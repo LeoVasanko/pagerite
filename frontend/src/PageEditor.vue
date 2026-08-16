@@ -2,10 +2,11 @@
 // Page editor: CodeMirror for Markdown, live server-rendered preview
 // applied straight into the visible article, saving over one WebSocket
 // (/_/api/ws/editor). Docked left of the article on the page itself
-// (main.js openEditor) or standalone at /admin with its own preview pane.
-// The socket reconnects automatically; unsaved text and pending saves
-// survive a disconnect. Editor scroll drives the document scroll, keeping
-// the rendered article at the cursor's position.
+// (main.js openEditor) or standalone at /_/admin with its own preview pane.
+// The socket connects when the editor is opened and reconnects with
+// exponential backoff after a failure; unsaved text and pending saves
+// survive a disconnect. Editor scroll drives the document scroll, keeping the
+// rendered article at the cursor's position.
 import { nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState } from '@codemirror/state'
@@ -21,7 +22,7 @@ const emit = defineEmits(['close'])
 const path = ref('')
 const title = ref('')
 const published = ref(true)
-const status = ref('connecting…')
+const saveError = ref('')
 const previewHtml = ref('')
 const previewHasH1 = ref(false)
 const editorEl = ref(null)
@@ -33,6 +34,8 @@ let view = null
 let savedResolve = null
 let pendingSave = null
 let reconnectTimer = null
+let reconnectDelay = 2000
+const MAX_RECONNECT_DELAY = 16000
 let everConnected = false
 let dirty = false
 let syncingScroll = false
@@ -42,7 +45,17 @@ function currentPath() {
 }
 
 function send(msg) {
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(msg))
+  } else {
+    ensureConnected()
+  }
+}
+
+function ensureConnected() {
+  if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+    connect()
+  }
 }
 
 function normPath(p) {
@@ -67,9 +80,6 @@ function save() {
     published: published.value,
   }
   pendingSave = msg
-  status.value = ws && ws.readyState === WebSocket.OPEN
-    ? 'saving…'
-    : 'offline — will save on reconnect'
   send(msg)
   return new Promise((resolve) => { savedResolve = resolve })
 }
@@ -102,9 +112,6 @@ async function uploadImage(file) {
     const { path: stored } = await res.json()
     const alt = name.replace(/\.[^.]+$/, '')
     insertAtCursor(`![${alt}](${stored})`)
-    status.value = `uploaded ${name}`
-  } else {
-    status.value = `upload failed (${res.status})`
   }
 }
 
@@ -170,16 +177,15 @@ function onMessage(ev) {
     setDocument(msg.markdown)
     requestRender()
     dirty = false // just loaded from the server, nothing unsaved
-    status.value = msg.exists ? '' : 'new page'
   } else if (msg.type === 'html' && msg.path === path.value) {
     previewIntoArticle(msg.html, msg.has_h1)
   } else if (msg.type === 'saved') {
-    status.value = `saved ${new Date().toLocaleTimeString()}`
+    saveError.value = ''
     pendingSave = null
     savedResolve?.()
     savedResolve = null
   } else if (msg.type === 'error') {
-    status.value = `error: ${msg.detail}`
+    saveError.value = '⚠️ changes could not be saved'
   }
 }
 
@@ -217,7 +223,7 @@ function connect() {
   )
   ws.onmessage = onMessage
   ws.onopen = () => {
-    status.value = ''
+    reconnectDelay = 2000
     if (everConnected) {
       // Reconnected: local text is authoritative — don't re-open (that
       // would clobber the editor), just resync preview and pending saves.
@@ -229,9 +235,11 @@ function connect() {
     everConnected = true
   }
   ws.onclose = () => {
-    status.value = 'offline — reconnecting…'
     clearTimeout(reconnectTimer)
-    reconnectTimer = setTimeout(connect, 1500)
+    reconnectTimer = setTimeout(() => {
+      connect()
+      reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY)
+    }, reconnectDelay)
   }
 }
 
@@ -294,9 +302,9 @@ onUnmounted(() => {
       />
       <button type="button" @click="fileInput.click()">image</button>
       <button type="button" @click="saveAndClose">save</button>
-      <span class="status">{{ status }}</span>
       <button v-if="!standalone" type="button" class="close" title="close" @click="close">✕</button>
     </header>
+    <div v-if="saveError">{{ saveError }}</div>
     <div class="panes">
       <div ref="editorEl" class="editor" />
       <div v-if="standalone" ref="previewEl" class="preview">
@@ -368,12 +376,6 @@ onUnmounted(() => {
 
 .toolbar .close:hover {
   color: var(--text);
-}
-
-.status {
-  color: var(--muted);
-  font-size: 0.85rem;
-  min-width: 5rem;
 }
 
 .panes {

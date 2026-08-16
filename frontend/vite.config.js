@@ -5,19 +5,37 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vueDevTools from 'vite-plugin-vue-devtools'
 
+const backendUrl = process.env.PAGERITE_BACKEND_URL || 'http://localhost:3200'
+
+// Proxy content pages (/slug, /path/to/slug) to the FastAPI backend in dev.
+// Excludes Vite internals (/@..., /src, /node_modules, /__...) and the
+// backend's /_ prefix. /_/api and /_/f are handled by the fastapi-vue plugin;
+// /_/admin is proxied explicitly below.
+const CONTENT_PROXY = '^\\/(?!_|@|src|node_modules|__)(?:[^./?]+(?:\\/[^./?]+)*)?(?:\\?.*)?$'
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
-    fastapiVue(),
+    fastapiVue({ paths: ["/_/api", "/_/f"] }),
     vue(),
     vueDevTools(),
   ],
+  server: {
+    proxy: {
+      "/_/admin": { target: backendUrl, changeOrigin: false },
+      [CONTENT_PROXY]: { target: backendUrl, changeOrigin: false },
+    },
+  },
   build: {
-    // JS entry only: no index.html in the build (it would shadow our /),
-    // and a manifest so the backend can resolve hashed asset names.
+    // Emit hashed assets at the root of frontend-build so the backend can
+    // serve them under /_/assets/{file} without a nested /assets directory.
     manifest: true,
+    assetsDir: '',
     rollupOptions: {
-      input: fileURLToPath(new URL('./src/main.js', import.meta.url)),
+      input: {
+        main: fileURLToPath(new URL('./src/main.js', import.meta.url)),
+        pagerite: fileURLToPath(new URL('./src/pagerite.js', import.meta.url)),
+      },
     },
   },
 })

@@ -29,8 +29,8 @@ evolves.
   directly at the site root; structured content may nest
   (`/docs/design-principles`-style). The URL space is the author's, so
   reserved prefixes must be kept few and deliberate: everything internal
-  lives under `/_/` (the API at `/_/api/`, uploaded files at `/_/f/`),
-  plus `/static` and `/admin`.
+  lives under `/_/` (the API at `/_/api/`, uploaded files at `/_/f/`, built
+  assets at `/_/assets/`, and the admin shell at `/_/admin`).
 - **Single user, trusted author.** No auth concerns in the core design.
   Everything published is public; only editing tools will later sit behind
   access control (external SSO when that time comes). The author is trusted
@@ -50,7 +50,7 @@ evolves.
   lists, task lists, brace-attributes; tables and strikethrough from the
   default preset), with `html=True` for raw passthrough. Fenced code blocks
   are highlighted server-side with **Pygments** (github-dark palette in
-  `/static/pygments.css`); a JS copy button appears on hover. Should this
+  `/_/assets/pygments-*.css`); a JS copy button appears on hover. Should this
   prove limiting, we implement our own renderer on top of html5tagger,
   which we already use for all HTML generation.
 - **Files are content-addressed.** Uploads (`PUT /_/api/files/{filename}`)
@@ -75,9 +75,9 @@ evolves.
   **per-page configurable**: `Node.banner` holds an arbitrary trusted HTML
   snippet (an image, a styled div, canvas + script — anything), resolved by
   walking up the node's ancestors to the front page; when nothing in the
-  chain sets one, the default `/static/banner.svg` artwork shows.
+  chain sets one, the default `/_/assets/banner-*.svg` artwork shows.
 - **Fetch-navigation.** Links are plain `<a href>`; a small script
-  (`pagerite/static/pagerite.js`) intercepts same-origin clicks, fetches the
+  (`frontend/src/pagerite.js`) intercepts same-origin clicks, fetches the
   page, and swaps the `#page-banner`, `#nav`, `#sidebar` and `#main` regions
   and the document title, keeping `<head>` and the layout chrome. Without JS
   everything works as normal page loads. Scripts inside fetched banner and
@@ -124,11 +124,13 @@ evolves.
 
 ## Styling
 
-- A single shared `style.css` covers the server-rendered pages and the Vue
-  components. Vue may add per-component styles on top where needed.
-- Fonts are self-hosted under `/static/fonts/` (Fraunces for headings,
-  Literata for body, Fira Code for code — variable woff2 files with local
-  `@font-face`). No third-party requests.
+- A single shared `frontend/src/assets/style.css` covers the server-rendered
+  pages and the Vue components. Vue may add per-component styles on top where
+  needed.
+- Fonts, the shared stylesheet, pygments styles and the default banner SVG
+  live under `frontend/src/assets/` and are emitted as hashed assets under
+  `/_/assets/` (Fraunces for headings, Literata for body, Fira Code for code —
+  variable woff2 files with local `@font-face`). No third-party requests.
 
 ## Editing
 
@@ -148,7 +150,7 @@ evolves.
   reloads the page). The pens are `<button>`s wired up by `pagerite.js` —
   editing is an action, not a navigation. The editor's WebSocket
   **reconnects automatically** with local text and pending saves preserved.
-  A standalone shell also exists at `/admin#/path` with its own preview
+  A standalone shell also exists at `/_/admin#/path` with its own preview
   pane. (All users are trusted authors for now; access control later with
   SSO.)
 - **CodeMirror 6** for Markdown editing (no WYSIWYG), title/published

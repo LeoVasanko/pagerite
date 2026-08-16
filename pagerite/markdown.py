@@ -25,7 +25,7 @@ from pygments.formatters import HtmlFormatter
 from pygments.lexers import get_lexer_by_name
 from pygments.util import ClassNotFound
 
-# Styles in /static/pygments.css match this formatter (regenerate:
+# Styles in /_/assets/pygments-*.css match this formatter (regenerate:
 # HtmlFormatter(style="github-dark").get_style_defs("pre code"))
 _formatter = HtmlFormatter(style="github-dark", nowrap=True)
 

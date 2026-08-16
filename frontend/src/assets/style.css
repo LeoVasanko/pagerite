@@ -1,6 +1,6 @@
 /* Shared styles for server-rendered pages and Vue components. */
-@import url("/static/fonts/fonts.css");
-@import url("/static/pygments.css");
+@import url("./fonts/fonts.css");
+@import url("./pygments.css");
 
 :root {
   color-scheme: dark;
@@ -56,7 +56,7 @@ body {
   flex-direction: column;
   justify-content: flex-end;
   min-height: 11rem;
-  background: url("/static/banner.svg") center 40% / cover;
+  background: url("./banner.svg") center 40% / cover;
   border-bottom: 1px solid var(--line);
 }
 

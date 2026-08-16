@@ -1,8 +1,8 @@
 """FastAPI application: server-rendered content pages plus Vue assets.
 
 Route ordering matters: our routes are defined before
-``frontend.route(app, "/")`` is called, so they take priority over the
-asset routes that fastapi-vue inserts at that position during ``load()``.
+``frontend.route(app, "/_/assets")`` is called, so they take priority over
+the asset routes that fastapi-vue inserts at that position during ``load()``.
 The content catch-all (``/{path:path}``) is defined last, so built
 frontend assets still win over content slugs; anything unmatched falls
 through to content (and 404 if no page exists there).
@@ -40,14 +40,16 @@ from pagerite.data import (
 from pagerite.markdown import has_h1, render
 
 DB_PATH = os.getenv("PAGERITE_DB", "pagerite.kanta")
-STATIC = Path(__file__).with_name("static")
 
 # Our own data root; kanta edits it in place, reads are plain attribute access.
 data = Data()
 kanta = Kanta(DB_PATH, data)
 
-# Vue build assets served at root, no SPA catch-all (assets only).
-frontend = Frontend(Path(__file__).with_name("frontend-build"), spa=False)
+# Vue build assets served under /_/assets/, no SPA catch-all (assets only).
+# With assetsDir: '', all files are emitted at the build root, so cached="/"
+# marks every built file immutable.
+BUILD_DIR = Path(__file__).with_name("frontend-build")
+frontend = Frontend(BUILD_DIR, spa=False, cached="/")
 
 
 def _hash_name(body: bytes, orig: str) -> str:
@@ -341,12 +343,12 @@ async def delete_page(path: str) -> None:
 
 
 def _check_reserved(path: str) -> None:
-    """Reject slugs that collide with machinery prefixes.
+    """Reject slugs under the machinery prefix.
 
-    The public URL space belongs to content; only "/_/" (files + API),
-    "/static" and "/admin" are reserved.
+    The public URL space belongs to content; only "/_/" is reserved for
+    the machinery (API, files, built assets, admin).
     """
-    if path.split("/", 1)[0] in {"_", "static", "admin"}:
+    if path.split("/", 1)[0] == "_":
         raise HTTPException(400, "reserved path prefix")
 
 
@@ -467,17 +469,17 @@ async def editor_ws(ws: WebSocket) -> None:
         pass
 
 
-@app.get("/admin", response_class=HTMLResponse)
+@app.get("/_/admin", response_class=HTMLResponse)
 async def admin() -> HTMLResponse:
     """Serve the editor app shell (Vue mounts into #app)."""
     return HTMLResponse(views.render_editor())
 
 
-@app.get("/static/{path:path}")
-async def static_file(path: str) -> FileResponse:
-    """Serve our own static assets (style.css, pagerite.js)."""
-    file = STATIC / path
-    if not file.is_file() or not file.resolve().is_relative_to(STATIC):
+@app.get("/favicon.ico")
+async def favicon() -> FileResponse:
+    """Serve the favicon copied from frontend/public by the Vite build."""
+    file = BUILD_DIR / "favicon.ico"
+    if not file.is_file():
         raise HTTPException(404)
     return FileResponse(file)
 
@@ -489,7 +491,7 @@ async def front_page(request: Request) -> Response:
 
 
 # Vue build asset routes are inserted at this position during load().
-frontend.route(app, "/")
+frontend.route(app, "/_/assets")
 
 
 @app.get("/{path:path}", response_model=None)

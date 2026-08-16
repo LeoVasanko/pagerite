@@ -1,10 +1,12 @@
+import "./assets/style.css";
+
 // Pagerite editor entries. Two separate apps, mounted in their own
 // dynamically created host divs inside the static document:
 // - PageEditor ("page" mode): pen next to an article heading — Markdown
 //   editing with the preview rendered into the visible article.
 // - SiteEditor ("site" mode): pen on the banner — banner HTML editing
 //   (previewed into the real banner) and the site structure tree.
-// The standalone /admin shell (#app in the DOM) mounts PageEditor with the
+// The standalone /_/admin shell (#app in the DOM) mounts PageEditor with the
 // page selected by location hash, as a no-dynamic-import fallback.
 import { createApp } from 'vue'
 import PageEditor from './PageEditor.vue'
@@ -45,7 +47,7 @@ export function closeEditor() {
 
 const shell = document.getElementById('app')
 if (shell) {
-  // Standalone /admin shell: mount into it and follow the location hash.
+  // Standalone /_/admin shell: mount into it and follow the location hash.
   host = shell
   createApp(PageEditor, {
     pagePath: location.hash.replace(/^#\/?/, '').replace(/\/$/, ''),

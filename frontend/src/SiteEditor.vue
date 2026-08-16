@@ -25,7 +25,7 @@ const emit = defineEmits(['close'])
 
 const path = ref('')
 const banner = ref('')
-const status = ref('connecting…')
+const saveError = ref('')
 const tree = ref([])
 const fileInput = ref(null)
 const bannerEl = ref(null)
@@ -33,6 +33,8 @@ const bannerEl = ref(null)
 let ws = null
 let pendingSave = null
 let reconnectTimer = null
+let reconnectDelay = 2000
+const MAX_RECONNECT_DELAY = 16000
 let everConnected = false
 let view = null      // CodeMirror for the banner HTML
 let syncing = false  // set while replacing the document programmatically
@@ -56,7 +58,17 @@ function normPath(p) {
 }
 
 function send(msg) {
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(msg))
+  } else {
+    ensureConnected()
+  }
+}
+
+function ensureConnected() {
+  if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+    connect()
+  }
 }
 
 // Debounce per key: text edits save while typing, without a request per
@@ -72,9 +84,6 @@ function debounce(key, fn, ms = 600) {
 function save() {
   const msg = { type: 'save', path: normPath(path.value), banner: banner.value }
   pendingSave = msg
-  if (ws && ws.readyState !== WebSocket.OPEN) {
-    status.value = 'offline — will save on reconnect'
-  }
   send(msg)
 }
 
@@ -189,7 +198,6 @@ async function commitPending() {
   if (!node) return
   const slug = node.slug.trim().replace(/\/+/g, '')
   if (!slug) {
-    status.value = 'a slug is needed'
     return
   }
   const loc = locatePending(tree.value, '')
@@ -205,7 +213,7 @@ async function commitPending() {
     }),
   })
   if (!res.ok) {
-    status.value = `create failed (${res.status})`
+    saveError.value = '⚠️ changes could not be saved'
     return
   }
   // Place it exactly where the row was dropped: a fresh order key halfway
@@ -218,6 +226,8 @@ async function commitPending() {
       : next ? next.order - 1
       : 1
     await postStructure({ path: newPath, order })
+  } else {
+    saveError.value = ''
   }
   pending.value = null
   await refreshPages()
@@ -232,10 +242,11 @@ async function addContent(node) {
     body: JSON.stringify({ title: node.title, markdown: '', published: node.published }),
   })
   if (res.ok) {
+    saveError.value = ''
     await refreshPages()
     navigate(node.path)
   } else {
-    status.value = `failed (${res.status})`
+    saveError.value = '⚠️ changes could not be saved'
   }
 }
 
@@ -283,7 +294,11 @@ async function saveBrand() {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ brand: brand.value }),
   })
-  if (!res.ok) status.value = `brand save failed (${res.status})`
+  if (res.ok) {
+    saveError.value = ''
+  } else {
+    saveError.value = '⚠️ changes could not be saved'
+  }
 }
 
 // Two-step delete (no dialogs): the first click arms the row's button for
@@ -306,18 +321,19 @@ function armRemove(node) {
 async function removePage(node) {
   const res = await fetch(`/_/api/pages/${node.path}`, { method: 'DELETE' })
   if (res.ok) {
+    saveError.value = ''
     refreshPages()
     const p = node.path
     if (p === path.value || (p && path.value.startsWith(`${p}/`))) {
       // The current page was deleted — or reduced to a category that now
       // redirects to its first child. Either way, re-render from the server.
       if (node.children.length) loadPlain(path.value)
-      else { status.value = 'deleted'; navigate('') }
+      else navigate('')
     } else {
       loadPlain(path.value) // refresh menus
     }
   } else {
-    status.value = `delete failed (${res.status})`
+    saveError.value = '⚠️ changes could not be saved'
   }
 }
 
@@ -334,8 +350,12 @@ async function postStructure(op) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(op),
   })
-  if (!res.ok) status.value = `structure change failed (${res.status})`
-  else loadPlain(path.value) // refresh menus and content from the server
+  if (res.ok) {
+    saveError.value = ''
+    loadPlain(path.value) // refresh menus and content from the server
+  } else {
+    saveError.value = '⚠️ changes could not be saved'
+  }
   await refreshPages()
   return res.ok
 }
@@ -453,7 +473,6 @@ async function uploadBannerMedia(file) {
   const name = file.name.replace(/[^\w.-]/g, '-')
   const res = await fetch(`/_/api/files/${encodeURIComponent(name)}`, { method: 'PUT', body: file })
   if (!res.ok) {
-    status.value = `upload failed (${res.status})`
     return
   }
   const { path: stored } = await res.json()
@@ -464,7 +483,6 @@ async function uploadBannerMedia(file) {
   setDocument(rest ? `${tag}\n${rest}` : tag)
   previewBanner()
   save()
-  status.value = `uploaded ${name}`
 }
 
 function onBannerPaste(ev) {
@@ -491,13 +509,12 @@ function onMessage(ev) {
     // Overlay this page's own banner on the swapped region. Empty means
     // inherited: the server-rendered region already shows the right one.
     if (banner.value.trim()) previewBanner()
-    status.value = msg.exists ? '' : 'new page'
   } else if (msg.type === 'saved') {
-    status.value = `saved ${new Date().toLocaleTimeString()}`
+    saveError.value = ''
     pendingSave = null
     refreshPages()
   } else if (msg.type === 'error') {
-    status.value = `error: ${msg.detail}`
+    saveError.value = '⚠️ changes could not be saved'
   }
 }
 
@@ -515,7 +532,7 @@ function connect() {
   )
   ws.onmessage = onMessage
   ws.onopen = () => {
-    status.value = ''
+    reconnectDelay = 2000
     if (everConnected) {
       // Reconnected: resend any save attempted while offline.
       if (pendingSave) send(pendingSave)
@@ -525,9 +542,11 @@ function connect() {
     everConnected = true
   }
   ws.onclose = () => {
-    status.value = 'offline — reconnecting…'
     clearTimeout(reconnectTimer)
-    reconnectTimer = setTimeout(connect, 1500)
+    reconnectTimer = setTimeout(() => {
+      connect()
+      reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY)
+    }, reconnectDelay)
   }
 }
 
@@ -575,9 +594,9 @@ onUnmounted(() => {
   <div class="editor-root overlay">
     <header class="toolbar">
       <span class="mode-label">site editor</span>
-      <span class="status">{{ status }}</span>
       <button type="button" class="close" title="close" @click="close">✕</button>
     </header>
+    <div v-if="saveError">{{ saveError }}</div>
 
     <section class="block">
       <label class="field">
@@ -645,11 +664,6 @@ onUnmounted(() => {
   color: var(--muted);
   font-size: 0.85rem;
   white-space: nowrap;
-}
-
-.status {
-  color: var(--muted);
-  font-size: 0.85rem;
 }
 
 /* Window-style close button, top right corner. */

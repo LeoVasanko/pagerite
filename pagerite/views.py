@@ -24,26 +24,28 @@ from pagerite.markdown import has_h1, render
 SITE_NAME = "Pagerite"
 BUILD = Path(__file__).with_name("frontend-build")
 
-Layout = Template(
-    Document(
-        E.Title,
-        lang="en",
-        _urls=["/static/style.css", "/static/pagerite.js"],
+
+def _layout(urls: list[str], modules: list[str] = ()) -> Template:
+    """Page layout template with standard asset URLs and ES-module scripts."""
+    doc = Document(E.Title, lang="en", _urls=urls)
+    for src in modules:
+        doc.script(src=src, type="module", defer=True)
+    return Template(
+        doc
+        .header(
+            E.div(E.Banner, id="page-banner"),
+            E.BannerEdit,
+            E.Brand,
+            E.nav(E.Nav, id="nav"),
+            id="banner",
+        )
+        .div(
+            E.aside(E.Sidebar, id="sidebar"),
+            E.main(E.Main, id="main"),
+            id="content",
+        )
+        .footer(None),  # kept empty for now; zero-height (see style.css)
     )
-    .header(
-        E.div(E.Banner, id="page-banner"),
-        E.BannerEdit,
-        E.Brand,
-        E.nav(E.Nav, id="nav"),
-        id="banner",
-    )
-    .div(
-        E.aside(E.Sidebar, id="sidebar"),
-        E.main(E.Main, id="main"),
-        id="content",
-    )
-    .footer(None),  # kept empty for now; zero-height (see style.css)
-)
 
 
 def _brand_link(brand: str) -> HTML:
@@ -168,7 +170,7 @@ def _edit_attrs(path: str, mode: str = "page") -> dict:
         "class": "edit-link" if mode == "page" else "edit-link banner-edit-link",
         "title": "edit",
         "data-editor-src": scripts[-1],
-        "data-editor-css": ",".join(s for s in styles if s != "/static/style.css"),
+        "data-editor-css": ",".join(styles),
         "data-editor-mode": mode,
     }
 
@@ -192,8 +194,9 @@ def render_page(menu: dict[str, Node], path: str, brand: str = SITE_NAME) -> str
     """Render a full HTML page for the slug path."""
     node = resolve(menu, path)[-1]
     title = _title(path.rpartition("/")[2], node)
+    scripts, styles = _page_assets()
     return str(
-        Layout(
+        _layout(styles, scripts)(
             Title=f"{title} – {brand}" if brand else title,
             Brand=_brand_link(brand),
             Nav=nav_html(menu, path),
@@ -213,8 +216,9 @@ def render_not_found(menu: dict[str, Node], path: str, brand: str = SITE_NAME) -
         # Editing works here too: this is how brand new pages get created.
         doc.button("🖊️", **_edit_attrs(path))
         doc.p(f"No page at /{path}.")
+    scripts, styles = _page_assets()
     return str(
-        Layout(
+        _layout(styles, scripts)(
             Title=f"Not Found – {brand}" if brand else "Not Found",
             Brand=_brand_link(brand),
             Nav=nav_html(menu, path),
@@ -226,8 +230,25 @@ def render_not_found(menu: dict[str, Node], path: str, brand: str = SITE_NAME) -
     )
 
 
+def _page_assets() -> tuple[list[str], list[str]]:
+    """Script and CSS URLs for public pages (pagerite entry).
+
+    Dev mode loads the entry from the Vite dev server; production uses
+    the Vite build manifest to resolve the hashed asset names.
+    """
+    if vite_url := os.environ.get("PAGERITE_VITE_URL"):
+        return (
+            [f"{vite_url}/src/pagerite.js"],
+            [],  # Vite injects the imported CSS in dev
+        )
+    manifest = json.loads((BUILD / ".vite/manifest.json").read_text())
+    entry = manifest["src/pagerite.js"]
+    styles = [f"/_/assets/{css}" for css in entry.get("css", [])]
+    return [f"/_/assets/{entry['file']}"], styles
+
+
 def _editor_assets() -> tuple[list[str], list[str]]:
-    """Script and CSS URLs for the admin editor (Vue app).
+    """Script and CSS URLs for the admin editor (main entry).
 
     Dev mode loads the modules from the Vite dev server; production uses
     the Vite build manifest to resolve the hashed asset names.
@@ -235,12 +256,12 @@ def _editor_assets() -> tuple[list[str], list[str]]:
     if vite_url := os.environ.get("PAGERITE_VITE_URL"):
         return (
             [f"{vite_url}/@vite/client", f"{vite_url}/src/main.js"],
-            ["/static/style.css"],
+            [],  # Vite injects the imported CSS in dev
         )
     manifest = json.loads((BUILD / ".vite/manifest.json").read_text())
     entry = manifest["src/main.js"]
-    styles = [f"/{css}" for css in entry.get("css", [])]
-    return [f"/{entry['file']}"], ["/static/style.css", *styles]
+    styles = [f"/_/assets/{css}" for css in entry.get("css", [])]
+    return [f"/_/assets/{entry['file']}"], styles
 
 
 def render_editor() -> str:
@@ -248,6 +269,6 @@ def render_editor() -> str:
     scripts, styles = _editor_assets()
     doc = Document(f"Admin – {SITE_NAME}", lang="en", _urls=styles)
     for src in scripts:
-        doc.script("", src=src, type="module")
+        doc.script(src=src, type="module", defer=True)
     doc.div(None, id="app")
     return str(doc)

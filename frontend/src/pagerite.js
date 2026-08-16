@@ -1,3 +1,5 @@
+import "./assets/style.css";
+
 // Fetch-navigation: swap dynamic regions (#nav, #main) instead of full
 // page loads. Real <a href> links are used throughout, so this is pure
 // progressive enhancement - without JS every link does a normal load.
@@ -127,7 +129,7 @@
   function preload() {
     const urls = new Set();
     for (const a of document.querySelectorAll('#nav a[href^="/"], #main a[href^="/"]')) {
-      if (!a.pathname.startsWith("/admin")) urls.add(a.pathname);
+      if (!a.pathname.startsWith("/_/admin")) urls.add(a.pathname);
     }
     for (const url of urls) {
       if (url === location.pathname) continue;
@@ -246,8 +248,7 @@
     if (url.origin !== location.origin) return;
     // Same-page anchor links (footnotes etc.): let the browser handle them
     if (url.pathname === location.pathname && url.hash) return;
-    if (url.pathname.startsWith("/_/") || url.pathname.startsWith("/static/")
-        || url.pathname === "/admin") return;
+    if (url.pathname.startsWith("/_/")) return;
     ev.preventDefault();
     load(url);
   });

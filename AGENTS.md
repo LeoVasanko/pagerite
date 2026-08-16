@@ -21,15 +21,15 @@ not for the public pages. See `docs/design-principles.md` for the design.
   - `app.py` — the FastAPI app. FastAPI's built-in API docs are disabled
     (`docs_url`/`redoc_url`/`openapi_url=None`) because `/docs` belongs to
     our content. Our own routes (content pages, `/_/api/...`, `/_/f/...`,
-    `/static/...`) are registered BEFORE `frontend.route(app, "/")` is
+    `/_/assets/...`, `/_/admin`) are registered BEFORE `frontend.route(app, "/_/assets")` is
     called: fastapi-vue inserts its file routes at the position where
     `route()` was called (during `load()` in the lifespan), so anything
     defined earlier wins. The one exception is the content catch-all
     `/{path:path}`, registered AFTER `frontend.route()` so that built
     frontend assets still take priority over content slugs. The `Frontend`
     is constructed with `spa=False` explicitly: it only serves the built
-    asset files at root without a catch-all; an `index.html` in the build
-    would become a `/` route, so leave it out of the build to keep `/` ours.
+    asset files under `/_/assets/` without a catch-all; an `index.html` in the build
+    would become a `/_/assets/` route, so leave it out of the build to keep `/` ours.
   - `data.py` — msgspec Structs for the kanta database. The site structure
     is a tree: `Data.menu` maps top-level slugs to `Node`s, each with
     `children` keyed by slug — the URL path is the slug chain. The front
@@ -72,12 +72,17 @@ not for the public pages. See `docs/design-principles.md` for the design.
     (`#page-banner`, `#nav`, `#sidebar`, `#main`) for fetch-navigation swaps.
   - `seed.py` — demo content written on startup for paths missing from the
     database (never overwrites existing pages).
-  - `static/` — our own assets served at `/static/`: `style.css` (shared
-    with Vue later), `pagerite.js` (fetch-navigation with rotating-cube
-    `startViewTransition`, scroll-reveal), `banner.svg`
-    (full-width header art) and `fonts/` (self-hosted Fraunces/Literata/
-    Fira Code variable woff2). The `::view-transition*` block at the end of
-    `style.css` (from termotohtori.fi) is fragile — do not tweak.
+  - `frontend/src/` — the Vue editor and public-page entries.
+    - `main.js` — Vue editor app entry, mounts PageEditor/SiteEditor.
+    - `pagerite.js` — public page entry; imports the shared style and runs
+      fetch-navigation, scroll-reveal and code copy buttons.
+    - `assets/` — shared styles and data files built by Vite and served hashed
+      under `/_/assets/`: `style.css`, `pygments.css`, `banner.svg` and
+      `fonts/` (self-hosted Fraunces/Literata/Fira Code variable woff2). The
+      `::view-transition*` block at the end of `style.css` (from
+      termotohtori.fi) is fragile — do not tweak.
+    - Vite builds ES-module `.js` outputs; the backend renders `<script
+      type="module" defer>` for them.
   - The database file is `pagerite.kanta` in the cwd (`PAGERITE_DB`
     overrides); gitignored. Do not delete it without asking.
 - `scripts/fastapi-vue/` — helper scripts from the fastapi-vue template
@@ -97,14 +102,15 @@ not for the public pages. See `docs/design-principles.md` for the design.
   lists become drop zones while dragging). The two pens swap the docked
   panel for the other editor; clicking the open editor's own pen closes it. Normally dynamic-imported onto the content page by
   pagerite.js when a 🖊️ edit link is clicked (the link carries
-  `data-editor-src`/`data-editor-css`/`data-editor-mode`); the `/admin`
+  `data-editor-src`/`data-editor-css`/`data-editor-mode`); the `/_/admin`
   route (page selected by location hash) is the no-JS-import fallback shell
   rendered by `views.render_editor` and keeps its own preview pane.
   In dev, modules load from the Vite dev server (`PAGERITE_VITE_URL`),
   in prod from the hashed build assets resolved via
   `frontend-build/.vite/manifest.json`. `vite.config.js` builds with
-  `manifest: true` and a JS-only input (`src/main.js`) so no `index.html`
-  ends up in the build (it would shadow `/`). vite-plugin-fastapi.js has an
+  `manifest: true`, `assetsDir: ''` and JS inputs (`src/main.js` and
+  `src/pagerite.js`) so no `index.html` ends up in the build (it would shadow
+  `/`). All outputs are ES modules. vite-plugin-fastapi.js has an
   auto-upgrade marker — edit `vite.config.js`, not the plugin.
 - `docs/` — design documentation.
 
@@ -145,14 +151,14 @@ not for the public pages. See `docs/design-principles.md` for the design.
   - **markdown-it-py** — Markdown rendering with `html=True` raw
     passthrough; mdit-py-plugins for footnote/deflist/tasklists/attrs;
     **Pygments** for server-side code highlighting (`nowrap` spans, styles
-    in `static/pygments.css` scoped to "pre code").
+    in `frontend/src/assets/pygments.css` scoped to "pre code").
 
 ## Conventions
 
 - Keep dependencies minimal; add via `uv add` and mention it.
 - The public URL space belongs to content (pretty slugs at root). Reserve
-  only few prefixes (`/_/` for files + API, `/static`, `/admin`) for the
-  machinery; top-level `_` is a reserved slug.
+  only `/_/` for the machinery (files, API, built assets, admin); top-level
+  `_` is a reserved slug.
 - No auth in core code; trusted single author. Never add output
   sanitization "for safety" against the author — embedded HTML/scripts in
   Markdown are passed through deliberately.
