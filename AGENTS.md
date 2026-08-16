@@ -100,8 +100,17 @@ not for the public pages. See `docs/design-principles.md` for the design.
   the banner pen — everything saves immediately as you edit (brand/title
   debounced, slug on commit since it renames the path), tree rows navigate
   in place without transitions when focused, and the front page is a
-  root-only row whose empty slug is editable like any other (empty child
-  lists become drop zones while dragging). The two pens swap the docked
+  root-only row whose empty slug is editable like any other. Every
+  non-empty list (and the root) ends with a non-draggable ➕ footer row
+  (vuedraggable `#footer` slot): clicking it starts a new pending page at
+  that level, and while dragging it is the list's "end of list" drop
+  target. Dropping ON the lower part of a row moves the page under that
+  row (the child list's container invisibly overlaps its own row's bottom
+  via negative margin — Sortable inserts it as the first child natively),
+  while a row's exposed top edge inserts a sibling before it. Row
+  indentation is structural (each nested list margin-indents itself), so a
+  dragged row previews its whole subtree at the target list's depth. The
+  two pens swap the docked
   panel for the other editor; clicking the open editor's own pen closes it. Normally dynamic-imported onto the content page by
   pagerite.js when a 🖊️ edit link is clicked (the link carries
   `data-editor-src`/`data-editor-css`/`data-editor-mode`); the `/_/admin`

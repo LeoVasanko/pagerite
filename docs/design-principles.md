@@ -167,14 +167,18 @@ evolves.
   insert `![alt](/_/f/hash.ext)` at the cursor.
 - The **structure panel** (vue-draggable tree of the whole site, in site
   mode) covers page management: reorder any menu level, drag across
-  sections (empty child lists appear as drop zones while dragging), add,
-  delete (two clicks: the button arms, then deletes — no dialogs).
-  Every node is a real label — content-less category rows offer a
-  ➕ to give them a landing page.
+  sections, add, delete (two clicks: the button arms, then deletes — no
+  dialogs). Every node is a real label — content-less category rows offer
+  a ➕ to give them a landing page.
   Deleting a category removes only its landing page (the label and its
-  subpages stay). The ➕ in the panel header starts a new page as a
-  local-only tree row that can be dragged into place before its title and
-  slug are filled in; it is persisted only on commit. Rows are always
+  subpages stay). Every non-empty list ends with a ➕ row that starts a
+  new page as a local-only tree row at that level; the row can be dragged
+  into place before its title and slug are filled in and is persisted only
+  on commit. While dragging, these ➕ rows double as "end of this list"
+  drop targets; dropping ON the lower part of a row makes the page that
+  row's first child (even a leaf's, creating a sublist), while a row's
+  exposed top edge inserts a sibling before it. A dragged row's
+  indentation previews the target list's depth. Rows are always
   editable: titles save while typing, slug edits commit on blur/Enter
   since they rename the path (moving the whole subtree). The front page
   is the root row with an empty slug — renaming it away leaves no front

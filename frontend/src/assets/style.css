@@ -191,14 +191,6 @@ body.editing #sidebar {
   }
 }
 
-/* Site structure tree: while dragging, empty child lists appear as drop
-   zones so a page can be moved under a childless page. */
-body.tree-dragging .treelist:empty {
-  min-height: 1.2rem;
-  outline: 1px dashed var(--line);
-  border-radius: 4px;
-}
-
 /* The banner's own pen: opens the site editor (banner + structure).
    Qualified with `button` to beat the later .edit-link rule's left offset
    (both classes apply to the same element). */
@@ -211,13 +203,8 @@ button.banner-edit-link {
   font: inherit;
   border: none;
   cursor: pointer;
-  opacity: 0.55;
   background: none;
   padding: 0;
-}
-
-.banner-edit-link:hover {
-  opacity: 1;
 }
 
 #sidebar {

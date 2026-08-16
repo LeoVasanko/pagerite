@@ -7,9 +7,15 @@
 // the slug commits on blur/Enter since it renames the path, moving the
 // whole subtree. Nodes without content are category labels that redirect
 // to their first child; the ➕ on their row gives them a landing page.
-// The ➕ in the panel header adds a *pending* row: a local-only item that
-// can be dragged into place before its title/slug are filled in, and is
-// persisted to the server only on commit (✓/Enter, Esc discards).
+// Every non-empty list (and the root list) ends with a ➕ footer row:
+// clicking it adds a *pending* row (a local-only item persisted to the
+// server only on commit, ✓/Enter, Esc discards) at the end of that list,
+// and while dragging it doubles as the list's "end of list" drop target.
+// Leaf pages have no ➕ row of their own, but every row's child list is a
+// drop target: its (invisible) container box reaches up over the bottom of
+// its row, so dropping ON a row makes it a child (first position), while
+// dropping on the row's top edge inserts a sibling before it. See the
+// `.node > .treelist` style.
 // The front page is the root row with an empty slug: renaming it away
 // leaves no front page, and giving another top-level row the empty slug
 // makes it the front page. Delete is a two-step inline button (no dialog).
@@ -59,8 +65,8 @@ function onMove(evt) {
   return true
 }
 
-// While dragging, reveal empty child lists as drop zones (style.css) so a
-// page can be moved under a childless page.
+// While dragging, the child-list overlap strips become hit-testable (see
+// styles). Purely functional — nothing is shown or resized.
 function onStart() {
   document.body.classList.add('tree-dragging')
 }
@@ -85,12 +91,12 @@ function onEnd() {
   >
     <template #item="{ element }">
       <div class="node">
-        <!-- Indentation is row padding, not a container margin, so the
-             slug and action columns stay aligned across nesting levels. -->
+        <!-- Indentation is structural: each nested treelist margin-indents
+             itself relative to its parent (see styles), so a dragged row
+             previews its whole subtree at the target list's depth. -->
         <div
           class="row"
           :class="{ current: element.path === handlers.current() }"
-          :style="depth ? { paddingLeft: `${depth * 1.1}rem` } : null"
         >
           <span class="drag" title="drag to reorder/move">⠿</span>
           <template v-if="element.pending">
@@ -161,26 +167,77 @@ function onEnd() {
         />
       </div>
     </template>
+    <!-- Non-draggable footer (vuedraggable slot): a ➕ row at the end of
+         the list. Clicking adds a pending page at this level; while
+         dragging it is the list's "end of list" drop target. Only shown
+         where the list has items (or at the root, to add the first page). -->
+    <template #footer>
+      <div v-if="nodes.length || !depth" class="add-row">
+        <button
+          type="button"
+          class="add"
+          title="new page here — fill in title and slug, then drag into place if needed"
+          @click="handlers.newPage(nodes)"
+        >➕</button>
+      </div>
+    </template>
   </draggable>
 </template>
 
 <style scoped>
 .treelist {
   min-height: 0;
+  /* Flex column so the ➕ footer can render last via `order` even when
+     Sortable's end-of-list insertion appends the preview after it in the
+     DOM (order only affects painting; Sortable's item rect math and
+     vuedraggable's index mapping still see the logical DOM order). */
+  display: flex;
+  flex-direction: column;
+  /* Child lists overlap the bottom of their own row (below); the overlap
+     strip must not block clicks on the row's inputs, so containers are
+     hit-test transparent and only the rows re-enable pointer events. */
+  pointer-events: none;
+}
+
+/* While dragging, the overlap strips become hit-testable so a row's child
+   list can be targeted. No visual change. */
+body.tree-dragging .treelist {
+  pointer-events: auto;
+}
+
+/* A node's child list indents itself (structural indentation: a dragged
+   row's subtree follows its head to the target depth automatically) and
+   reaches up over the bottom ~60% of its row: the negative top margin
+   pulls the container up, the equal padding pushes its children back
+   down — zero layout or visual effect, but while dragging Sortable sees
+   the lower part of the row as inside the child list and natively inserts
+   there as the first child (a leaf's empty child list becomes a sublist
+   this way). The exposed top strip of the row remains the parent list's
+   target = sibling before this row. */
+.node > .treelist {
+  margin-top: -0.95rem;
+  padding-top: 0.95rem;
+  margin-left: 1.1rem;
 }
 
 .node {
   margin-left: 0.2rem;
 }
 
-/* Grid rows: handle / title / slug / actions line up as columns. Rows are
-   full width at every level (indentation is row padding) and the slug and
-   action columns are fixed-width, so they align across nesting levels. */
+/* Grid rows: handle / title / slug / actions line up as columns within a
+   level (nesting indents the whole list container, so columns align per
+   level, not across levels). */
 .row {
   display: grid;
   grid-template-columns: 1.2em minmax(3rem, 1fr) 7rem 5rem;
   align-items: baseline;
   gap: 0.35rem;
+  /* Vertical spacing widens the drop zones: the exposed top strip is the
+     "sibling before" target, the overlapped bottom is "child of". */
+  padding-top: 0.15rem;
+  padding-bottom: 0.15rem;
+  /* Rows (and the ➕ row) stay clickable despite .treelist's pointer-events: none. */
+  pointer-events: auto;
 }
 
 .row.current .title-edit {
@@ -262,5 +319,29 @@ function onEnd() {
 
 .ghost {
   opacity: 0.4;
+}
+
+/* The ➕ footer row: subtle always-visible "add here" button at the end of
+   a list; while dragging it is the list's "end of list" drop target. */
+.add-row {
+  min-height: 1.1rem;
+  display: flex;
+  align-items: center;
+  pointer-events: auto; /* see .row */
+  order: 1; /* always render after the rows, even mid-drag (see .treelist) */
+}
+
+.add {
+  margin-left: 1.2em; /* align with the row titles, past the drag handle */
+  padding: 0 0.3rem;
+  background: none;
+  border: none;
+  font-size: 0.9rem;
+  cursor: pointer;
+  opacity: 0.5;
+}
+
+.add:hover {
+  opacity: 1;
 }
 </style>

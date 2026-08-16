@@ -157,12 +157,13 @@ function followMove(oldPath, newPath) {
 }
 
 // --- New page flow -------------------------------------------------------
-// The ➕ in the pages header adds a *pending* row to the tree: a local-only
-// item that can be dragged into place before anything is filled in. It is
-// persisted only on commit (✓/Enter), at wherever it currently sits.
+// The ➕ row at the end of any list adds a *pending* row there: a
+// local-only item that can be dragged into place before anything is
+// filled in. It is persisted only on commit (✓/Enter), at wherever it
+// currently sits.
 const pending = ref(null)
 
-function newPage() {
+function newPage(list) {
   if (pending.value) return // one at a time
   pending.value = {
     slug: '',
@@ -174,7 +175,7 @@ function newPage() {
     children: [],
     pending: true,
   }
-  tree.value.push(pending.value)
+  list.push(pending.value)
 }
 
 // Where does the pending row currently sit? -> {parentPath, list, index}.
@@ -431,6 +432,7 @@ provide('structureHandlers', {
   addContent,
   commitPending,
   discardPending,
+  newPage,
 })
 
 // --- Banner editing ------------------------------------------------------
@@ -644,12 +646,6 @@ onUnmounted(() => {
 
     <section class="block structure">
       <StructureTree :nodes="tree" />
-      <button
-        type="button"
-        class="add"
-        title="new page — drag the new row into place, then fill in title and slug"
-        @click="newPage"
-      >➕</button>
     </section>
   </div>
 </template>
@@ -773,22 +769,5 @@ onUnmounted(() => {
   flex: 1;
   overflow-y: auto;
   min-height: 0;
-}
-
-/* Icon buttons (➕) keep the emoji's own color, no button chrome. */
-.structure .add {
-  align-self: flex-start; /* don't stretch to the block's full width */
-  margin-top: 0.3rem;
-  margin-left: 1.2em; /* align with the row titles, past the drag handle */
-  padding: 0.1rem 0.3rem;
-  background: none;
-  border: none;
-  font-size: 1rem;
-  cursor: pointer;
-  opacity: 0.7;
-}
-
-.structure .add:hover {
-  opacity: 1;
 }
 </style>
