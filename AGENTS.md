@@ -53,8 +53,9 @@ not for the public pages. See `docs/design-principles.md` for the design.
     caching; pages reference files by absolute `/_f/` URLs so hierarchy
     moves never break them. `Node.banner` is a raw trusted HTML snippet
     for the header banner (img, styled div, canvas+script...); empty
-    inherits from the node's ancestors (front page last), then the default
-    banner.svg artwork. `Data.version` is bumped on every write
+    inherits from the node's ancestors (front page last), then the active
+    theme's banner artwork (or a plain gradient in the base stylesheet).
+    `Data.version` is bumped on every write
     and embedded in page ETags so nav-affecting changes invalidate caches.
     `Data.brand` is the site name (header link + `<title>` suffix), editable
     in the site editor via `/_api/settings`; empty = no header link and
@@ -81,9 +82,9 @@ not for the public pages. See `docs/design-principles.md` for the design.
       stylesheets (base and theme) so they can be swapped or augmented.
     - `assets/` — shared styles and data files built by Vite and served hashed
       under `/_assets/`: `pagerite.css` (base layout + conservative variables),
-      `themes/purple/theme.css` (the purple/dark theme override), `pygments.css`,
-      `banner.svg` and `fonts/` (self-hosted Fraunces/Literata/Fira Code variable
-      woff2). The `::view-transition*` block at the end of `pagerite.css` (from
+      `themes/purple/theme.css` (the purple/dark theme override, including its
+      own `banner.svg`), `pygments.css`, and `fonts/` (self-hosted
+      Fraunces/Literata/Fira Code variable woff2). The `::view-transition*` block at the end of `pagerite.css` (from
       termotohtori.fi) is fragile — do not tweak.
     - Vite builds ES-module `.js` outputs; the backend renders `<script
       type="module">` for them (module scripts defer by default).

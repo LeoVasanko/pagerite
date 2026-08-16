@@ -25,6 +25,10 @@
   filter: drop-shadow(0 0 0.1rem #000);
 }
 
+#banner {
+  background: url("./banner.svg") center 40% / cover;
+}
+
 pre {
   background: #ffffff09;
 }

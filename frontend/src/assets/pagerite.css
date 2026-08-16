@@ -46,14 +46,15 @@ body {
   flex: 1;
 }
 
-/* Full-width banner: image header with the brand and nav overlaid. */
+/* Full-width banner: image header with the brand and nav overlaid.
+   Base provides a plain fallback; themes override with artwork. */
 #banner {
   position: relative;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
   min-height: 11rem;
-  background: url("./banner.svg") center 40% / cover;
+  background: linear-gradient(135deg, var(--surface), var(--bg));
   border-bottom: 1px solid var(--line);
 }
 

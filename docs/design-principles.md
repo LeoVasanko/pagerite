@@ -78,8 +78,8 @@ evolves.
   **per-page configurable**: `Node.banner` holds an arbitrary trusted HTML
   snippet (an image, a styled div, canvas + script — anything), resolved by
   walking up the node's ancestors to the front page; when nothing in the
-  chain sets one, the default `banner.svg` artwork (inlined into the
-  stylesheet by the build) shows.
+  chain sets one, the active theme's banner artwork shows (the purple theme
+  ships a `banner.svg`; the base stylesheet falls back to a plain gradient).
 - **Fetch-navigation.** Links are plain `<a href>`; a small script
   (`frontend/src/pagerite.js`) intercepts same-origin clicks, fetches the
   page, and swaps the `#page-banner`, `#nav`, `#sidebar` and `#main` regions
@@ -135,10 +135,11 @@ evolves.
   (`frontend/src/assets/themes/purple/theme.css` by default) overrides those
   variables and adds the visual styling. Vue may add per-component styles on top
   where needed.
-- Fonts, the shared stylesheet, pygments styles and the default banner SVG
-  live under `frontend/src/assets/` and are emitted as hashed assets under
-  `/_assets/` (Fraunces for headings, Literata for body, Fira Code for code —
-  variable woff2 files with local `@font-face`). No third-party requests.
+- Fonts, the shared stylesheet, pygments styles and the theme's banner SVG
+  live under `frontend/src/assets/` (the banner SVG under
+  `themes/purple/`) and are emitted as hashed assets under `/_assets/`
+  (Fraunces for headings, Literata for body, Fira Code for code — variable
+  woff2 files with local `@font-face`). No third-party requests.
 
 ## Editing
 
