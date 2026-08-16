@@ -87,7 +87,9 @@ function save() {
 async function saveAndClose() {
   await save()
   // Reload so nav/sidebar changes apply, then the editor is gone.
-  if (props.standalone) location.href = `/${path.value}`
+  // In standalone mode replace the current history entry so the admin
+  // shell does not remain in the back-button stack.
+  if (props.standalone) location.replace(`/${path.value}`)
   else { dirty = false; emit('close'); location.reload() }
 }
 
