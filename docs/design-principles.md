@@ -32,8 +32,11 @@ evolves.
   lives under `/_/` (the API at `/_/api/`, uploaded files at `/_/f/`, built
   assets at `/_/assets/`, and the admin shell at `/_/admin`). The only
   other reserved root path is `/favicon.ico`, served from the build.
-  Slugs may not begin with `_` or `.` anywhere in the path — such URLs
-  are never looked up as content.
+  Slugs are lowercase ASCII (`[a-z0-9-]`; input is transliterated and
+  filtered as you type, and a new page's empty slug is derived from its
+  title), may not begin with `_` or `.`, and may not occupy a reserved
+  root file name (`robots.txt`, `sitemap.xml`, `favicon.ico`, …) — such
+  URLs are never looked up as content.
 - **Single user, trusted author.** No auth concerns in the core design.
   Everything published is public; only editing tools will later sit behind
   access control (external SSO when that time comes). The author is trusted

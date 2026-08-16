@@ -17,6 +17,7 @@ import { EditorState, Compartment } from '@codemirror/state'
 import { placeholder } from '@codemirror/view'
 import { html } from '@codemirror/lang-html'
 import { cmHighlight, cmTheme } from './cmtheme'
+import { slugify } from './slugify'
 
 const props = defineProps({
   pagePath: { type: String, default: '' },
@@ -196,13 +197,10 @@ function discardPending() {
 async function commitPending() {
   const node = pending.value
   if (!node) return
-  const slug = node.slug.trim().replace(/\/+/g, '')
+  // Empty slug: derive one from the title (transliterated to ASCII).
+  const slug = slugify(node.slug.trim()) || slugify(node.title)
   if (!slug) {
     return
-  }
-  if (invalidSlug(slug)) {
-    saveError.value = '⚠️ slugs cannot begin with _ or .'
-    return // keep the pending row so the slug can be fixed
   }
   const loc = locatePending(tree.value, '')
   const parentPath = loc?.parentPath ?? ''
@@ -217,7 +215,9 @@ async function commitPending() {
     }),
   })
   if (!res.ok) {
-    saveError.value = '⚠️ changes could not be saved'
+    // Show the server's reason (e.g. a reserved file name); the pending
+    // row stays so it can be edited and committed again.
+    saveError.value = `⚠️ ${await errorDetail(res)}`
     return
   }
   // Place it exactly where the row was dropped: a fresh order key halfway
@@ -348,6 +348,13 @@ async function refreshPages() {
   } catch { /* list stays stale; not fatal */ }
 }
 
+// Human-readable reason from a failed API call (FastAPI errors carry a
+// JSON {detail}), falling back to a generic message.
+async function errorDetail(res) {
+  const body = await res.json().catch(() => null)
+  return body?.detail || 'changes could not be saved'
+}
+
 async function postStructure(op) {
   const res = await fetch('/_/api/structure', {
     method: 'POST',
@@ -358,7 +365,7 @@ async function postStructure(op) {
     saveError.value = ''
     loadPlain(path.value) // refresh menus and content from the server
   } else {
-    saveError.value = '⚠️ changes could not be saved'
+    saveError.value = `⚠️ ${await errorDetail(res)}`
   }
   await refreshPages()
   return res.ok
@@ -398,20 +405,11 @@ function onTitleInput(node, ev) {
   })
 }
 
-// Slugs may not begin with _ or . (reserved for the /_/ machinery and
-// dot-paths); enforced on every commit, and again server-side.
-function invalidSlug(slug) {
-  return slug.startsWith('_') || slug.startsWith('.')
-}
-
+// The slug inputs are filtered as you type (StructureTree onSlugInput,
+// see slugify.js); the server re-validates and its reason is shown.
 async function commitSlug(node, ev) {
-  const slug = ev.target.value.trim().replace(/\/+/g, '')
+  const slug = ev.target.value.trim()
   if (slug === node.slug) return
-  if (invalidSlug(slug)) {
-    saveError.value = '⚠️ slugs cannot begin with _ or .'
-    ev.target.value = node.slug
-    return
-  }
   const parent = node.path.split('/').slice(0, -1).join('/')
   // Empty slug at top level = the front page (path "").
   const moveTo = parent ? (slug ? `${parent}/${slug}` : parent) : slug

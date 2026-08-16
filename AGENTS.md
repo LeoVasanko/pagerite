@@ -162,9 +162,15 @@ not for the public pages. See `docs/design-principles.md` for the design.
 - Keep dependencies minimal; add via `uv add` and mention it.
 - The public URL space belongs to content (pretty slugs at root). Reserve
   only `/_/` for the machinery (files, API, built assets, admin), plus
-  `/favicon.ico` from the build. Slugs may not begin with `_` or `.` —
-  validated in the site editor, rejected by the API, and such URLs are
-  never looked up as content when serving.
+  `/favicon.ico` from the build. Slugs are lowercase ASCII `[a-z0-9-]`
+  (the site editor filters input live via `slugify.js`, built on the
+  `transliteration` npm package — unicode folds to ASCII, spaces become
+  hyphens; an empty slug on a new page is derived from its title), may
+  not begin with `_` or `.`, and may not be a reserved file name
+  (`robots.txt`, `ads.txt`, `sitemap.xml`, `openapi.json`, `favicon.ico`,
+  `site.webmanifest`). The API rejects such paths with a human-readable
+  reason shown in the editor, and such URLs are never looked up as
+  content when serving.
 - No auth in core code; trusted single author. Never add output
   sanitization "for safety" against the author — embedded HTML/scripts in
   Markdown are passed through deliberately.

@@ -17,6 +17,7 @@
     "@codemirror/view": "^6.43.8",
     "@lezer/highlight": "^1.2.3",
     "codemirror": "^6.0.2",
+    "transliteration": "^2.6.1",
     "vue": "^3.5.26",
     "vuedraggable": "^4.1.0"
   },

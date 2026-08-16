@@ -17,6 +17,7 @@
 // forwarding.
 import { inject } from 'vue'
 import draggable from 'vuedraggable'
+import { slugify } from './slugify'
 
 defineOptions({ name: 'StructureTree' })
 const props = defineProps({
@@ -26,6 +27,18 @@ const props = defineProps({
 })
 
 const handlers = inject('structureHandlers')
+
+// Live-filter the slug inputs as they are typed (oninput): invalid
+// characters are simply not accepted, spaces become hyphens and unicode
+// folds to ASCII (see slugify.js). Existing rows commit on change, the
+// pending row is v-modeled.
+function onSlugInput(ev) {
+  ev.target.value = slugify(ev.target.value)
+}
+
+function onPendingSlugInput(element, ev) {
+  element.slug = slugify(ev.target.value)
+}
 
 // Focus the title input of a fresh pending row.
 const vFocus = { mounted: (el) => el.focus() }
@@ -92,7 +105,8 @@ function onEnd() {
             <input
               v-model="element.slug"
               class="edit slug-edit"
-              placeholder="slug"
+              placeholder="slug — empty: derived from the title"
+              @input="onPendingSlugInput(element, $event)"
               @keyup.enter="handlers.commitPending()"
               @keyup.esc="handlers.discardPending()"
             />
@@ -115,6 +129,7 @@ function onEnd() {
               :value="element.slug"
               placeholder="front page"
               title="Slug (last path segment) — renames move the whole subtree. Empty at top level = front page"
+              @input="onSlugInput"
               @change="handlers.commitSlug(element, $event)"
             />
             <span class="acts">

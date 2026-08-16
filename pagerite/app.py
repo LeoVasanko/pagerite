@@ -349,10 +349,25 @@ def _is_reserved(path: str) -> bool:
     return any(seg.startswith(("_", ".")) for seg in path.split("/"))
 
 
+# Well-known root file names that content may not occupy (they would
+# shadow real files or carry special meaning to crawlers/clients).
+RESERVED_FILES = {
+    "robots.txt",
+    "ads.txt",
+    "sitemap.xml",
+    "openapi.json",
+    "favicon.ico",
+    "site.webmanifest",
+}
+
+
 def _check_reserved(path: str) -> None:
-    """Reject configured slugs beginning with "_" or "."."""
+    """Reject configured slugs beginning with "_" or ".", and reserved
+    file names at the root."""
     if _is_reserved(path):
         raise HTTPException(400, 'slugs cannot begin with "_" or "."')
+    if path in RESERVED_FILES:
+        raise HTTPException(400, f'"{path}" is a reserved file name')
 
 
 @app.websocket("/_/api/ws/editor")
@@ -497,8 +512,8 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
     first child page in menu order.
     """
     path = path.strip("/")
-    if path and _is_reserved(path):
-        # Reserved slug shape: never content — don't even look it up.
+    if path and (_is_reserved(path) or path in RESERVED_FILES):
+        # Reserved slug shape or file name: never content — no tree lookup.
         return HTMLResponse(views.render_not_found(data.menu, path, data.brand), 404)
     chain = resolve(data.menu, path)
     node = chain[-1] if chain else None
