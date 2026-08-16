@@ -10,4 +10,6 @@ wheels/
 .venv
 .ruff_cache/
 /pagerite/frontend-build
-pagerite.kanta
+
+# Site
+*.kantadb

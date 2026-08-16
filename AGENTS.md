@@ -20,8 +20,8 @@ not for the public pages. See `docs/design-principles.md` for the design.
   - Avoid running the server yourself, ask the user to test
   - `app.py` — the FastAPI app. FastAPI's built-in API docs are disabled
     (`docs_url`/`redoc_url`/`openapi_url=None`) because `/docs` belongs to
-    our content. Our own routes (content pages, `/_/api/...`, `/_/f/...`,
-    `/_/admin`) are registered BEFORE `frontend.route(app, "/")` is
+    our content. Our own routes (content pages, `/_api/...`, `/_f/...`,
+    `/_admin`) are registered BEFORE `frontend.route(app, "/")` is
     called: fastapi-vue inserts its file routes at the position where
     `route()` was called (during `load()` in the lifespan), so anything
     defined earlier wins. The one exception is the content catch-all
@@ -29,7 +29,7 @@ not for the public pages. See `docs/design-principles.md` for the design.
     frontend assets still take priority over content slugs. The `Frontend`
     is constructed with `spa=False` explicitly: it only serves the built
     files without a catch-all. The build mirrors the URL space — hashed
-    immutable assets under `/_/assets/`, `favicon.ico` at the site root —
+    immutable assets under `/_assets/`, `favicon.ico` at the site root —
     and an `index.html` in the build would become a `/` route, so leave it
     out of the build to keep `/` ours.
   - `data.py` — msgspec Structs for the kanta database. The site structure
@@ -49,15 +49,15 @@ not for the public pages. See `docs/design-principles.md` for the design.
     the `Data` object; reads are plain attribute access, writes in
     `kanta.transaction(...)`.
     `Data.files` is a content-addressed store (blake3[:12] + extension)
-    mapping file names to bytes, served at `/_/f/{name}` with immutable
-    caching; pages reference files by absolute `/_/f/` URLs so hierarchy
+    mapping file names to bytes, served at `/_f/{name}` with immutable
+    caching; pages reference files by absolute `/_f/` URLs so hierarchy
     moves never break them. `Node.banner` is a raw trusted HTML snippet
     for the header banner (img, styled div, canvas+script...); empty
     inherits from the node's ancestors (front page last), then the default
     banner.svg artwork. `Data.version` is bumped on every write
     and embedded in page ETags so nav-affecting changes invalidate caches.
     `Data.brand` is the site name (header link + `<title>` suffix), editable
-    in the site editor via `/_/api/settings`; empty = no header link and
+    in the site editor via `/_api/settings`; empty = no header link and
     no `<title>` suffix.
   - `markdown.py` — markdown-it-py renderer (html passthrough + attrs,
     footnote, deflist, tasklists plugins). Custom image rule: relative srcs
@@ -80,20 +80,20 @@ not for the public pages. See `docs/design-principles.md` for the design.
       code copy buttons. The backend links the shared CSS as two separate
       stylesheets (base and theme) so they can be swapped or augmented.
     - `assets/` — shared styles and data files built by Vite and served hashed
-      under `/_/assets/`: `pagerite.css` (base layout + conservative variables),
+      under `/_assets/`: `pagerite.css` (base layout + conservative variables),
       `themes/purple/theme.css` (the purple/dark theme override), `pygments.css`,
       `banner.svg` and `fonts/` (self-hosted Fraunces/Literata/Fira Code variable
       woff2). The `::view-transition*` block at the end of `pagerite.css` (from
       termotohtori.fi) is fragile — do not tweak.
     - Vite builds ES-module `.js` outputs; the backend renders `<script
       type="module">` for them (module scripts defer by default).
-  - The database file is `pagerite.kanta` in the cwd (`PAGERITE_DB`
+  - The database file is `pagerite.kantadb` in the cwd (`PAGERITE_DB`
     overrides); gitignored. Do not delete it without asking.
 - `scripts/fastapi-vue/` — helper scripts from the fastapi-vue template
   (build hook etc.), do not edit.
 - `frontend/` — the Vue editor as **two separate apps** mounted in their
   own host divs created inside the static document: `PageEditor.vue`
-  (CodeMirror + server-rendered preview over WebSocket `/_/api/ws/editor`,
+  (CodeMirror + server-rendered preview over WebSocket `/_api/ws/editor`,
   previewing into the visible article; editor scroll drives document
   scroll) opened by the article pen — it edits content and title only,
   never the path — and `SiteEditor.vue` (site brand + banner HTML edited in
@@ -115,7 +115,7 @@ not for the public pages. See `docs/design-principles.md` for the design.
   two pens swap the docked
   panel for the other editor; clicking the open editor's own pen closes it. Normally dynamic-imported onto the content page by
   pagerite.js when a 🖊️ edit link is clicked (the link carries
-  `data-editor-src`/`data-editor-css`/`data-editor-mode`); the `/_/admin`
+  `data-editor-src`/`data-editor-css`/`data-editor-mode`); the `/_admin`
   route (page selected by location hash) is the no-JS-import fallback shell
   rendered by `views.render_editor` and keeps its own preview pane.
   In dev, modules load from the Vite dev server (`PAGERITE_VITE_URL`),
@@ -172,7 +172,7 @@ not for the public pages. See `docs/design-principles.md` for the design.
 
 - Keep dependencies minimal; add via `uv add` and mention it.
 - The public URL space belongs to content (pretty slugs at root). Reserve
-  only `/_/` for the machinery (files, API, built assets, admin), plus
+  only `/_` for the machinery (`/_api/`, `/_f/`, `/_assets/`, `/_admin`), plus
   `/favicon.ico` from the build. Slugs are lowercase ASCII letters, digits,
   hyphens and underscores `[a-z0-9_-]` (the site editor filters input live
   via `slugify.js`, built on the `transliteration` npm package — unicode

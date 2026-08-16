@@ -22,7 +22,7 @@ from devutil import (
 
 DEFAULT_VITE_PORT = 3100
 DEFAULT_DEV_PORT = 3200
-HEALTH = "/_/api/health?from=devserver.py"
+HEALTH = "/_api/health?from=devserver.py"
 
 
 async def run_devserver(

@@ -1,6 +1,6 @@
 <script setup>
 // Recursive site-structure tree with drag-and-drop ordering (vue-draggable).
-// Nodes come from the server (GET /_/api/pages via SiteEditor.vue) as
+// Nodes come from the server (GET /_api/pages via SiteEditor.vue) as
 // {slug, path, title, order, published, has_content, children}.
 // Every node is real: a label whose title and slug are always editable
 // inline — the title saves while typing (and focusing it opens the page),

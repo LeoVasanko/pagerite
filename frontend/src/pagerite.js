@@ -132,7 +132,7 @@
   function preload() {
     const urls = new Set();
     for (const a of document.querySelectorAll('#nav a[href^="/"], #main a[href^="/"]')) {
-      if (!a.pathname.startsWith("/_/admin")) urls.add(a.pathname);
+      if (!a.pathname.startsWith("/_admin")) urls.add(a.pathname);
     }
     for (const url of urls) {
       if (url === location.pathname) continue;
@@ -251,7 +251,7 @@
     if (url.origin !== location.origin) return;
     // Same-page anchor links (footnotes etc.): let the browser handle them
     if (url.pathname === location.pathname && url.hash) return;
-    if (url.pathname.startsWith("/_/")) return;
+    if (url.pathname.startsWith("/_")) return;
     ev.preventDefault();
     load(url);
   });
@@ -270,7 +270,7 @@
     try {
       const body = { path, index };
       if (editor) body.markdown = editor.getMarkdown();
-      const res = await fetch("/_/api/toggle-task", {
+      const res = await fetch("/_api/toggle-task", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),

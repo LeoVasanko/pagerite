@@ -6,7 +6,7 @@
 // no save button, no edit mode. Focusing a page's row navigates to it in
 // place (no transitions).
 //
-// The tree comes from the server nested (GET /_/api/pages); every node is
+// The tree comes from the server nested (GET /_api/pages); every node is
 // real — a label with a title and slug, with content (landing page) or
 // without (category whose URL renders a placeholder page). The front page
 // is a top-level row with an empty slug, not the parent of the others.
@@ -206,7 +206,7 @@ async function commitPending() {
   const loc = locatePending(tree.value, '')
   const parentPath = loc?.parentPath ?? ''
   const newPath = parentPath ? `${parentPath}/${slug}` : slug
-  const res = await fetch(`/_/api/pages/${newPath}`, {
+  const res = await fetch(`/_api/pages/${newPath}`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -246,7 +246,7 @@ const brand = ref('')
 
 async function loadSettings() {
   try {
-    brand.value = (await (await fetch('/_/api/settings')).json()).brand
+    brand.value = (await (await fetch('/_api/settings')).json()).brand
   } catch { /* keep default */ }
 }
 
@@ -278,7 +278,7 @@ function onBrandInput() {
 }
 
 async function saveBrand() {
-  const res = await fetch('/_/api/settings', {
+  const res = await fetch('/_api/settings', {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ brand: brand.value }),
@@ -308,7 +308,7 @@ function armRemove(node) {
 }
 
 async function removePage(node) {
-  const res = await fetch(`/_/api/pages/${node.path}`, { method: 'DELETE' })
+  const res = await fetch(`/_api/pages/${node.path}`, { method: 'DELETE' })
   if (res.ok) {
     saveError.value = ''
     refreshPages()
@@ -329,7 +329,7 @@ async function removePage(node) {
 // --- Site structure tree (drag-and-drop ordering/moving) ----------------
 async function refreshPages() {
   try {
-    tree.value = await (await fetch('/_/api/pages')).json()
+    tree.value = await (await fetch('/_api/pages')).json()
   } catch { /* list stays stale; not fatal */ }
 }
 
@@ -341,7 +341,7 @@ async function errorDetail(res) {
 }
 
 async function postStructure(op) {
-  const res = await fetch('/_/api/structure', {
+  const res = await fetch('/_api/structure', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(op),
@@ -469,7 +469,7 @@ async function uploadBannerMedia(file) {
   // Banner media goes to the shared content store, like article images.
   if (!file || !/^(image|video)\//.test(file.type)) return
   const name = file.name.replace(/[^\w.-]/g, '-')
-  const res = await fetch(`/_/api/files/${encodeURIComponent(name)}`, { method: 'PUT', body: file })
+  const res = await fetch(`/_api/files/${encodeURIComponent(name)}`, { method: 'PUT', body: file })
   if (!res.ok) {
     return
   }
@@ -526,7 +526,7 @@ function onKeydown(ev) {
 
 function connect() {
   ws = new WebSocket(
-    `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/_/api/ws/editor`,
+    `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/_api/ws/editor`,
   )
   ws.onmessage = onMessage
   ws.onopen = () => {

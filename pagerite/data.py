@@ -70,7 +70,7 @@ class Data(msgspec.Struct):
     #: Top-level menu items by slug; "" is the front page.
     menu: dict[str, Node] = {}
     #: Content-addressed file store: name (blake3 hash prefix + extension)
-    #: -> bytes, served immutable at "/_/{name}". Absolute URLs that stay
+    #: -> bytes, served immutable at "/_f/{name}". Absolute URLs that stay
     #: valid when pages move.
     files: dict[str, bytes] = {}
     #: Bumped on every structure/content write, so page ETags (which embed

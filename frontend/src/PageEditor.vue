@@ -1,8 +1,8 @@
 <script setup>
 // Page editor: CodeMirror for Markdown, live server-rendered preview
 // applied straight into the visible article, saving over one WebSocket
-// (/_/api/ws/editor). Docked left of the article on the page itself
-// (main.js openEditor) or standalone at /_/admin with its own preview pane.
+// (/_api/ws/editor). Docked left of the article on the page itself
+// (main.js openEditor) or standalone at /_admin with its own preview pane.
 // The socket connects when the editor is opened and reconnects with
 // exponential backoff after a failure; unsaved text and pending saves
 // survive a disconnect. Editor scroll drives the document scroll, keeping the
@@ -109,7 +109,7 @@ function insertAtCursor(text) {
 async function uploadImage(file) {
   if (!file) return
   const name = file.name.replace(/[^\w.-]/g, '-')
-  const res = await fetch(`/_/api/files/${encodeURIComponent(name)}`, { method: 'PUT', body: file })
+  const res = await fetch(`/_api/files/${encodeURIComponent(name)}`, { method: 'PUT', body: file })
   if (res.ok) {
     const { path: stored } = await res.json()
     const alt = name.replace(/\.[^.]+$/, '')
@@ -223,7 +223,7 @@ function syncScroll() {
 
 function connect() {
   ws = new WebSocket(
-    `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/_/api/ws/editor`,
+    `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/_api/ws/editor`,
   )
   ws.onmessage = onMessage
   ws.onopen = () => {

@@ -12,7 +12,7 @@ uv run pagerite          # serves the built frontend
 uv run scripts/devserver.py   # dev mode with auto reloads (no build needed)
 ```
 
-The database lives in `pagerite.kanta` in the working directory
+The database lives in `pagerite.kantadb` in the working directory
 (`PAGERITE_DB` overrides). On startup, demo pages from `pagerite/seed.py`
 are added only if missing.
 

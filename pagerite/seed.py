@@ -53,12 +53,12 @@ site's layout or scroll effects.
 
 ## Images
 
-Upload a file (`PUT /_/api/files/{filename}`) and it lands in the
-content-addressed store, served immutable from `/_/f/{hash}.ext` — an
+Upload a file (`PUT /_api/files/{filename}`) and it lands in the
+content-addressed store, served immutable from `/_f/{hash}.ext` — an
 absolute URL that survives page moves:
 
 ```
-![Abstract shapes](/_/f/....svg "A captioned figure"){.right width=280}
+![Abstract shapes](/_f/....svg "A captioned figure"){.right width=280}
 ```
 
 ![Abstract shapes](shapes.svg "A captioned figure, floated right with an attribute class"){.right width=280}

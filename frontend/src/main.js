@@ -4,7 +4,7 @@
 //   editing with the preview rendered into the visible article.
 // - SiteEditor ("site" mode): pen on the banner — banner HTML editing
 //   (previewed into the real banner) and the site structure tree.
-// The standalone /_/admin shell (#app in the DOM) mounts PageEditor with the
+// The standalone /_admin shell (#app in the DOM) mounts PageEditor with the
 // page selected by location hash, as a no-dynamic-import fallback.
 if (import.meta.env.DEV) {
   import("./assets/pagerite.css");
@@ -50,7 +50,7 @@ export function closeEditor() {
 
 const shell = document.getElementById('app')
 if (shell) {
-  // Standalone /_/admin shell: mount into it and follow the location hash.
+  // Standalone /_admin shell: mount into it and follow the location hash.
   host = shell
   createApp(PageEditor, {
     pagePath: location.hash.replace(/^#\/?/, '').replace(/\/$/, ''),

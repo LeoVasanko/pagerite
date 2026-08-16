@@ -29,8 +29,7 @@ evolves.
   directly at the site root; structured content may nest
   (`/docs/design-principles`-style). The URL space is the author's, so
   reserved prefixes must be kept few and deliberate: everything internal
-  lives under `/_/` (the API at `/_/api/`, uploaded files at `/_/f/`, built
-  assets at `/_/assets/`, and the admin shell at `/_/admin`). The only
+  lives under `/_` (`/_api/`, `/_f/`, `/_assets/`, `/_admin`). The only
   other reserved root path is `/favicon.ico`, served from the build.
   Slugs are lowercase ASCII letters, digits, hyphens and underscores
   (`[a-z0-9_-]`; input is transliterated and filtered as you type, and a
@@ -55,16 +54,16 @@ evolves.
   lists, task lists, brace-attributes; tables and strikethrough from the
   default preset), with `html=True` for raw passthrough. Fenced code blocks
   are highlighted server-side with **Pygments** (github-dark palette in
-  `/_/assets/pygments-*.css`); a JS copy button appears on hover. Should this
+  `/_assets/pygments-*.css`); a JS copy button appears on hover. Should this
   prove limiting, we implement our own renderer on top of html5tagger,
   which we already use for all HTML generation.
-- **Files are content-addressed.** Uploads (`PUT /_/api/files/{filename}`)
+- **Files are content-addressed.** Uploads (`PUT /_api/files/{filename}`)
   are stored by content hash — blake3, first 6 bytes hex + original
-  extension — and served immutable from `/_/f/{hash}.ext`. Absolute URLs
+  extension — and served immutable from `/_f/{hash}.ext`. Absolute URLs
   that survive page renames and dedupe identical content; pages no longer
   own files. An image with a title becomes a `<figure>` with
   `<figcaption>`. Positioning is by attribute classes:
-  `![alt](/_/f/….avif "Caption"){.right}` — `{.right}`, `{.left}` float,
+  `![alt](/_f/….avif "Caption"){.right}` — `{.right}`, `{.left}` float,
   `{.wide}` goes full bleed (viewport edge to edge, or up to the docked
   editor; the sidebar stacks on top of it); plain attributes like `width=300`
   work too.
@@ -116,7 +115,7 @@ evolves.
   fresh value halfway between its new siblings; all other items keep
   theirs). New pages append at the end of their menu. Structure edits
   (reorder, move/rename with the whole subtree, retitle) go through
-  `POST /_/api/structure` and the editor's structure panel.
+  `POST /_api/structure` and the editor's structure panel.
 - Unpublished pages are hidden from both nav and URL access (404).
 
 ## Reading experience
@@ -139,7 +138,7 @@ evolves.
   where needed.
 - Fonts, the shared stylesheet, pygments styles and the default banner SVG
   live under `frontend/src/assets/` and are emitted as hashed assets under
-  `/_/assets/` (Fraunces for headings, Literata for body, Fira Code for code —
+  `/_assets/` (Fraunces for headings, Literata for body, Fira Code for code —
   variable woff2 files with local `@font-face`). No third-party requests.
 
 ## Editing
@@ -160,14 +159,14 @@ evolves.
   reloads the page). The pens are `<button>`s wired up by `pagerite.js` —
   editing is an action, not a navigation. The editor's WebSocket
   **reconnects automatically** with local text and pending saves preserved.
-  A standalone shell also exists at `/_/admin#/path` with its own preview
+  A standalone shell also exists at `/_admin#/path` with its own preview
   pane. (All users are trusted authors for now; access control later with
   SSO.)
 - **CodeMirror 6** for Markdown editing (no WYSIWYG), title/published
   controls.
   Images can be pasted straight into the editor or chosen via a file
-  input: they upload to the content store (`PUT /_/api/files/...`) and
-  insert `![alt](/_/f/hash.ext)` at the cursor.
+  input: they upload to the content store (`PUT /_api/files/...`) and
+  insert `![alt](/_f/hash.ext)` at the cursor.
 - The **structure panel** (vue-draggable tree of the whole site, in site
   mode) covers page management: reorder any menu level, drag across
   sections, add, delete (two clicks: the button arms, then deletes — no
@@ -187,11 +186,11 @@ evolves.
   is the root row with an empty slug — renaming it away leaves no front
   page ("/" redirects to the first nav item), and giving another
   top-level row the empty slug makes it the front page.
-- Preview and saving go over a **WebSocket** (`/_/api/ws/editor`) with a
+- Preview and saving go over a **WebSocket** (`/_api/ws/editor`) with a
   stateless JSON protocol (`open`/`render`/`save`; on save all fields are
   optional and absent ones keep their old values, `move_from` renames),
   avoiding REST polling and races. Rendering always stays server-side.
-- A REST API also exists for scripting, all under `/_/api/`:
+- A REST API also exists for scripting, all under `/_api/`:
   `GET pages` (the full tree), `PUT/DELETE pages/{path}`,
   `GET/PUT settings` (site brand), `POST structure` (reorder/move/
   retitle), file upload/removal via `PUT/DELETE files/{name}`.

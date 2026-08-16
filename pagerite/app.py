@@ -40,7 +40,7 @@ from pagerite.data import (
 )
 from pagerite.markdown import has_h1, render, toggle_task
 
-DB_PATH = os.getenv("PAGERITE_DB", "pagerite.kanta")
+DB_PATH = os.getenv("PAGERITE_DB", "pagerite.kantadb")
 
 # Our own data root; kanta edits it in place, reads are plain attribute access.
 data = Data()
@@ -48,9 +48,9 @@ kanta = Kanta(DB_PATH, data)
 
 # Vue build served at the site root, no SPA catch-all (assets only). The
 # build mirrors the URL space: hashed, immutable files live under
-# /_/assets/ (assetsDir: '_/assets'), the favicon at /favicon.ico.
+# /_assets/ (assetsDir: '_/assets'), the favicon at /favicon.ico.
 BUILD_DIR = Path(__file__).with_name("frontend-build")
-frontend = Frontend(BUILD_DIR, spa=False, cached="/_/assets/")
+frontend = Frontend(BUILD_DIR, spa=False, cached="/_assets/")
 
 
 def _hash_name(body: bytes, orig: str) -> str:
@@ -60,12 +60,12 @@ def _hash_name(body: bytes, orig: str) -> str:
 
 
 def _store_seed_file(markdown: str, banner: str, orig: str, body: bytes) -> tuple[str, str]:
-    """Store a seed file content-addressed and point references at /_/f/."""
+    """Store a seed file content-addressed and point references at /_f/."""
     name = _hash_name(body, orig)
     data.files.setdefault(name, body)
-    markdown = markdown.replace(f"]({orig}", f"](/_/f/{name}")
-    banner = banner.replace(f'src="/{orig}"', f'src="/_/f/{name}"')
-    banner = banner.replace(f'src="{orig}"', f'src="/_/f/{name}"')
+    markdown = markdown.replace(f"]({orig}", f"](/_f/{name}")
+    banner = banner.replace(f'src="/{orig}"', f'src="/_f/{name}"')
+    banner = banner.replace(f'src="{orig}"', f'src="/_f/{name}"')
     return markdown, banner
 
 
@@ -163,13 +163,13 @@ class PageIn(BaseModel):
     banner: str | None = None  # None keeps the existing banner
 
 
-@app.get("/_/api/health")
+@app.get("/_api/health")
 async def health_check() -> dict[str, str]:
     """Return backend status for health monitoring."""
     return {"status": "ok"}
 
 
-@app.get("/_/api/pages")
+@app.get("/_api/pages")
 async def list_pages() -> list[dict]:
     """The site tree for the structure editor (all nodes, drafts included).
 
@@ -194,7 +194,7 @@ async def list_pages() -> list[dict]:
     return dump(data.menu, "")
 
 
-@app.put("/_/api/pages/{path:path}", status_code=204)
+@app.put("/_api/pages/{path:path}", status_code=204)
 async def save_page(path: str, page: PageIn) -> None:
     """Create or replace the page at a slug path ("" or "/" = front page).
 
@@ -236,7 +236,7 @@ class StructureOp(BaseModel):
     title: str | None = None
 
 
-@app.post("/_/api/structure", status_code=204)
+@app.post("/_api/structure", status_code=204)
 async def update_structure(op: StructureOp) -> None:
     """Apply one structure operation (see StructureOp)."""
     path = op.path.strip("/")
@@ -279,7 +279,7 @@ async def update_structure(op: StructureOp) -> None:
         data.version += 1
 
 
-@app.get("/_/api/settings")
+@app.get("/_api/settings")
 async def get_settings() -> dict[str, str]:
     """Site-wide settings (the brand text)."""
     return {"brand": data.brand}
@@ -291,7 +291,7 @@ class SettingsIn(BaseModel):
     brand: str
 
 
-@app.put("/_/api/settings", status_code=204)
+@app.put("/_api/settings", status_code=204)
 async def put_settings(settings: SettingsIn) -> None:
     """Update site-wide settings; bumps the version so ETags invalidate."""
     with kanta.transaction("update settings"):
@@ -307,7 +307,7 @@ class ToggleTaskIn(BaseModel):
     markdown: str | None = None
 
 
-@app.post("/_/api/toggle-task")
+@app.post("/_api/toggle-task")
 async def toggle_task_endpoint(body: ToggleTaskIn) -> dict[str, str]:
     """Toggle the Nth task-list checkbox in a page's Markdown source.
 
@@ -337,12 +337,12 @@ async def toggle_task_endpoint(body: ToggleTaskIn) -> dict[str, str]:
     return {"markdown": new_markdown}
 
 
-@app.put("/_/api/files/{name}")
+@app.put("/_api/files/{name}")
 async def upload_file(name: str, request: Request) -> dict[str, str]:
     """Store an upload (image, video...) in the content-addressed store.
 
     The stored name is a blake3 hash prefix + the original extension,
-    served immutable at "/_/f/{name}"; returns {"path": "/_/f/..."}.
+    served immutable at "/_f/{name}"; returns {"path": "/_f/..."}.
     """
     if "/" in name or name in {".", ".."}:
         raise HTTPException(400, "bad file name")
@@ -351,10 +351,10 @@ async def upload_file(name: str, request: Request) -> dict[str, str]:
     with kanta.transaction("upload file", extra=name):
         data.files[stored] = body
         data.version += 1
-    return {"path": f"/_/f/{stored}"}
+    return {"path": f"/_f/{stored}"}
 
 
-@app.delete("/_/api/files/{name}", status_code=204)
+@app.delete("/_api/files/{name}", status_code=204)
 async def delete_file(name: str) -> None:
     """Remove a file from the content-addressed store (no refcounting:
     other pages referencing the same content will 404)."""
@@ -365,7 +365,7 @@ async def delete_file(name: str) -> None:
         data.version += 1
 
 
-@app.get("/_/f/{name}")
+@app.get("/_f/{name}")
 async def stored_file(name: str, request: Request) -> Response:
     """Serve a file from the content-addressed store (immutable: the name
     is its own hash, so cache forever)."""
@@ -382,7 +382,7 @@ async def stored_file(name: str, request: Request) -> Response:
     )
 
 
-@app.delete("/_/api/pages/{path:path}", status_code=204)
+@app.delete("/_api/pages/{path:path}", status_code=204)
 async def delete_page(path: str) -> None:
     """Delete a node by slug path.
 
@@ -426,7 +426,7 @@ def _check_reserved(path: str) -> None:
         )
 
 
-@app.websocket("/_/api/ws/editor")
+@app.websocket("/_api/ws/editor")
 async def editor_ws(ws: WebSocket) -> None:
     """Editor session: open pages, render previews, save — over one socket.
 
@@ -549,7 +549,7 @@ async def editor_ws(ws: WebSocket) -> None:
         pass
 
 
-@app.get("/_/admin", response_class=HTMLResponse)
+@app.get("/_admin", response_class=HTMLResponse)
 async def admin() -> HTMLResponse:
     """Serve the editor app shell (Vue mounts into #app)."""
     return HTMLResponse(views.render_editor())
@@ -562,7 +562,7 @@ async def front_page(request: Request) -> Response:
 
 
 # Vue build asset routes are inserted at this position during load(): the
-# build mirrors the URL space (/_/assets/*, /favicon.ico at the root).
+# build mirrors the URL space (/_assets/*, /favicon.ico at the root).
 frontend.route(app, "/")
 
 
