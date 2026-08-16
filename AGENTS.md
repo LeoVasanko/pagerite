@@ -20,9 +20,9 @@ not for the public pages. See `docs/design-principles.md` for the design.
   - Avoid running the server yourself, ask the user to test
   - `app.py` — the FastAPI app. FastAPI's built-in API docs are disabled
     (`docs_url`/`redoc_url`/`openapi_url=None`) because `/docs` belongs to
-    our content. Our own routes (content pages, `/_api/...`, `/_f/...`,
-    `/_admin`) are registered BEFORE `frontend.route(app, "/")` is
-    called: fastapi-vue inserts its file routes at the position where
+    our content. Our own routes (content pages, `/_api/...`, `/_f/...`) are
+    registered BEFORE `frontend.route(app, "/")` is called: fastapi-vue
+    inserts its file routes at the position where
     `route()` was called (during `load()` in the lifespan), so anything
     defined earlier wins. The one exception is the content catch-all
     `/{path:path}`, registered AFTER `frontend.route()` so that built
@@ -115,17 +115,17 @@ not for the public pages. See `docs/design-principles.md` for the design.
   two pens swap the docked
   panel for the other editor; clicking the open editor's own pen closes it. Normally dynamic-imported onto the content page by
   pagerite.js when a 🖊️ edit link is clicked (the link carries
-  `data-editor-src`/`data-editor-css`/`data-editor-mode`); the `/_admin`
-  route (page selected by location hash) is the no-JS-import fallback shell
-  rendered by `views.render_editor` and keeps its own preview pane.
+  `data-editor-src`/`data-editor-css`/`data-editor-mode`).
   In dev, modules load from the Vite dev server (`PAGERITE_VITE_URL`),
   in prod from the hashed build assets resolved via
-  `frontend-build/.vite/manifest.json`. `vite.config.js` builds with
-  `manifest: true`, `assetsDir: '_/assets'` (so the build mirrors the URL
-  space; `frontend/public/favicon.ico` lands at the build root and is
-  served at `/favicon.ico`) and JS inputs (`src/main.js` and
-  `src/pagerite.js`) so no `index.html` ends up in the build (it would shadow
-  `/`). All outputs are ES modules. vite-plugin-fastapi.js has an
+  `frontend-build/.vite/manifest.json`. `vite.config.js` sets
+  `appType: 'mpa'` (no SPA fallback) and builds with `manifest: true`,
+  `assetsDir: '_/assets'` (so the build mirrors the URL space;
+  `frontend/public/favicon.ico` lands at the build root and is served at
+  `/favicon.ico`). JS inputs are `src/main.js` and `src/pagerite.js`; there
+  is no `index.html` source (it would shadow `/` and turn missing dev paths
+  into an empty Vue shell). All outputs are ES modules.
+  vite-plugin-fastapi.js has an
   auto-upgrade marker — edit `vite.config.js`, not the plugin.
 - `docs/` — design documentation.
 
@@ -172,7 +172,7 @@ not for the public pages. See `docs/design-principles.md` for the design.
 
 - Keep dependencies minimal; add via `uv add` and mention it.
 - The public URL space belongs to content (pretty slugs at root). Reserve
-  only `/_` for the machinery (`/_api/`, `/_f/`, `/_assets/`, `/_admin`), plus
+  only `/_` for the machinery (`/_api/`, `/_f/`, `/_assets/`), plus
   `/favicon.ico` from the build. Slugs are lowercase ASCII letters, digits,
   hyphens and underscores `[a-z0-9_-]` (the site editor filters input live
   via `slugify.js`, built on the `transliteration` npm package — unicode

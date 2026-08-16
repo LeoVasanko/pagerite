@@ -4,8 +4,6 @@
 //   editing with the preview rendered into the visible article.
 // - SiteEditor ("site" mode): pen on the banner — banner HTML editing
 //   (previewed into the real banner) and the site structure tree.
-// The standalone /_admin shell (#app in the DOM) mounts PageEditor with the
-// page selected by location hash, as a no-dynamic-import fallback.
 if (import.meta.env.DEV) {
   import("./assets/pagerite.css");
   import("./assets/themes/purple/theme.css");
@@ -17,22 +15,18 @@ import SiteEditor from './SiteEditor.vue'
 
 let host = null
 
-export function openEditor(path, { standalone = false, mode = 'page' } = {}) {
+export function openEditor(path, { mode = 'page' } = {}) {
   closeEditor()
   host = document.createElement('div')
   host.className = 'editor-host'
   // Docked inside #content: below the banner, next to the article only.
-  const container = (!standalone && document.getElementById('content')) || document.body
-  container.prepend(host)
-  if (!standalone) {
-    document.body.classList.add('editing')
-    // Which kind of editor is open; pagerite.js uses this to decide
-    // whether a pen click closes the panel or swaps in the other editor.
-    document.body.dataset.editorMode = mode
-  }
+  document.getElementById('content').prepend(host)
+  document.body.classList.add('editing')
+  // Which kind of editor is open; pagerite.js uses this to decide
+  // whether a pen click closes the panel or swaps in the other editor.
+  document.body.dataset.editorMode = mode
   createApp(mode === 'site' ? SiteEditor : PageEditor, {
     pagePath: path,
-    standalone,
     onClose: closeEditor,
   }).mount(host)
 }
@@ -46,15 +40,4 @@ export function closeEditor() {
   const old = host
   host = null
   setTimeout(() => old.remove(), 250)
-}
-
-const shell = document.getElementById('app')
-if (shell) {
-  // Standalone /_admin shell: mount into it and follow the location hash.
-  host = shell
-  createApp(PageEditor, {
-    pagePath: location.hash.replace(/^#\/?/, '').replace(/\/$/, ''),
-    standalone: true,
-    onClose: () => {},
-  }).mount(shell)
 }

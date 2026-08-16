@@ -549,12 +549,6 @@ async def editor_ws(ws: WebSocket) -> None:
         pass
 
 
-@app.get("/_admin", response_class=HTMLResponse)
-async def admin() -> HTMLResponse:
-    """Serve the editor app shell (Vue mounts into #app)."""
-    return HTMLResponse(views.render_editor())
-
-
 @app.get("/")
 async def front_page(request: Request) -> Response:
     """Render the front page (slug path "")."""

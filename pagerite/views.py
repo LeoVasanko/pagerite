@@ -72,15 +72,6 @@ def _editor_css_url(vite_url: str | None) -> str | None:
     return None
 
 
-def _editor_page_css_urls(vite_url: str | None) -> list[str]:
-    """All CSS URLs for the standalone admin editor page."""
-    if vite_url:
-        return []
-    shared = _shared_css_urls(None)
-    editor_css = _editor_css_url(None)
-    return [*shared, editor_css] if editor_css else shared
-
-
 def _layout(urls: list[str], modules: list[str] = ()) -> Template:
     """Page layout template with standard asset URLs and ES-module scripts.
 
@@ -230,12 +221,12 @@ def _edit_attrs(path: str, mode: str = "page") -> dict:
     (the pen on the banner) edits the banner and site structure. They are
     buttons, not links: editing is an action, not a navigation.
     """
-    scripts, _styles, editor_css = _editor_assets()
+    script, editor_css = _editor_assets()
     return {
         "type": "button",
         "class": "edit-link" if mode == "page" else "edit-link banner-edit-link",
         "title": "edit",
-        "data-editor-src": scripts[-1],
+        "data-editor-src": script[-1],
         "data-editor-css": editor_css or "",
         "data-editor-mode": mode,
     }
@@ -346,38 +337,17 @@ def _page_assets() -> tuple[list[str], list[str]]:
     return _asset_cache["page"]
 
 
-def _editor_assets() -> tuple[list[str], list[str], str | None]:
-    """Script URLs, page CSS URLs, and editor-specific CSS URL.
+def _editor_assets() -> tuple[list[str], str | None]:
+    """Script URL and editor-specific CSS URL for the public-page edit pen.
 
-    The standalone admin page uses all CSS URLs; the public-page edit pen
-    only needs the editor-specific URL because the shared CSS is already
-    linked on the page.
+    The shared CSS is already linked on the page, so the pen only needs the
+    editor-specific stylesheet.
     """
     vite_url = os.environ.get("PAGERITE_VITE_URL")
     if vite_url:
-        return (
-            [f"{vite_url}/@vite/client", f"{vite_url}/src/main.js"],
-            _shared_css_urls(vite_url),
-            None,
-        )
+        return [f"{vite_url}/@vite/client", f"{vite_url}/src/main.js"], None
     if "editor" not in _asset_cache:
         manifest = _manifest()
         entry = manifest["src/main.js"]
-        _asset_cache["editor"] = (
-            [f"/{entry['file']}"],
-            _editor_page_css_urls(None),
-            _editor_css_url(None),
-        )
+        _asset_cache["editor"] = [f"/{entry['file']}"], _editor_css_url(None)
     return _asset_cache["editor"]
-
-
-def render_editor() -> str:
-    """Render the admin editor shell: a mount point for the Vue app."""
-    scripts, styles, _editor_css = _editor_assets()
-    doc = Document(f"Admin – {SITE_NAME}", lang="en")
-    for url in styles:
-        doc.link(rel="stylesheet", href=url, blocking="render")
-    for src in scripts:
-        doc.script(src=src, type="module")
-    doc.div(None, id="app")
-    return str(doc)

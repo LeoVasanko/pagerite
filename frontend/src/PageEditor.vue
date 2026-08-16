@@ -1,13 +1,12 @@
 <script setup>
 // Page editor: CodeMirror for Markdown, live server-rendered preview
 // applied straight into the visible article, saving over one WebSocket
-// (/_api/ws/editor). Docked left of the article on the page itself
-// (main.js openEditor) or standalone at /_admin with its own preview pane.
+// (/_api/ws/editor). Docked left of the article on the page itself.
 // The socket connects when the editor is opened and reconnects with
 // exponential backoff after a failure; unsaved text and pending saves
 // survive a disconnect. Editor scroll drives the document scroll, keeping the
 // rendered article at the cursor's position.
-import { nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState } from '@codemirror/state'
 import { markdown } from '@codemirror/lang-markdown'
@@ -15,7 +14,6 @@ import { cmHighlight, cmTheme } from './cmtheme'
 
 const props = defineProps({
   pagePath: { type: String, default: '' },
-  standalone: { type: Boolean, default: false },
 })
 const emit = defineEmits(['close'])
 
@@ -23,10 +21,7 @@ const path = ref('')
 const title = ref('')
 const published = ref(true)
 const saveError = ref('')
-const previewHtml = ref('')
-const previewHasH1 = ref(false)
 const editorEl = ref(null)
-const previewEl = ref(null)
 const fileInput = ref(null)
 
 let ws = null
@@ -39,10 +34,6 @@ const MAX_RECONNECT_DELAY = 16000
 let everConnected = false
 let dirty = false
 let syncingScroll = false
-
-function currentPath() {
-  return location.hash.replace(/^#\/?/, '').replace(/\/$/, '')
-}
 
 function send(msg) {
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -87,10 +78,9 @@ function save() {
 async function saveAndClose() {
   await save()
   // Reload so nav/sidebar changes apply, then the editor is gone.
-  // In standalone mode replace the current history entry so the admin
-  // shell does not remain in the back-button stack.
-  if (props.standalone) location.replace(`/${path.value}`)
-  else { dirty = false; emit('close'); location.reload() }
+  dirty = false
+  emit('close')
+  location.reload()
 }
 
 function close() {
@@ -98,7 +88,7 @@ function close() {
   const stale = dirty
   dirty = false
   emit('close')
-  if (stale && !props.standalone) location.reload()
+  if (stale) location.reload()
 }
 
 function insertAtCursor(text) {
@@ -128,11 +118,6 @@ function setDocument(text, preserveSelection = false) {
   view.dispatch(tr)
 }
 
-function onHashChange() {
-  const p = currentPath()
-  if (p !== path.value) openPath(p)
-}
-
 function runScripts(root) {
   // Scripts injected via innerHTML do not execute; re-create them.
   for (const old of root.querySelectorAll('script')) {
@@ -144,15 +129,6 @@ function runScripts(root) {
 }
 
 function previewIntoArticle(html, hasH1) {
-  // Docked mode previews into the article on the page itself;
-  // standalone mode has its own preview pane. When the markdown owns its
-  // h1, the title-derived h1 is hidden (matching server-side rendering).
-  previewHasH1.value = hasH1
-  if (props.standalone) {
-    previewHtml.value = html
-    nextTick(() => { if (previewEl.value) runScripts(previewEl.value) })
-    return
-  }
   const article = document.querySelector('#main article')
   if (!article) return
   const h1 = article.querySelector('h1')
@@ -210,13 +186,8 @@ function syncScroll() {
     const scroller = view.scrollDOM
     const max = scroller.scrollHeight - scroller.clientHeight
     const pct = max > 0 ? scroller.scrollTop / max : 0
-    if (props.standalone) {
-      const pv = previewEl.value
-      if (pv) pv.scrollTop = pct * (pv.scrollHeight - pv.clientHeight)
-    } else {
-      const doc = document.documentElement
-      window.scrollTo(0, pct * (doc.scrollHeight - innerHeight))
-    }
+    const doc = document.documentElement
+    window.scrollTo(0, pct * (doc.scrollHeight - innerHeight))
     syncingScroll = false
   })
 }
@@ -234,7 +205,7 @@ function connect() {
       requestRender()
       if (pendingSave) send(pendingSave)
     } else {
-      openPath(props.standalone ? currentPath() : normPath(props.pagePath))
+      openPath(normPath(props.pagePath))
     }
     everConnected = true
   }
@@ -281,7 +252,6 @@ onMounted(() => {
     setMarkdown: (text) => setDocument(text, true),
     path: () => path.value,
   }
-  if (props.standalone) addEventListener('hashchange', onHashChange)
   addEventListener('keydown', onKeydown)
 })
 
@@ -293,13 +263,12 @@ onUnmounted(() => {
   }
   view?.destroy()
   delete window.__pageritePageEditor
-  if (props.standalone) removeEventListener('hashchange', onHashChange)
   removeEventListener('keydown', onKeydown)
 })
 </script>
 
 <template>
-  <div class="editor-root" :class="{ overlay: !standalone }">
+  <div class="editor-root overlay">
     <header class="toolbar">
       <input v-model="title" placeholder="Title" class="title" @input="requestRender" />
       <label><input v-model="published" type="checkbox" /> published</label>
@@ -312,18 +281,11 @@ onUnmounted(() => {
       />
       <button type="button" @click="fileInput.click()">image</button>
       <button type="button" @click="saveAndClose">save</button>
-      <button v-if="!standalone" type="button" class="close" title="close" @click="close">✕</button>
+      <button type="button" class="close" title="close" @click="close">✕</button>
     </header>
     <div v-if="saveError">{{ saveError }}</div>
     <div class="panes">
       <div ref="editorEl" class="editor" />
-      <div v-if="standalone" ref="previewEl" class="preview">
-        <article>
-          <h1 v-if="!previewHasH1">{{ title }}</h1>
-          <!-- server-rendered markdown preview -->
-          <div class="body" v-html="previewHtml" />
-        </article>
-      </div>
     </div>
   </div>
 </template>
@@ -417,19 +379,5 @@ onUnmounted(() => {
 /* No line numbers / gutter chrome. */
 .editor :deep(.cm-gutters) {
   display: none;
-}
-
-.preview {
-  flex: 1;
-  min-width: 0;
-  overflow-y: auto;
-  padding: 1rem 1.5rem;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-}
-
-.preview article {
-  max-width: 44rem;
-  margin: 0 auto;
 }
 </style>

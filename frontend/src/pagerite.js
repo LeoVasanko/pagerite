@@ -132,7 +132,7 @@
   function preload() {
     const urls = new Set();
     for (const a of document.querySelectorAll('#nav a[href^="/"], #main a[href^="/"]')) {
-      if (!a.pathname.startsWith("/_admin")) urls.add(a.pathname);
+      urls.add(a.pathname);
     }
     for (const url of urls) {
       if (url === location.pathname) continue;

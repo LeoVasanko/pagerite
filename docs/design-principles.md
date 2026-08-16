@@ -10,9 +10,8 @@ evolves.
   Python with **html5tagger**. There is no client-side templating or SPA for
   the public site.
 - **Vue only where interactivity demands it.** Small interactive islands
-  (editing tools mainly) may be Vue components, either mounted into specific
-  elements of the server-rendered pages or served as standalone apps
-  (e.g. an admin panel). The public reading experience has no scripting
+  (editing tools mainly) are Vue components mounted into specific elements of
+  the server-rendered pages. The public reading experience has no scripting
   requirement.
 - **Persistence via kanta.** Content is stored in an asyncio-friendly kanta
   database. Rendering happens on the fly on each request — there are no
@@ -29,7 +28,7 @@ evolves.
   directly at the site root; structured content may nest
   (`/docs/design-principles`-style). The URL space is the author's, so
   reserved prefixes must be kept few and deliberate: everything internal
-  lives under `/_` (`/_api/`, `/_f/`, `/_assets/`, `/_admin`). The only
+  lives under `/_` (`/_api/`, `/_f/`, `/_assets/`). The only
   other reserved root path is `/favicon.ico`, served from the build.
   Slugs are lowercase ASCII letters, digits, hyphens and underscores
   (`[a-z0-9_-]`; input is transliterated and filtered as you type, and a
@@ -159,8 +158,7 @@ evolves.
   reloads the page). The pens are `<button>`s wired up by `pagerite.js` —
   editing is an action, not a navigation. The editor's WebSocket
   **reconnects automatically** with local text and pending saves preserved.
-  A standalone shell also exists at `/_admin#/path` with its own preview
-  pane. (All users are trusted authors for now; access control later with
+  (All users are trusted authors for now; access control later with
   SSO.)
 - **CodeMirror 6** for Markdown editing (no WYSIWYG), title/published
   controls.
