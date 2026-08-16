@@ -27,10 +27,11 @@ export default defineConfig({
     },
   },
   build: {
-    // Emit hashed assets at the root of frontend-build so the backend can
-    // serve them under /_/assets/{file} without a nested /assets directory.
+    // Mirror the URL space in the build output: hashed files land under
+    // frontend-build/_/assets/ and the Frontend serves the build directory
+    // at the site root (frontend/public/favicon.ico -> /favicon.ico).
     manifest: true,
-    assetsDir: '',
+    assetsDir: '_/assets',
     rollupOptions: {
       input: {
         main: fileURLToPath(new URL('./src/main.js', import.meta.url)),

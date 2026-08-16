@@ -21,15 +21,17 @@ not for the public pages. See `docs/design-principles.md` for the design.
   - `app.py` — the FastAPI app. FastAPI's built-in API docs are disabled
     (`docs_url`/`redoc_url`/`openapi_url=None`) because `/docs` belongs to
     our content. Our own routes (content pages, `/_/api/...`, `/_/f/...`,
-    `/_/assets/...`, `/_/admin`) are registered BEFORE `frontend.route(app, "/_/assets")` is
+    `/_/admin`) are registered BEFORE `frontend.route(app, "/")` is
     called: fastapi-vue inserts its file routes at the position where
     `route()` was called (during `load()` in the lifespan), so anything
     defined earlier wins. The one exception is the content catch-all
     `/{path:path}`, registered AFTER `frontend.route()` so that built
     frontend assets still take priority over content slugs. The `Frontend`
     is constructed with `spa=False` explicitly: it only serves the built
-    asset files under `/_/assets/` without a catch-all; an `index.html` in the build
-    would become a `/_/assets/` route, so leave it out of the build to keep `/` ours.
+    files without a catch-all. The build mirrors the URL space — hashed
+    immutable assets under `/_/assets/`, `favicon.ico` at the site root —
+    and an `index.html` in the build would become a `/` route, so leave it
+    out of the build to keep `/` ours.
   - `data.py` — msgspec Structs for the kanta database. The site structure
     is a tree: `Data.menu` maps top-level slugs to `Node`s, each with
     `children` keyed by slug — the URL path is the slug chain. The front
@@ -108,7 +110,9 @@ not for the public pages. See `docs/design-principles.md` for the design.
   In dev, modules load from the Vite dev server (`PAGERITE_VITE_URL`),
   in prod from the hashed build assets resolved via
   `frontend-build/.vite/manifest.json`. `vite.config.js` builds with
-  `manifest: true`, `assetsDir: ''` and JS inputs (`src/main.js` and
+  `manifest: true`, `assetsDir: '_/assets'` (so the build mirrors the URL
+  space; `frontend/public/favicon.ico` lands at the build root and is
+  served at `/favicon.ico`) and JS inputs (`src/main.js` and
   `src/pagerite.js`) so no `index.html` ends up in the build (it would shadow
   `/`). All outputs are ES modules. vite-plugin-fastapi.js has an
   auto-upgrade marker — edit `vite.config.js`, not the plugin.

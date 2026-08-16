@@ -30,7 +30,8 @@ evolves.
   (`/docs/design-principles`-style). The URL space is the author's, so
   reserved prefixes must be kept few and deliberate: everything internal
   lives under `/_/` (the API at `/_/api/`, uploaded files at `/_/f/`, built
-  assets at `/_/assets/`, and the admin shell at `/_/admin`).
+  assets at `/_/assets/`, and the admin shell at `/_/admin`). The only
+  other reserved root path is `/favicon.ico`, served from the build.
 - **Single user, trusted author.** No auth concerns in the core design.
   Everything published is public; only editing tools will later sit behind
   access control (external SSO when that time comes). The author is trusted
@@ -75,7 +76,8 @@ evolves.
   **per-page configurable**: `Node.banner` holds an arbitrary trusted HTML
   snippet (an image, a styled div, canvas + script — anything), resolved by
   walking up the node's ancestors to the front page; when nothing in the
-  chain sets one, the default `/_/assets/banner-*.svg` artwork shows.
+  chain sets one, the default `banner.svg` artwork (inlined into the
+  stylesheet by the build) shows.
 - **Fetch-navigation.** Links are plain `<a href>`; a small script
   (`frontend/src/pagerite.js`) intercepts same-origin clicks, fetches the
   page, and swaps the `#page-banner`, `#nav`, `#sidebar` and `#main` regions

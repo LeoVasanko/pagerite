@@ -243,8 +243,9 @@ def _page_assets() -> tuple[list[str], list[str]]:
         )
     manifest = json.loads((BUILD / ".vite/manifest.json").read_text())
     entry = manifest["src/pagerite.js"]
-    styles = [f"/_/assets/{css}" for css in entry.get("css", [])]
-    return [f"/_/assets/{entry['file']}"], styles
+    # Manifest paths already carry the _/assets/ prefix (assetsDir).
+    styles = [f"/{css}" for css in entry.get("css", [])]
+    return [f"/{entry['file']}"], styles
 
 
 def _editor_assets() -> tuple[list[str], list[str]]:
@@ -260,8 +261,8 @@ def _editor_assets() -> tuple[list[str], list[str]]:
         )
     manifest = json.loads((BUILD / ".vite/manifest.json").read_text())
     entry = manifest["src/main.js"]
-    styles = [f"/_/assets/{css}" for css in entry.get("css", [])]
-    return [f"/_/assets/{entry['file']}"], styles
+    styles = [f"/{css}" for css in entry.get("css", [])]
+    return [f"/{entry['file']}"], styles
 
 
 def render_editor() -> str:

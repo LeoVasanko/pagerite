@@ -1,7 +1,7 @@
 """FastAPI application: server-rendered content pages plus Vue assets.
 
 Route ordering matters: our routes are defined before
-``frontend.route(app, "/_/assets")`` is called, so they take priority over
+``frontend.route(app, "/")`` is called, so they take priority over
 the asset routes that fastapi-vue inserts at that position during ``load()``.
 The content catch-all (``/{path:path}``) is defined last, so built
 frontend assets still win over content slugs; anything unmatched falls
@@ -21,7 +21,7 @@ from pathlib import Path
 
 import blake3
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi_vue import Frontend
 from kanta import Kanta
 from pydantic import BaseModel
@@ -45,11 +45,11 @@ DB_PATH = os.getenv("PAGERITE_DB", "pagerite.kanta")
 data = Data()
 kanta = Kanta(DB_PATH, data)
 
-# Vue build assets served under /_/assets/, no SPA catch-all (assets only).
-# With assetsDir: '', all files are emitted at the build root, so cached="/"
-# marks every built file immutable.
+# Vue build served at the site root, no SPA catch-all (assets only). The
+# build mirrors the URL space: hashed, immutable files live under
+# /_/assets/ (assetsDir: '_/assets'), the favicon at /favicon.ico.
 BUILD_DIR = Path(__file__).with_name("frontend-build")
-frontend = Frontend(BUILD_DIR, spa=False, cached="/")
+frontend = Frontend(BUILD_DIR, spa=False, cached="/_/assets/")
 
 
 def _hash_name(body: bytes, orig: str) -> str:
@@ -475,23 +475,15 @@ async def admin() -> HTMLResponse:
     return HTMLResponse(views.render_editor())
 
 
-@app.get("/favicon.ico")
-async def favicon() -> FileResponse:
-    """Serve the favicon copied from frontend/public by the Vite build."""
-    file = BUILD_DIR / "favicon.ico"
-    if not file.is_file():
-        raise HTTPException(404)
-    return FileResponse(file)
-
-
 @app.get("/")
 async def front_page(request: Request) -> Response:
     """Render the front page (slug path "")."""
     return await show_page(request, "")
 
 
-# Vue build asset routes are inserted at this position during load().
-frontend.route(app, "/_/assets")
+# Vue build asset routes are inserted at this position during load(): the
+# build mirrors the URL space (/_/assets/*, /favicon.ico at the root).
+frontend.route(app, "/")
 
 
 @app.get("/{path:path}", response_model=None)
