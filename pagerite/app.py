@@ -342,14 +342,17 @@ async def delete_page(path: str) -> None:
         data.version += 1
 
 
-def _check_reserved(path: str) -> None:
-    """Reject slugs under the machinery prefix.
+def _is_reserved(path: str) -> bool:
+    """Slug shape that content may never use: any segment beginning with
+    "_" or "." ("/_/" is the machinery prefix; dot-segments look like
+    hidden or filesystem paths)."""
+    return any(seg.startswith(("_", ".")) for seg in path.split("/"))
 
-    The public URL space belongs to content; only "/_/" is reserved for
-    the machinery (API, files, built assets, admin).
-    """
-    if path.split("/", 1)[0] == "_":
-        raise HTTPException(400, "reserved path prefix")
+
+def _check_reserved(path: str) -> None:
+    """Reject configured slugs beginning with "_" or "."."""
+    if _is_reserved(path):
+        raise HTTPException(400, 'slugs cannot begin with "_" or "."')
 
 
 @app.websocket("/_/api/ws/editor")
@@ -494,6 +497,9 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
     first child page in menu order.
     """
     path = path.strip("/")
+    if path and _is_reserved(path):
+        # Reserved slug shape: never content — don't even look it up.
+        return HTMLResponse(views.render_not_found(data.menu, path, data.brand), 404)
     chain = resolve(data.menu, path)
     node = chain[-1] if chain else None
     if node is not None and node.published and node.content is not None:

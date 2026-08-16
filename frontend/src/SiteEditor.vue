@@ -200,6 +200,10 @@ async function commitPending() {
   if (!slug) {
     return
   }
+  if (invalidSlug(slug)) {
+    saveError.value = '⚠️ slugs cannot begin with _ or .'
+    return // keep the pending row so the slug can be fixed
+  }
   const loc = locatePending(tree.value, '')
   const parentPath = loc?.parentPath ?? ''
   const newPath = parentPath ? `${parentPath}/${slug}` : slug
@@ -394,9 +398,20 @@ function onTitleInput(node, ev) {
   })
 }
 
+// Slugs may not begin with _ or . (reserved for the /_/ machinery and
+// dot-paths); enforced on every commit, and again server-side.
+function invalidSlug(slug) {
+  return slug.startsWith('_') || slug.startsWith('.')
+}
+
 async function commitSlug(node, ev) {
   const slug = ev.target.value.trim().replace(/\/+/g, '')
   if (slug === node.slug) return
+  if (invalidSlug(slug)) {
+    saveError.value = '⚠️ slugs cannot begin with _ or .'
+    ev.target.value = node.slug
+    return
+  }
   const parent = node.path.split('/').slice(0, -1).join('/')
   // Empty slug at top level = the front page (path "").
   const moveTo = parent ? (slug ? `${parent}/${slug}` : parent) : slug

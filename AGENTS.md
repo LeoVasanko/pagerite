@@ -161,8 +161,10 @@ not for the public pages. See `docs/design-principles.md` for the design.
 
 - Keep dependencies minimal; add via `uv add` and mention it.
 - The public URL space belongs to content (pretty slugs at root). Reserve
-  only `/_/` for the machinery (files, API, built assets, admin); top-level
-  `_` is a reserved slug.
+  only `/_/` for the machinery (files, API, built assets, admin), plus
+  `/favicon.ico` from the build. Slugs may not begin with `_` or `.` —
+  validated in the site editor, rejected by the API, and such URLs are
+  never looked up as content when serving.
 - No auth in core code; trusted single author. Never add output
   sanitization "for safety" against the author — embedded HTML/scripts in
   Markdown are passed through deliberately.
