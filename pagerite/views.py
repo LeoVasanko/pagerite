@@ -25,12 +25,73 @@ from pagerite.markdown import has_h1, render
 SITE_NAME = "Pagerite"
 BUILD = Path(__file__).with_name("frontend-build")
 
+# Shared CSS built as separate entries so the backend can link base and theme
+# independently. Order matters: base first, theme overrides it.
+_SHARED_CSS = {
+    "src/assets/pagerite.css": "pagerite",
+    "src/assets/themes/purple/theme.css": "pagerite-theme",
+}
+
+_manifest_cache: dict | None = None
+_asset_cache: dict[str, tuple] = {}
+
+
+def _manifest() -> dict:
+    global _manifest_cache
+    if _manifest_cache is None:
+        _manifest_cache = json.loads((BUILD / ".vite/manifest.json").read_text())
+    return _manifest_cache
+
+
+def _shared_css_urls(vite_url: str | None) -> list[str]:
+    """URLs for the base and theme stylesheets.
+
+    In dev the JS entries import these files, so Vite injects them; the
+    backend does not link them, avoiding the HMR-wrapped module output.
+    """
+    if vite_url:
+        return []
+    manifest = _manifest()
+    return [f"/{manifest[key]['file']}" for key in _SHARED_CSS]
+
+
+def _editor_css_url(vite_url: str | None) -> str | None:
+    """URL for the editor-specific stylesheet (Vue component styles).
+
+    This is linked by the public-page edit pen so the editor styles are
+    loaded before the editor JS dynamic-import resolves.
+    """
+    if vite_url:
+        return None
+    manifest = _manifest()
+    entry = manifest["src/main.js"]
+    shared_files = {manifest[key]["file"] for key in _SHARED_CSS}
+    for css in entry.get("css", []):
+        if css not in shared_files:
+            return f"/{css}"
+    return None
+
+
+def _editor_page_css_urls(vite_url: str | None) -> list[str]:
+    """All CSS URLs for the standalone admin editor page."""
+    if vite_url:
+        return []
+    shared = _shared_css_urls(None)
+    editor_css = _editor_css_url(None)
+    return [*shared, editor_css] if editor_css else shared
+
 
 def _layout(urls: list[str], modules: list[str] = ()) -> Template:
-    """Page layout template with standard asset URLs and ES-module scripts."""
-    doc = Document(E.Title, lang="en", _urls=urls)
+    """Page layout template with standard asset URLs and ES-module scripts.
+
+    Stylesheets use ``blocking="render"`` so the browser waits for them before
+    showing the page, avoiding a flash of unstyled content.
+    """
+    doc = Document(E.Title, lang="en")
+    for url in urls:
+        doc.link(rel="stylesheet", href=url, blocking="render")
     for src in modules:
-        doc.script(src=src, type="module", defer=True)
+        doc.script(src=src, type="module")
     return Template(
         doc
         .header(
@@ -45,7 +106,7 @@ def _layout(urls: list[str], modules: list[str] = ()) -> Template:
             E.main(E.Main, id="main"),
             id="content",
         )
-        .footer(None),  # kept empty for now; zero-height (see style.css)
+        .footer(None),  # kept empty for now; zero-height (see pagerite.css)
     )
 
 
@@ -169,13 +230,13 @@ def _edit_attrs(path: str, mode: str = "page") -> dict:
     (the pen on the banner) edits the banner and site structure. They are
     buttons, not links: editing is an action, not a navigation.
     """
-    scripts, styles = _editor_assets()
+    scripts, _styles, editor_css = _editor_assets()
     return {
         "type": "button",
         "class": "edit-link" if mode == "page" else "edit-link banner-edit-link",
         "title": "edit",
         "data-editor-src": scripts[-1],
-        "data-editor-css": ",".join(styles),
+        "data-editor-css": editor_css or "",
         "data-editor-mode": mode,
     }
 
@@ -272,40 +333,51 @@ def _page_assets() -> tuple[list[str], list[str]]:
     Dev mode loads the entry from the Vite dev server; production uses
     the Vite build manifest to resolve the hashed asset names.
     """
-    if vite_url := os.environ.get("PAGERITE_VITE_URL"):
-        return (
-            [f"{vite_url}/src/pagerite.js"],
-            [],  # Vite injects the imported CSS in dev
+    vite_url = os.environ.get("PAGERITE_VITE_URL")
+    if vite_url:
+        return [f"{vite_url}/src/pagerite.js"], _shared_css_urls(vite_url)
+    if "page" not in _asset_cache:
+        manifest = _manifest()
+        entry = manifest["src/pagerite.js"]
+        _asset_cache["page"] = (
+            [f"/{entry['file']}"],
+            _shared_css_urls(None),
         )
-    manifest = json.loads((BUILD / ".vite/manifest.json").read_text())
-    entry = manifest["src/pagerite.js"]
-    # Manifest paths already carry the _/assets/ prefix (assetsDir).
-    styles = [f"/{css}" for css in entry.get("css", [])]
-    return [f"/{entry['file']}"], styles
+    return _asset_cache["page"]
 
 
-def _editor_assets() -> tuple[list[str], list[str]]:
-    """Script and CSS URLs for the admin editor (main entry).
+def _editor_assets() -> tuple[list[str], list[str], str | None]:
+    """Script URLs, page CSS URLs, and editor-specific CSS URL.
 
-    Dev mode loads the modules from the Vite dev server; production uses
-    the Vite build manifest to resolve the hashed asset names.
+    The standalone admin page uses all CSS URLs; the public-page edit pen
+    only needs the editor-specific URL because the shared CSS is already
+    linked on the page.
     """
-    if vite_url := os.environ.get("PAGERITE_VITE_URL"):
+    vite_url = os.environ.get("PAGERITE_VITE_URL")
+    if vite_url:
         return (
             [f"{vite_url}/@vite/client", f"{vite_url}/src/main.js"],
-            [],  # Vite injects the imported CSS in dev
+            _shared_css_urls(vite_url),
+            None,
         )
-    manifest = json.loads((BUILD / ".vite/manifest.json").read_text())
-    entry = manifest["src/main.js"]
-    styles = [f"/{css}" for css in entry.get("css", [])]
-    return [f"/{entry['file']}"], styles
+    if "editor" not in _asset_cache:
+        manifest = _manifest()
+        entry = manifest["src/main.js"]
+        _asset_cache["editor"] = (
+            [f"/{entry['file']}"],
+            _editor_page_css_urls(None),
+            _editor_css_url(None),
+        )
+    return _asset_cache["editor"]
 
 
 def render_editor() -> str:
     """Render the admin editor shell: a mount point for the Vue app."""
-    scripts, styles = _editor_assets()
-    doc = Document(f"Admin – {SITE_NAME}", lang="en", _urls=styles)
+    scripts, styles, _editor_css = _editor_assets()
+    doc = Document(f"Admin – {SITE_NAME}", lang="en")
+    for url in styles:
+        doc.link(rel="stylesheet", href=url, blocking="render")
     for src in scripts:
-        doc.script(src=src, type="module", defer=True)
+        doc.script(src=src, type="module")
     doc.div(None, id="app")
     return str(doc)

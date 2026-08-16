@@ -640,7 +640,7 @@ onUnmounted(() => {
   height: 100vh;
 }
 
-/* Docked-overlay positioning lives in the global style.css (.editor-host /
+/* Docked-overlay positioning lives in the global pagerite.css (.editor-host /
    .editor-root.overlay) since the host element is created by main.js. */
 
 .toolbar {

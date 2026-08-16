@@ -1,5 +1,3 @@
-import "./assets/style.css";
-
 // Pagerite editor entries. Two separate apps, mounted in their own
 // dynamically created host divs inside the static document:
 // - PageEditor ("page" mode): pen next to an article heading — Markdown
@@ -8,6 +6,11 @@ import "./assets/style.css";
 //   (previewed into the real banner) and the site structure tree.
 // The standalone /_/admin shell (#app in the DOM) mounts PageEditor with the
 // page selected by location hash, as a no-dynamic-import fallback.
+if (import.meta.env.DEV) {
+  import("./assets/pagerite.css");
+  import("./assets/themes/purple/theme.css");
+}
+
 import { createApp } from 'vue'
 import PageEditor from './PageEditor.vue'
 import SiteEditor from './SiteEditor.vue'

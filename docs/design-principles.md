@@ -132,9 +132,11 @@ evolves.
 
 ## Styling
 
-- A single shared `frontend/src/assets/style.css` covers the server-rendered
-  pages and the Vue components. Vue may add per-component styles on top where
-  needed.
+- The base stylesheet `frontend/src/assets/pagerite.css` provides the layout,
+  typography and interaction rules with conservative CSS variables. A theme layer
+  (`frontend/src/assets/themes/purple/theme.css` by default) overrides those
+  variables and adds the visual styling. Vue may add per-component styles on top
+  where needed.
 - Fonts, the shared stylesheet, pygments styles and the default banner SVG
   live under `frontend/src/assets/` and are emitted as hashed assets under
   `/_/assets/` (Fraunces for headings, Literata for body, Fira Code for code —

@@ -36,6 +36,8 @@ export default defineConfig({
       input: {
         main: fileURLToPath(new URL('./src/main.js', import.meta.url)),
         pagerite: fileURLToPath(new URL('./src/pagerite.js', import.meta.url)),
+        pagerite_base: fileURLToPath(new URL('./src/assets/pagerite.css', import.meta.url)),
+        pagerite_theme: fileURLToPath(new URL('./src/assets/themes/purple/theme.css', import.meta.url)),
       },
     },
   },

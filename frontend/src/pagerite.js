@@ -1,5 +1,3 @@
-import "./assets/style.css";
-
 // Fetch-navigation: swap dynamic regions (#nav, #main) instead of full
 // page loads. Real <a href> links are used throughout, so this is pure
 // progressive enhancement - without JS every link does a normal load.
@@ -7,6 +5,11 @@ import "./assets/style.css";
 // Also: scroll-reveal effects and code copy buttons. These need no
 // support from the article itself and are re-applied after each swap.
 (() => {
+  if (import.meta.env.DEV) {
+    import("./assets/pagerite.css");
+    import("./assets/themes/purple/theme.css");
+  }
+
   const REGIONS = ["page-banner", "nav", "sidebar", "main"];
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
   let editorModule = null;
@@ -191,7 +194,7 @@ import "./assets/style.css";
       runScripts(document.getElementById("main"));
       applyEffects();
     };
-    // Rotating cube page transition (see the FRAGILE block in style.css);
+    // Rotating cube page transition (see the FRAGILE block in pagerite.css);
     // mirrored when navigating back through history. Navigation within the
     // same top-level section crossfades instead, in either direction.
     if (document.startViewTransition && !reduceMotion.matches) {

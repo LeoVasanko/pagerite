@@ -76,15 +76,17 @@ not for the public pages. See `docs/design-principles.md` for the design.
     database (never overwrites existing pages).
   - `frontend/src/` — the Vue editor and public-page entries.
     - `main.js` — Vue editor app entry, mounts PageEditor/SiteEditor.
-    - `pagerite.js` — public page entry; imports the shared style and runs
-      fetch-navigation, scroll-reveal and code copy buttons.
+    - `pagerite.js` — public page entry; runs fetch-navigation, scroll-reveal and
+      code copy buttons. The backend links the shared CSS as two separate
+      stylesheets (base and theme) so they can be swapped or augmented.
     - `assets/` — shared styles and data files built by Vite and served hashed
-      under `/_/assets/`: `style.css`, `pygments.css`, `banner.svg` and
-      `fonts/` (self-hosted Fraunces/Literata/Fira Code variable woff2). The
-      `::view-transition*` block at the end of `style.css` (from
+      under `/_/assets/`: `pagerite.css` (base layout + conservative variables),
+      `themes/purple/theme.css` (the purple/dark theme override), `pygments.css`,
+      `banner.svg` and `fonts/` (self-hosted Fraunces/Literata/Fira Code variable
+      woff2). The `::view-transition*` block at the end of `pagerite.css` (from
       termotohtori.fi) is fragile — do not tweak.
     - Vite builds ES-module `.js` outputs; the backend renders `<script
-      type="module" defer>` for them.
+      type="module">` for them (module scripts defer by default).
   - The database file is `pagerite.kanta` in the cwd (`PAGERITE_DB`
     overrides); gitignored. Do not delete it without asking.
 - `scripts/fastapi-vue/` — helper scripts from the fastapi-vue template

@@ -1,16 +1,17 @@
-/* Shared styles for server-rendered pages and Vue components. */
+/* Base structural and functional styles for Pagerite pages and editors.
+   Color choices are intentionally conservative CSS variables so themes can
+   override them without fighting layout or interaction rules. */
 @import url("./fonts/fonts.css");
 @import url("./pygments.css");
 
 :root {
-  color-scheme: dark;
-  --bg: #12101c;
-  --surface: #1b1830;
-  --text: #e8e6f2;
-  --muted: #9a94b8;
-  --accent: #00d4c8;
-  --accent2: #7c5cff;
-  --line: #ffffff1a;
+  --bg: #ffffff;
+  --surface: #f5f5f5;
+  --text: #1a1a1a;
+  --muted: #666666;
+  --accent: #0056b3;
+  --accent2: #003d80;
+  --line: #0000001a;
   /* Width of the docked editor panel (used both here for shifting the page
      and in the Vue editor's own styles). */
   --editor-w: min(46rem, 50vw);
@@ -43,10 +44,6 @@ body {
 
 #content {
   flex: 1;
-}
-
-::selection {
-  background: var(--accent2);
 }
 
 /* Full-width banner: image header with the brand and nav overlaid. */
@@ -87,12 +84,7 @@ body {
   text-decoration: none;
   margin: auto 1.25rem 0;
   padding-top: 1.5rem;
-  background: linear-gradient(90deg, var(--accent), var(--accent2));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  text-shadow: none;
-  filter: drop-shadow(0 0 0.1rem #000);
+  color: var(--text);
 }
 
 /* Nav overlaid at the bottom of the banner */
@@ -433,7 +425,6 @@ pre {
      past them by its own padding. */
   margin-left: -0.8rem;
   margin-right: -0.8rem;
-  background: #ffffff09;
   border-radius: 4px;
   position: relative;
 }
@@ -595,7 +586,6 @@ footer {
    FRAGILE: do not tweak; the view-transition pseudo-tree is picky. */
 ::view-transition {
   perspective: 1000px;
-  background: #000;
   inset: 0;
 }
 
