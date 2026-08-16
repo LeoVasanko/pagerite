@@ -15,6 +15,7 @@ import StructureTree from './StructureTree.vue'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState, Compartment } from '@codemirror/state'
 import { placeholder } from '@codemirror/view'
+import { css } from '@codemirror/lang-css'
 import { html } from '@codemirror/lang-html'
 import { cmHighlight, cmTheme } from './cmtheme'
 import { slugify } from './slugify'
@@ -40,6 +41,11 @@ let everConnected = false
 let view = null      // CodeMirror for the banner HTML
 let syncing = false  // set while replacing the document programmatically
 const bannerPh = new Compartment()  // placeholder shows the inherited source
+
+let cssView = null      // CodeMirror for the site-wide custom CSS
+let cssSyncing = false  // set while replacing the CSS document programmatically
+const customCss = ref('')
+const cssEl = ref(null)
 
 // path -> node, for quick lookups (current title, delete checks).
 const flatMap = computed(() => {
@@ -114,6 +120,33 @@ function swapRegions(doc) {
     curBrand.remove()
   } else if (freshBrand) {
     document.getElementById('nav')?.before(document.importNode(freshBrand, true))
+  }
+  // Site-wide custom CSS is in <head> and must be swapped too.
+  const freshUserStyle = doc.getElementById('pagerite-user')
+  const curUserStyle = document.getElementById('pagerite-user')
+  if (freshUserStyle && curUserStyle) {
+    curUserStyle.textContent = freshUserStyle.textContent
+  } else if (freshUserStyle) {
+    document.head.appendChild(document.importNode(freshUserStyle, true))
+  } else if (curUserStyle) {
+    curUserStyle.remove()
+  }
+  // Theme and other public stylesheets live in <head> and must be kept in
+  // sync; editor-only stylesheets are preserved. Diff-based: unchanged
+  // sheets keep their elements, so their @keyframes are never torn down
+  // (re-creating keyframes would replay the editor's slide-in animation).
+  const curLinks = [...document.head.querySelectorAll('link[rel="stylesheet"]')]
+    .filter((l) => !l.dataset.pagerite)
+  const freshHrefs = [...doc.head.querySelectorAll('link[rel="stylesheet"]')]
+    .map((l) => l.href)
+  for (const link of curLinks) {
+    if (!freshHrefs.includes(link.href)) link.remove()
+  }
+  const have = new Set(
+    [...document.head.querySelectorAll('link[rel="stylesheet"]')].map((l) => l.href),
+  )
+  for (const link of doc.head.querySelectorAll('link[rel="stylesheet"]')) {
+    if (!have.has(link.href)) document.head.appendChild(document.importNode(link, true))
   }
   document.title = doc.title
 }
@@ -243,10 +276,18 @@ async function commitPending() {
 // Edits apply to the live page immediately and save while typing. An
 // empty brand removes the header link and the title suffix entirely.
 const brand = ref('')
+const theme = ref('purple')
+const THEME_OPTIONS = [
+  { value: '', label: 'none' },
+  { value: 'purple', label: 'purple' },
+]
 
 async function loadSettings() {
   try {
-    brand.value = (await (await fetch('/_api/settings')).json()).brand
+    const s = await (await fetch('/_api/settings')).json()
+    brand.value = s.brand
+    theme.value = s.theme || ''
+    customCss.value = s.custom_css || ''
   } catch { /* keep default */ }
 }
 
@@ -277,17 +318,74 @@ function onBrandInput() {
   debounce('brand', saveBrand)
 }
 
-async function saveBrand() {
+async function saveSettings(opts = {}) {
   const res = await fetch('/_api/settings', {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ brand: brand.value }),
+    body: JSON.stringify({
+      brand: brand.value,
+      theme: theme.value,
+      custom_css: customCss.value,
+      ...opts,
+    }),
   })
   if (res.ok) {
     saveError.value = ''
   } else {
     saveError.value = '⚠️ changes could not be saved'
   }
+}
+
+function saveBrand() {
+  saveSettings()
+}
+
+async function onThemeChange() {
+  await saveSettings()
+  if (import.meta.env.DEV) {
+    // Dev: styles are Vite-injected <style> tags, not <link>s, so the
+    // stylesheet sync in swapRegions can't switch themes. Drop the old
+    // theme's injected styles and import the new theme module instead.
+    for (const el of document.head.querySelectorAll('style[data-vite-dev-id]')) {
+      if (el.dataset.viteDevId.includes('/themes/')) el.remove()
+    }
+    if (theme.value) {
+      await import(/* @vite-ignore */ `/src/assets/themes/${theme.value}/theme.css`)
+    }
+  }
+  loadPlain(path.value)
+}
+
+// --- Site-wide custom CSS --------------------------------------------------
+// Edits apply to the live page immediately and save while typing.
+function applyCustomCss(css) {
+  let el = document.getElementById('pagerite-user')
+  if (css.trim()) {
+    if (!el) {
+      el = document.createElement('style')
+      el.id = 'pagerite-user'
+      document.head.append(el)
+    }
+    el.textContent = css
+  } else if (el) {
+    el.remove()
+  }
+}
+
+function onCustomCssInput() {
+  applyCustomCss(customCss.value)
+  debounce('custom-css', saveCustomCss, 400)
+}
+
+function saveCustomCss() {
+  saveSettings()
+}
+
+function setCssDocument(text) {
+  cssSyncing = true
+  cssView.dispatch({ changes: { from: 0, to: cssView.state.doc.length, insert: text } })
+  cssSyncing = false
+  customCss.value = text
 }
 
 // Two-step delete (no dialogs): the first click arms the row's button for
@@ -548,9 +646,8 @@ function connect() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   refreshPages()
-  loadSettings()
   connect()
   view = new EditorView({
     state: EditorState.create({
@@ -572,7 +669,30 @@ onMounted(() => {
     }),
     parent: bannerEl.value,
   })
+  cssView = new EditorView({
+    state: EditorState.create({
+      doc: '',
+      extensions: [
+        basicSetup,
+        css(),
+        cmTheme,
+        cmHighlight,
+        EditorView.lineWrapping,
+        placeholder('Site styling CSS'),
+        EditorView.updateListener.of((u) => {
+          if (u.docChanged && !cssSyncing) {
+            customCss.value = cssView.state.doc.toString()
+            onCustomCssInput()
+          }
+        }),
+      ],
+    }),
+    parent: cssEl.value,
+  })
   addEventListener('keydown', onKeydown)
+  await loadSettings()
+  setCssDocument(customCss.value)
+  applyCustomCss(customCss.value)
 })
 
 onUnmounted(() => {
@@ -584,6 +704,7 @@ onUnmounted(() => {
     ws.close()
   }
   view?.destroy()
+  cssView?.destroy()
   removeEventListener('keydown', onKeydown)
 })
 </script>
@@ -605,7 +726,18 @@ onUnmounted(() => {
           placeholder="Site name (header link and window title)"
           @input="onBrandInput"
         />
+        <select
+          v-model="theme"
+          class="text-input theme-select"
+          title="Theme"
+          @change="onThemeChange"
+        >
+          <option v-for="opt in THEME_OPTIONS" :key="opt.value" :value="opt.value">
+            {{ opt.label }}
+          </option>
+        </select>
       </label>
+      <div ref="cssEl" class="css-cm" />
     </section>
 
     <section class="block" @paste="onBannerPaste">
@@ -727,6 +859,11 @@ onUnmounted(() => {
   border-radius: 4px;
 }
 
+.theme-select {
+  flex: 0 0 auto;
+  width: auto;
+}
+
 /* Small CodeMirror window for the banner HTML; scrolls internally. */
 .banner-cm {
   border: 1px solid var(--line);
@@ -745,6 +882,26 @@ onUnmounted(() => {
 
 /* No line numbers / gutter chrome. */
 .banner-cm :deep(.cm-gutters) {
+  display: none;
+}
+
+/* CodeMirror window for site-wide custom CSS. */
+.css-cm {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.css-cm :deep(.cm-editor) {
+  max-height: 12rem;
+  font-size: 0.85rem;
+}
+
+.css-cm :deep(.cm-scroller) {
+  overflow: auto;
+}
+
+.css-cm :deep(.cm-gutters) {
   display: none;
 }
 

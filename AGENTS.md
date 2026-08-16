@@ -59,7 +59,11 @@ not for the public pages. See `docs/design-principles.md` for the design.
     and embedded in page ETags so nav-affecting changes invalidate caches.
     `Data.brand` is the site name (header link + `<title>` suffix), editable
     in the site editor via `/_api/settings`; empty = no header link and
-    no `<title>` suffix.
+    no `<title>` suffix. `Data.theme` is the active theme name (empty =
+    none/base only); themes live in `frontend/src/assets/themes/{theme}`.
+    `Data.custom_css` is raw trusted CSS injected inline in every page
+    `<head>` (id `pagerite-user`) and swapped during fetch-navigation;
+    editable in the site editor.
   - `markdown.py` — markdown-it-py renderer (html passthrough + attrs,
     footnote, deflist, tasklists plugins). Custom image rule: relative srcs
     resolve against the page path, titled images become figures.
@@ -83,8 +87,8 @@ not for the public pages. See `docs/design-principles.md` for the design.
     - `assets/` — shared styles and data files built by Vite and served hashed
       under `/_assets/`: `pagerite.css` (base layout + conservative variables),
       `themes/purple/theme.css` (the purple/dark theme override, including its
-      own `banner.svg`), `pygments.css`, and `fonts/` (self-hosted
-      Fraunces/Literata/Fira Code variable woff2). The `::view-transition*` block at the end of `pagerite.css` (from
+      own `banner.svg`), `pygments.css`, and `fonts/` (self-hosted Source
+      Sans 3/Source Serif 4/Inter/Montserrat/Fira Code variable woff2). The `::view-transition*` block at the end of `pagerite.css` (from
       termotohtori.fi) is fragile — do not tweak.
     - Vite builds ES-module `.js` outputs; the backend renders `<script
       type="module">` for them (module scripts defer by default).
@@ -97,13 +101,16 @@ not for the public pages. See `docs/design-principles.md` for the design.
   (CodeMirror + server-rendered preview over WebSocket `/_api/ws/editor`,
   previewing into the visible article; editor scroll drives document
   scroll) opened by the article pen — it edits content and title only,
-  never the path — and `SiteEditor.vue` (site brand + banner HTML edited in
-  a small CodeMirror window and previewed into `#page-banner` + vue-draggable structure tree with
-  always-editable title/slug inputs per row) opened by
-  the banner pen — everything saves immediately as you edit (brand/title
-  debounced, slug on commit since it renames the path), tree rows navigate
-  in place without transitions when focused, and the front page is a
-  root-only row whose empty slug is editable like any other. Every
+  never the path — and `SiteEditor.vue` (site brand + theme selector +
+  site-wide custom CSS + banner HTML edited in small CodeMirror windows;
+  banner previewed into `#page-banner`, CSS injected into
+  `<head id="pagerite-user">`) + vue-draggable structure tree with
+  always-editable title/slug inputs per row, opened by the banner pen —
+  everything saves immediately as you edit (brand/title/CSS debounced,
+  slug on commit since it renames the path), theme change swaps the
+  stylesheet in place, tree rows navigate in place without transitions when
+  focused, and the front page is a root-only row whose empty slug is
+  editable like any other. Every
   non-empty list (and the root) ends with a non-draggable ➕ footer row
   (vuedraggable `#footer` slot): clicking it starts a new pending page at
   that level, and while dragging it is the list's "end of list" drop
@@ -125,7 +132,15 @@ not for the public pages. See `docs/design-principles.md` for the design.
   `frontend/public/favicon.ico` lands at the build root and is served at
   `/favicon.ico`). JS inputs are `src/main.js` and `src/pagerite.js`; there
   is no `index.html` source (it would shadow `/` and turn missing dev paths
-  into an empty Vue shell). All outputs are ES modules.
+  into an empty Vue shell). All outputs are ES modules. The build sets
+  `preserveEntrySignatures: 'exports-only'` because main.js is consumed
+  via dynamic `import()` for its `openEditor`/`closeEditor` exports — Vite
+  app builds otherwise strip unused entry exports, leaving dead edit pens.
+  In dev the backend links no stylesheets (Vite injects them from JS); the
+  active theme reaches the page as `<meta name="pagerite:theme">` and
+  pagerite.js imports that theme's CSS, while a theme switch in the site
+  editor swaps the Vite-injected `<style data-vite-dev-id>` tags (the
+  `<link>` sync used in prod is a no-op in dev).
   vite-plugin-fastapi.js has an
   auto-upgrade marker — edit `vite.config.js`, not the plugin.
 - `docs/` — design documentation.

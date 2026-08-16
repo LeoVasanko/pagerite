@@ -79,6 +79,12 @@ class Data(msgspec.Struct):
     #: Site name shown in the header and <title> suffix; editable in the
     #: site editor. Empty = no brand link in the header, no title suffix.
     brand: str = "Pagerite"
+    #: Active theme name (empty = none/base only). Themes live in
+    #: frontend/src/assets/themes/{theme}/theme.css.
+    theme: str = "purple"
+    #: Raw site-wide custom CSS, injected inline in every page <head>.
+    #: Trusted author content; not sanitized.
+    custom_css: str = ""
     #: Legacy flat page store (pre-tree databases); migrated into `menu`
     #: on startup, then cleared. Never written otherwise.
     pages: dict[str, Page] = {}

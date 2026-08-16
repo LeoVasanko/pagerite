@@ -281,14 +281,16 @@ async def update_structure(op: StructureOp) -> None:
 
 @app.get("/_api/settings")
 async def get_settings() -> dict[str, str]:
-    """Site-wide settings (the brand text)."""
-    return {"brand": data.brand}
+    """Site-wide settings (brand, theme and custom CSS)."""
+    return {"brand": data.brand, "theme": data.theme, "custom_css": data.custom_css}
 
 
 class SettingsIn(BaseModel):
     """Payload for updating site-wide settings."""
 
     brand: str
+    theme: str
+    custom_css: str
 
 
 @app.put("/_api/settings", status_code=204)
@@ -296,6 +298,8 @@ async def put_settings(settings: SettingsIn) -> None:
     """Update site-wide settings; bumps the version so ETags invalidate."""
     with kanta.transaction("update settings"):
         data.brand = settings.brand
+        data.theme = settings.theme
+        data.custom_css = settings.custom_css
         data.version += 1
 
 
@@ -570,7 +574,7 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
     path = path.strip("/")
     if path and _is_reserved(path):
         # Reserved slug shape: never content — no tree lookup.
-        return HTMLResponse(views.render_not_found(data.menu, path, data.brand), 404)
+        return HTMLResponse(views.render_not_found(data.menu, path, data.brand, data.custom_css, data.theme), 404)
     chain = resolve(data.menu, path)
     node = chain[-1] if chain else None
     if node is not None and node.published and node.content is not None:
@@ -580,17 +584,17 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
         if request.headers.get("if-none-match") == etag:
             return Response(status_code=304)
         return HTMLResponse(
-            views.render_page(data.menu, path, data.brand),
+            views.render_page(data.menu, path, data.brand, data.custom_css, data.theme),
             headers={"etag": etag},
         )
     if node is not None and node.published and node.content is None:
         # Category label without a landing page: placeholder with the pen
         # to create it (404 — no page here, but the node is real).
-        return HTMLResponse(views.render_category(data.menu, path, data.brand), 404)
+        return HTMLResponse(views.render_category(data.menu, path, data.brand, data.custom_css, data.theme), 404)
     if node is None and not path:
         # No front page (no top-level node with slug ""): "/" opens the
         # first item of the navigation instead.
         for slug, item in sorted_nodes(data.menu):
             if item.published:
                 return RedirectResponse(f"/{slug}")
-    return HTMLResponse(views.render_not_found(data.menu, path, data.brand), 404)
+    return HTMLResponse(views.render_not_found(data.menu, path, data.brand, data.custom_css, data.theme), 404)

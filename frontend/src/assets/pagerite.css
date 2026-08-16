@@ -12,6 +12,9 @@
   --accent: #0056b3;
   --accent2: #003d80;
   --line: #0000001a;
+  --font-body: "Source Sans 3", system-ui, sans-serif;
+  --font-heading: "Source Serif 4", Georgia, serif;
+  --font-code: "Fira Code", ui-monospace, monospace;
   /* Width of the docked editor panel (used both here for shifting the page
      and in the Vue editor's own styles). */
   --editor-w: min(46rem, 50vw);
@@ -26,9 +29,12 @@ html {
 }
 
 body {
-  font-family: "Literata", Georgia, serif;
+  font-family: var(--font-body);
   font-size: 1.05rem;
   line-height: 1.65;
+  /* Tabular numerals wherever the active font supports them; avoids
+     numbers jumping in width as counters/values change. */
+  font-variant-numeric: tabular-nums;
   margin: 0;
   background: var(--bg);
   color: var(--text);
@@ -79,7 +85,7 @@ body {
 }
 
 #brand {
-  font-family: "Fraunces", serif;
+  font-family: var(--font-heading);
   font-weight: 700;
   font-size: 2.4rem;
   text-decoration: none;
@@ -257,7 +263,7 @@ main {
 article h1,
 article h2,
 article h3 {
-  font-family: "Fraunces", serif;
+  font-family: var(--font-heading);
   font-weight: 600;
   line-height: 1.25;
 }
@@ -463,7 +469,7 @@ pre:hover .copy,
 }
 
 code {
-  font-family: "Fira Code", ui-monospace, monospace;
+  font-family: var(--font-code);
   font-size: 0.88em;
 }
 

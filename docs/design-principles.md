@@ -82,8 +82,9 @@ evolves.
   ships a `banner.svg`; the base stylesheet falls back to a plain gradient).
 - **Fetch-navigation.** Links are plain `<a href>`; a small script
   (`frontend/src/pagerite.js`) intercepts same-origin clicks, fetches the
-  page, and swaps the `#page-banner`, `#nav`, `#sidebar` and `#main` regions
-  and the document title, keeping `<head>` and the layout chrome. Without JS
+  page, and swaps the `#page-banner`, `#nav`, `#sidebar` and `#main` regions,
+  the document title, and the site-wide custom CSS (`<style id="pagerite-user">`
+  in `<head>`), keeping the rest of `<head>` and the layout chrome. Without JS
   everything works as normal page loads. Scripts inside fetched banner and
   content regions are re-created so they execute. Swaps run inside `document.startViewTransition` for a rotating
   cube page transition (CSS adapted from termotohtori.fi — the
@@ -132,14 +133,16 @@ evolves.
 
 - The base stylesheet `frontend/src/assets/pagerite.css` provides the layout,
   typography and interaction rules with conservative CSS variables. A theme layer
-  (`frontend/src/assets/themes/purple/theme.css` by default) overrides those
-  variables and adds the visual styling. Vue may add per-component styles on top
+  (`frontend/src/assets/themes/purple/theme.css`) overrides those variables and
+  adds the visual styling; `Data.theme` selects the active theme (empty = none/base
+  only) and the site editor can switch it. Vue may add per-component styles on top
   where needed.
 - Fonts, the shared stylesheet, pygments styles and the theme's banner SVG
   live under `frontend/src/assets/` (the banner SVG under
   `themes/purple/`) and are emitted as hashed assets under `/_assets/`
-  (Fraunces for headings, Literata for body, Fira Code for code — variable
-  woff2 files with local `@font-face`). No third-party requests.
+  (Source Serif 4 for headings, Source Sans 3 for body, Fira Code for code
+  by default; Inter and Montserrat kept as variable woff2 options with
+  local `@font-face`). No third-party requests.
 
 ## Editing
 
@@ -151,10 +154,13 @@ evolves.
     sidebar hides while editing. Preview renders server-side per keystroke
     (no debouncing) straight into the visible article's heading and body.
   - **Site mode** — the 🖊️ on the banner opens a panel with the site
-    **brand** (applied to the header live), the page's **banner HTML**
-    field (previewed into the real banner region, so you see exactly
-    which banner you're editing) and the **structure tree**. Everything
-    saves immediately as you edit — no save button, no edit mode.
+    **brand** (applied to the header live), a **theme** selector (swapping
+    the theme stylesheet in place), a **site-wide custom CSS** field (injected
+    into `<style id="pagerite-user">` in the live page head and swapped during
+    fetch-navigation), the page's **banner HTML** field (previewed into the
+    real banner region, so you see exactly which banner you're editing) and
+    the **structure tree**. Everything saves immediately as you edit — no
+    save button, no edit mode.
 - Clicking a pen again closes the editor (without saving; a dirty preview
   reloads the page). The pens are `<button>`s wired up by `pagerite.js` —
   editing is an action, not a navigation. The editor's WebSocket
@@ -191,7 +197,7 @@ evolves.
   avoiding REST polling and races. Rendering always stays server-side.
 - A REST API also exists for scripting, all under `/_api/`:
   `GET pages` (the full tree), `PUT/DELETE pages/{path}`,
-  `GET/PUT settings` (site brand), `POST structure` (reorder/move/
-  retitle), file upload/removal via `PUT/DELETE files/{name}`.
+  `GET/PUT settings` (site brand, theme and custom CSS), `POST structure`
+  (reorder/move/retitle), file upload/removal via `PUT/DELETE files/{name}`.
 - On startup, seed pages from `pagerite/seed.py` are added **only if
   missing** — existing user content is never overwritten.

@@ -7,7 +7,10 @@
 (() => {
   if (import.meta.env.DEV) {
     import("./assets/pagerite.css");
-    import("./assets/themes/purple/theme.css");
+    // The theme is selectable; the backend names the active one in a meta
+    // tag (dev links no stylesheets — Vite injects them from JS).
+    const theme = document.querySelector('meta[name="pagerite:theme"]')?.content;
+    if (theme) import(/* @vite-ignore */ `./assets/themes/${theme}/theme.css`);
   }
 
   const REGIONS = ["page-banner", "nav", "sidebar", "main"];
@@ -188,6 +191,17 @@
         const el = document.getElementById(id);
         el.replaceWith(document.importNode(doc.getElementById(id), true));
       }
+      // Site-wide custom CSS lives in <head id="pagerite-user"> and must be
+      // kept in sync across fetch-navigations.
+      const oldUserStyle = document.getElementById("pagerite-user");
+      const newUserStyle = doc.getElementById("pagerite-user");
+      if (oldUserStyle && newUserStyle) {
+        oldUserStyle.textContent = newUserStyle.textContent;
+      } else if (newUserStyle) {
+        document.head.appendChild(document.importNode(newUserStyle, true));
+      } else if (oldUserStyle) {
+        oldUserStyle.remove();
+      }
       document.title = doc.title;
       // Banners may contain scripts (canvas etc.), content pages may too.
       runScripts(document.getElementById("page-banner"));
@@ -235,6 +249,7 @@
           const link = document.createElement("link");
           link.rel = "stylesheet";
           link.href = css;
+          link.dataset.pagerite = "editor-css";
           document.head.append(link);
         }
       }
@@ -242,7 +257,7 @@
       editorModule = import(/* @vite-ignore */ editBtn.dataset.editorSrc);
       editorModule
         .then((m) => m.openEditor(path, { mode }))
-        .catch(() => {});
+        .catch((e) => console.error("editor load failed:", e));
       return;
     }
     const a = ev.target.closest("a[href]");

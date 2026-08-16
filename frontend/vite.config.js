@@ -32,6 +32,10 @@ export default defineConfig({
     manifest: true,
     assetsDir: '_assets',
     rollupOptions: {
+      // main.js is dynamic-imported by the public page (pagerite.js) for
+      // its openEditor/closeEditor exports — keep them in the bundle
+      // (app builds strip unused entry exports by default).
+      preserveEntrySignatures: 'exports-only',
       input: {
         main: fileURLToPath(new URL('./src/main.js', import.meta.url)),
         pagerite: fileURLToPath(new URL('./src/pagerite.js', import.meta.url)),

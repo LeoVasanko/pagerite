@@ -274,7 +274,7 @@ body.tree-dragging .treelist {
 }
 
 .slug-edit {
-  font-family: "Fira Code", monospace;
+  font-family: var(--font-code);
   color: var(--muted);
 }
 

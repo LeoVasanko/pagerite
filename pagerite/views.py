@@ -27,10 +27,8 @@ BUILD = Path(__file__).with_name("frontend-build")
 
 # Shared CSS built as separate entries so the backend can link base and theme
 # independently. Order matters: base first, theme overrides it.
-_SHARED_CSS = {
-    "src/assets/pagerite.css": "pagerite",
-    "src/assets/themes/purple/theme.css": "pagerite-theme",
-}
+_BASE_CSS_KEY = "src/assets/pagerite.css"
+_THEME_CSS_KEY = "src/assets/themes/{theme}/theme.css"
 
 _manifest_cache: dict | None = None
 _asset_cache: dict[str, tuple] = {}
@@ -43,7 +41,15 @@ def _manifest() -> dict:
     return _manifest_cache
 
 
-def _shared_css_urls(vite_url: str | None) -> list[str]:
+def _css_keys(theme: str) -> list[str]:
+    """Manifest keys for the stylesheets to load for ``theme`` (empty = none)."""
+    keys = [_BASE_CSS_KEY]
+    if theme:
+        keys.append(_THEME_CSS_KEY.format(theme=theme))
+    return keys
+
+
+def _shared_css_urls(vite_url: str | None, theme: str) -> list[str]:
     """URLs for the base and theme stylesheets.
 
     In dev the JS entries import these files, so Vite injects them; the
@@ -52,10 +58,10 @@ def _shared_css_urls(vite_url: str | None) -> list[str]:
     if vite_url:
         return []
     manifest = _manifest()
-    return [f"/{manifest[key]['file']}" for key in _SHARED_CSS]
+    return [f"/{manifest[key]['file']}" for key in _css_keys(theme)]
 
 
-def _editor_css_url(vite_url: str | None) -> str | None:
+def _editor_css_url(vite_url: str | None, theme: str) -> str | None:
     """URL for the editor-specific stylesheet (Vue component styles).
 
     This is linked by the public-page edit pen so the editor styles are
@@ -65,24 +71,37 @@ def _editor_css_url(vite_url: str | None) -> str | None:
         return None
     manifest = _manifest()
     entry = manifest["src/main.js"]
-    shared_files = {manifest[key]["file"] for key in _SHARED_CSS}
+    shared_files = {manifest[key]["file"] for key in _css_keys(theme)}
     for css in entry.get("css", []):
         if css not in shared_files:
             return f"/{css}"
     return None
 
 
-def _layout(urls: list[str], modules: list[str] = ()) -> Template:
+def _layout(
+    urls: list[str],
+    modules: list[str] = (),
+    custom_css: str = "",
+    theme: str = "",
+) -> Template:
     """Page layout template with standard asset URLs and ES-module scripts.
 
     Stylesheets use ``blocking="render"`` so the browser waits for them before
     showing the page, avoiding a flash of unstyled content.
+
+    The active theme is named in a meta tag so that in dev (where the
+    backend links no stylesheets and Vite injects them from JS) the
+    frontend entries know which theme CSS module to import.
     """
     doc = Document(E.Title, lang="en")
+    if theme:
+        doc.meta(name="pagerite:theme", content=theme)
     for url in urls:
         doc.link(rel="stylesheet", href=url, blocking="render")
     for src in modules:
         doc.script(src=src, type="module")
+    if custom_css.strip():
+        doc.style(custom_css, id="pagerite-user")
     return Template(
         doc
         .header(
@@ -212,7 +231,7 @@ def banner_source(menu: dict[str, Node], path: str) -> str | None:
     return None
 
 
-def _edit_attrs(path: str, mode: str = "page") -> dict:
+def _edit_attrs(path: str, mode: str = "page", theme: str = "") -> dict:
     """Attributes for a 🖊️ edit button.
 
     pagerite.js wires these buttons to dynamic-import the editor app
@@ -221,7 +240,7 @@ def _edit_attrs(path: str, mode: str = "page") -> dict:
     (the pen on the banner) edits the banner and site structure. They are
     buttons, not links: editing is an action, not a navigation.
     """
-    script, editor_css = _editor_assets()
+    script, editor_css = _editor_assets(theme)
     return {
         "type": "button",
         "class": "edit-link" if mode == "page" else "edit-link banner-edit-link",
@@ -247,25 +266,37 @@ def page_content(menu: dict[str, Node], path: str) -> HTML:
     return HTML(str(doc))
 
 
-def render_page(menu: dict[str, Node], path: str, brand: str = SITE_NAME) -> str:
+def render_page(
+    menu: dict[str, Node],
+    path: str,
+    brand: str = SITE_NAME,
+    custom_css: str = "",
+    theme: str = "",
+) -> str:
     """Render a full HTML page for the slug path."""
     node = resolve(menu, path)[-1]
     title = _title(path.rpartition("/")[2], node)
-    scripts, styles = _page_assets()
+    scripts, styles = _page_assets(theme)
     return str(
-        _layout(styles, scripts)(
+        _layout(styles, scripts, custom_css, theme)(
             Title=f"{title} – {brand}" if brand else title,
             Brand=_brand_link(brand),
             Nav=nav_html(menu, path),
             Sidebar=sidebar_html(menu, path),
             Banner=banner_html(menu, path),
-            BannerEdit=HTML(str(E.button("🖊️", **_edit_attrs(path, "site")))),
+            BannerEdit=HTML(str(E.button("🖊️", **_edit_attrs(path, "site", theme)))),
             Main=page_content(menu, path),
         ),
     )
 
 
-def render_category(menu: dict[str, Node], path: str, brand: str = SITE_NAME) -> str:
+def render_category(
+    menu: dict[str, Node],
+    path: str,
+    brand: str = SITE_NAME,
+    custom_css: str = "",
+    theme: str = "",
+) -> str:
     """Render the placeholder for a content-less category label (404).
 
     The node exists in the tree but has no page of its own. Nav links
@@ -278,47 +309,53 @@ def render_category(menu: dict[str, Node], path: str, brand: str = SITE_NAME) ->
     with doc:
         doc.h1(title)
         # Editing works here too: the pen creates this category's page.
-        doc.button("🖊️", **_edit_attrs(path))
+        doc.button("🖊️", **_edit_attrs(path, "page", theme))
         doc.p(
             "Pages in this section are listed in the menu on the left."
         )
-    scripts, styles = _page_assets()
+    scripts, styles = _page_assets(theme)
     return str(
-        _layout(styles, scripts)(
+        _layout(styles, scripts, custom_css, theme)(
             Title=f"{title} – {brand}" if brand else title,
             Brand=_brand_link(brand),
             Nav=nav_html(menu, path),
             Sidebar=sidebar_html(menu, path),
             Banner=banner_html(menu, path),
-            BannerEdit=HTML(str(E.button("🖊️", **_edit_attrs(path, "site")))),
+            BannerEdit=HTML(str(E.button("🖊️", **_edit_attrs(path, "site", theme)))),
             Main=HTML(str(doc)),
         ),
     )
 
 
-def render_not_found(menu: dict[str, Node], path: str, brand: str = SITE_NAME) -> str:
+def render_not_found(
+    menu: dict[str, Node],
+    path: str,
+    brand: str = SITE_NAME,
+    custom_css: str = "",
+    theme: str = "",
+) -> str:
     """Render a 404 page within the normal layout."""
     doc = E.article
     with doc:
         doc.h1("Not Found")
         # Editing works here too: this is how brand new pages get created.
-        doc.button("🖊️", **_edit_attrs(path))
+        doc.button("🖊️", **_edit_attrs(path, "page", theme))
         doc.p(f"No page at /{path}.")
-    scripts, styles = _page_assets()
+    scripts, styles = _page_assets(theme)
     return str(
-        _layout(styles, scripts)(
+        _layout(styles, scripts, custom_css, theme)(
             Title=f"Not Found – {brand}" if brand else "Not Found",
             Brand=_brand_link(brand),
             Nav=nav_html(menu, path),
             Sidebar=sidebar_html(menu, path),
             Banner=banner_html(menu, path),
-            BannerEdit=HTML(str(E.button("🖊️", **_edit_attrs(path, "site")))),
+            BannerEdit=HTML(str(E.button("🖊️", **_edit_attrs(path, "site", theme)))),
             Main=HTML(str(doc)),
         ),
     )
 
 
-def _page_assets() -> tuple[list[str], list[str]]:
+def _page_assets(theme: str) -> tuple[list[str], list[str]]:
     """Script and CSS URLs for public pages (pagerite entry).
 
     Dev mode loads the entry from the Vite dev server; production uses
@@ -326,18 +363,19 @@ def _page_assets() -> tuple[list[str], list[str]]:
     """
     vite_url = os.environ.get("PAGERITE_VITE_URL")
     if vite_url:
-        return [f"{vite_url}/src/pagerite.js"], _shared_css_urls(vite_url)
-    if "page" not in _asset_cache:
+        return [f"{vite_url}/src/pagerite.js"], _shared_css_urls(vite_url, theme)
+    key = f"page:{theme}"
+    if key not in _asset_cache:
         manifest = _manifest()
         entry = manifest["src/pagerite.js"]
-        _asset_cache["page"] = (
+        _asset_cache[key] = (
             [f"/{entry['file']}"],
-            _shared_css_urls(None),
+            _shared_css_urls(None, theme),
         )
-    return _asset_cache["page"]
+    return _asset_cache[key]
 
 
-def _editor_assets() -> tuple[list[str], str | None]:
+def _editor_assets(theme: str) -> tuple[list[str], str | None]:
     """Script URL and editor-specific CSS URL for the public-page edit pen.
 
     The shared CSS is already linked on the page, so the pen only needs the
@@ -346,8 +384,9 @@ def _editor_assets() -> tuple[list[str], str | None]:
     vite_url = os.environ.get("PAGERITE_VITE_URL")
     if vite_url:
         return [f"{vite_url}/@vite/client", f"{vite_url}/src/main.js"], None
-    if "editor" not in _asset_cache:
+    key = f"editor:{theme}"
+    if key not in _asset_cache:
         manifest = _manifest()
         entry = manifest["src/main.js"]
-        _asset_cache["editor"] = [f"/{entry['file']}"], _editor_css_url(None)
-    return _asset_cache["editor"]
+        _asset_cache[key] = [f"/{entry['file']}"], _editor_css_url(None, theme)
+    return _asset_cache[key]

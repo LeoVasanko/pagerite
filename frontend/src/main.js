@@ -5,8 +5,9 @@
 // - SiteEditor ("site" mode): pen on the banner — banner HTML editing
 //   (previewed into the real banner) and the site structure tree.
 if (import.meta.env.DEV) {
+  // Base styles only; the theme CSS is imported by pagerite.js (which
+  // always runs first — the editor opens from public pages).
   import("./assets/pagerite.css");
-  import("./assets/themes/purple/theme.css");
 }
 
 import { createApp } from 'vue'
@@ -29,6 +30,15 @@ export function openEditor(path, { mode = 'page' } = {}) {
     pagePath: path,
     onClose: closeEditor,
   }).mount(host)
+  // The slide-in (editor-slide-in in pagerite.css) is a one-shot open
+  // effect; once finished, drop it so that later stylesheet swaps (theme
+  // change re-creating @keyframes) cannot restart it.
+  const root = host.firstElementChild
+  root?.addEventListener('animationend', function done(e) {
+    if (e.target !== root) return
+    root.removeEventListener('animationend', done)
+    root.style.animation = 'none'
+  })
 }
 
 export function closeEditor() {
