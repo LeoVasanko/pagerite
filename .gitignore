@@ -1,3 +1,10 @@
+.*
+!.gitignore
+*.lock
+*.kantadb
+/pagerite/frontend-build
+package-lock.json
+
 # Python-generated files
 __pycache__/
 *.py[oc]
@@ -5,11 +12,3 @@ build/
 dist/
 wheels/
 *.egg-info
-
-# Virtual environments
-.venv
-.ruff_cache/
-/pagerite/frontend-build
-
-# Site
-*.kantadb
