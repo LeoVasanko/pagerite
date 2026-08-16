@@ -3,8 +3,8 @@
 The site structure is a tree of Nodes. Every node is a menu label with a
 configurable title and slug (its key in the parent's ``children``); the
 URL path is the chain of slugs from the top level. ``content`` is the
-node's Markdown page, or None for a pure category label, whose URL
-redirects to the first child page.
+node's Markdown page, or None for a pure category label, whose URL renders
+a placeholder page while nav links point at its first child.
 """
 
 from datetime import UTC, datetime
@@ -29,7 +29,7 @@ class Node(msgspec.Struct, omit_defaults=True):
     title: str = ""
     order: float = 0
     #: Markdown source of the node's page; None = pure category label
-    #: (redirects to the first child page).
+    #: (its URL renders a placeholder page).
     content: str | None = None
     #: Raw HTML for the header banner (img, styled div, canvas+script...).
     #: Empty inherits the nearest ancestor's banner, front page last.

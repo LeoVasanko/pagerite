@@ -8,8 +8,8 @@
 //
 // The tree comes from the server nested (GET /_/api/pages); every node is
 // real — a label with a title and slug, with content (landing page) or
-// without (category redirecting to its first child). The front page is a
-// top-level row with an empty slug, not the parent of the others.
+// without (category whose URL renders a placeholder page). The front page
+// is a top-level row with an empty slug, not the parent of the others.
 import { computed, onMounted, onUnmounted, provide, ref } from 'vue'
 import StructureTree from './StructureTree.vue'
 import { EditorView, basicSetup } from 'codemirror'
@@ -125,8 +125,8 @@ async function loadPlain(p) {
     const res = await fetch(finalUrl)
     const type = res.headers.get('content-type') || ''
     if (!type.includes('text/html')) return
-    // Category URLs redirect to their first child; reflect that. A 404
-    // layout is fine too (new pages are created by editing them).
+    // Category and missing URLs render a placeholder 404 page — fine to
+    // swap in (new pages are created by editing them).
     if (res.redirected) finalUrl = res.url
     doc = new DOMParser().parseFromString(await res.text(), 'text/html')
   } catch { return }
@@ -239,22 +239,6 @@ async function commitPending() {
   navigate(newPath)
 }
 
-// Give a content-less category a landing page (empty page at its path).
-async function addContent(node) {
-  const res = await fetch(`/_/api/pages/${node.path}`, {
-    method: 'PUT',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ title: node.title, markdown: '', published: node.published }),
-  })
-  if (res.ok) {
-    saveError.value = ''
-    await refreshPages()
-    navigate(node.path)
-  } else {
-    saveError.value = '⚠️ changes could not be saved'
-  }
-}
-
 // --- Site-wide brand (header link + <title> suffix) ----------------------
 // Edits apply to the live page immediately and save while typing. An
 // empty brand removes the header link and the title suffix entirely.
@@ -330,8 +314,8 @@ async function removePage(node) {
     refreshPages()
     const p = node.path
     if (p === path.value || (p && path.value.startsWith(`${p}/`))) {
-      // The current page was deleted — or reduced to a category that now
-      // redirects to its first child. Either way, re-render from the server.
+      // The current page was deleted — or reduced to a category, which now
+      // renders a placeholder page. Either way, re-render from the server.
       if (node.children.length) loadPlain(path.value)
       else navigate('')
     } else {
@@ -429,7 +413,6 @@ provide('structureHandlers', {
   reorder: onReorder,
   titleInput: onTitleInput,
   commitSlug,
-  addContent,
   commitPending,
   discardPending,
   newPage,

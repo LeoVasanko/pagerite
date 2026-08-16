@@ -316,9 +316,15 @@ article ul ul ul li::before {
   content: "🔹";
 }
 
-/* Task lists render emoji checkmarks (see markdown.py), no diamond. */
+/* Task lists: real checkboxes (not emoji), clickable in the public page. */
 article .task-list-item::before {
   content: none;
+}
+
+article .task-list-item-checkbox {
+  cursor: pointer;
+  margin-inline-end: 0.35em;
+  vertical-align: middle;
 }
 
 article {

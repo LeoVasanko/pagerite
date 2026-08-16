@@ -39,9 +39,9 @@ not for the public pages. See `docs/design-principles.md` for the design.
     main level pages, not their parent); it cannot have children, and
     renaming its slug away leaves no front page ("/" redirects to the
     first nav item). `Node.content` is
-    the Markdown page, or None for a pure category label whose URL
-    redirects to its first child; every label's title and slug are
-    editable. Siblings order by the fractional `Node.order` key: a moved
+    the Markdown page, or None for a pure category label whose URL renders
+    a placeholder page (while nav links to it point at its first child);
+    every label's title and slug are editable. Siblings order by the fractional `Node.order` key: a moved
     item gets a fresh key relative to its new siblings, all others keep
     theirs. `resolve`/`find_slot` walk the tree by path; moves are slot
     detach/attach carrying the whole subtree. Legacy flat `Data.pages`
@@ -65,8 +65,8 @@ not for the public pages. See `docs/design-principles.md` for the design.
   - `views.py` — the shared page layout as an html5tagger `Template` with
     placeholders (`Title`, `Brand`, `Banner`, `Nav`, `Sidebar`, `Main`), nav
     rendering straight from the `Data.menu` tree (siblings sorted by
-    `Node.order`; content-less labels redirect to their first child via
-    `first_leaf`), and page/404 rendering. If the markdown contains its own h1, the page title
+    `Node.order`; nav links to content-less labels point at their first
+    child via `first_leaf`), and page/404 rendering. If the markdown contains its own h1, the page title
     is NOT rendered as an additional h1 (it still supplies <title> and nav
     labels). The navbar holds
     top-level items only; the current section's subitems go to a left
@@ -171,15 +171,12 @@ not for the public pages. See `docs/design-principles.md` for the design.
 - Keep dependencies minimal; add via `uv add` and mention it.
 - The public URL space belongs to content (pretty slugs at root). Reserve
   only `/_/` for the machinery (files, API, built assets, admin), plus
-  `/favicon.ico` from the build. Slugs are lowercase ASCII `[a-z0-9-]`
-  (the site editor filters input live via `slugify.js`, built on the
-  `transliteration` npm package — unicode folds to ASCII, spaces become
-  hyphens; an empty slug on a new page is derived from its title), may
-  not begin with `_` or `.`, and may not be a reserved file name
-  (`robots.txt`, `ads.txt`, `sitemap.xml`, `openapi.json`, `favicon.ico`,
-  `site.webmanifest`). The API rejects such paths with a human-readable
-  reason shown in the editor, and such URLs are never looked up as
-  content when serving.
+  `/favicon.ico` from the build. Slugs are lowercase ASCII letters, digits,
+  hyphens and underscores `[a-z0-9_-]` (the site editor filters input live
+  via `slugify.js`, built on the `transliteration` npm package — unicode
+  folds to ASCII, spaces become hyphens; an empty slug on a new page is
+  derived from its title), may not begin with `_` or `.`, and such URLs are
+  never looked up as content.
 - No auth in core code; trusted single author. Never add output
   sanitization "for safety" against the author — embedded HTML/scripts in
   Markdown are passed through deliberately.

@@ -13,6 +13,8 @@ page's own path (so `![alt](photo.avif)` in `/docs/design` is served from
 classes, e.g. `![alt](photo.avif "Caption"){.right}`.
 """
 
+import re
+
 from markdown_it import MarkdownIt
 from markdown_it.common.utils import escapeHtml
 from markdown_it.renderer import RendererHTML
@@ -28,6 +30,9 @@ from pygments.util import ClassNotFound
 # Styles in /_/assets/pygments-*.css match this formatter (regenerate:
 # HtmlFormatter(style="github-dark").get_style_defs("pre code"))
 _formatter = HtmlFormatter(style="github-dark", nowrap=True)
+
+
+_TASK_MARKER_RE = re.compile(r"^(\s*(?:>\s*)*(?:[-*+]|\d+\.)\s+)\[( |x|X)\](\s+|$)")
 
 
 def _highlight(text: str, lang: str, _attrs: str) -> str:
@@ -83,31 +88,37 @@ def _unwrap_lone_figures(state) -> None:
                 tokens[i + 1].hidden = True
 
 
-md = (
-    MarkdownIt("default", {"html": True, "highlight": _highlight})
-    .use(attrs_plugin)
-    .use(footnote_plugin)
-    .use(deflist_plugin)
-    .use(tasklists_plugin)
-)
-def _checkbox_emojis(state) -> None:
-    """Render task-list checkboxes as emoji instead of disabled inputs.
+def _tag_task_checkboxes(state) -> None:
+    """Tag rendered task-list checkboxes with a stable index.
 
-    A disabled <input> renders grey and washed out; a colored emoji
-    shows the state without any styling.
+    The public page and the editor preview use the index to identify which
+    `[ ]`/`[x]` marker in the Markdown source to toggle when a visitor
+    clicks the checkbox.
     """
+    index = 0
     for token in state.tokens:
         if token.type != "inline" or not token.children:
             continue
         for child in token.children:
             if child.type == "html_inline" and 'type="checkbox"' in child.content:
-                child.type = "text"
-                child.content = "✅" if "checked" in child.content else "⬜"
+                child.content = child.content.replace(
+                    'type="checkbox"',
+                    f'data-task-index="{index}" type="checkbox"',
+                    1,
+                )
+                index += 1
 
 
+md = (
+    MarkdownIt("default", {"html": True, "highlight": _highlight})
+    .use(attrs_plugin)
+    .use(footnote_plugin)
+    .use(deflist_plugin)
+    .use(tasklists_plugin, enabled=True)
+)
 md.add_render_rule("image", _image_rule)
 md.core.ruler.push("unwrap_lone_figures", _unwrap_lone_figures)
-md.core.ruler.push("checkbox_emojis", _checkbox_emojis)
+md.core.ruler.push("tag_task_checkboxes", _tag_task_checkboxes)
 
 
 def render(text: str, page_path: str = "") -> str:
@@ -123,3 +134,43 @@ def has_h1(text: str) -> bool:
     <title> and navigation labels).
     """
     return any(t.type == "heading_open" and t.tag == "h1" for t in md.parse(text))
+
+
+def toggle_task(text: str, index: int) -> str | None:
+    """Toggle the Nth task-list checkbox marker in ``text``.
+
+    Returns the modified Markdown source, or ``None`` if the index is out
+    of range or the marker could not be found.
+    """
+    tokens = md.parse(text, {"page_path": ""})
+    checkbox_lines: list[int | None] = []
+    for token in tokens:
+        if token.type == "inline" and token.children:
+            for child in token.children:
+                if child.type == "html_inline" and 'type="checkbox"' in child.content:
+                    checkbox_lines.append(token.map[0] if token.map else None)
+                    break
+
+    if not (0 <= index < len(checkbox_lines)):
+        return None
+    line_idx = checkbox_lines[index]
+    if line_idx is None or line_idx < 0:
+        return None
+
+    lines = text.splitlines(keepends=True)
+    if line_idx >= len(lines):
+        return None
+    line = lines[line_idx]
+
+    def repl(m: re.Match[str]) -> str:
+        prefix = m.group(1)
+        marker = m.group(2)
+        new_marker = "x" if marker.strip() == "" else " "
+        return f"{prefix}[{new_marker}]{m.group(3)}"
+
+    new_line = _TASK_MARKER_RE.sub(repl, line, count=1)
+    if new_line == line:
+        return None
+
+    lines[line_idx] = new_line
+    return "".join(lines)

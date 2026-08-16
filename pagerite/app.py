@@ -14,6 +14,7 @@ walking the tree (``resolve``), moves are slot detach/attach
 
 import mimetypes
 import os
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -37,7 +38,7 @@ from pagerite.data import (
     resolve,
     sorted_nodes,
 )
-from pagerite.markdown import has_h1, render
+from pagerite.markdown import has_h1, render, toggle_task
 
 DB_PATH = os.getenv("PAGERITE_DB", "pagerite.kanta")
 
@@ -80,6 +81,25 @@ def _ensure(menu: dict[str, Node], path: str) -> Node:
             nodes[seg] = node
         nodes = node.children
     return node
+
+
+def _remove_page_content(menu: dict[str, Node], path: str) -> None:
+    """Delete a page's markdown content.
+
+    A node with children becomes a content-less category label; a childless
+    node is removed entirely. Does nothing if the path does not exist.
+    """
+    slot = find_slot(menu, path)
+    if slot is None:
+        return
+    node = slot[0].get(slot[1])
+    if node is None:
+        return
+    if node.children:
+        node.content = None
+        node.modified = datetime.now(UTC)
+    else:
+        del slot[0][slot[1]]
 
 
 def _migrate_legacy() -> None:
@@ -179,18 +199,22 @@ async def save_page(path: str, page: PageIn) -> None:
     """Create or replace the page at a slug path ("" or "/" = front page).
 
     Missing ancestors are created as content-less category labels. Giving
-    a category markdown turns it into a landing page.
+    a category markdown turns it into a landing page. An empty markdown
+    string (after stripping) deletes the page instead.
     """
     path = path.strip("/")
     _check_reserved(path)
     with kanta.transaction("save page", extra=path):
-        node = _ensure(data.menu, path)
-        node.title = page.title
-        node.content = page.markdown
-        node.published = page.published
-        if page.banner is not None:
-            node.banner = page.banner
-        node.modified = datetime.now(UTC)
+        if page.markdown.strip() == "":
+            _remove_page_content(data.menu, path)
+        else:
+            node = _ensure(data.menu, path)
+            node.title = page.title
+            node.content = page.markdown
+            node.published = page.published
+            if page.banner is not None:
+                node.banner = page.banner
+            node.modified = datetime.now(UTC)
         data.version += 1
 
 
@@ -275,6 +299,44 @@ async def put_settings(settings: SettingsIn) -> None:
         data.version += 1
 
 
+class ToggleTaskIn(BaseModel):
+    """Payload for toggling one task-list checkbox."""
+
+    path: str
+    index: int
+    markdown: str | None = None
+
+
+@app.post("/_/api/toggle-task")
+async def toggle_task_endpoint(body: ToggleTaskIn) -> dict[str, str]:
+    """Toggle the Nth task-list checkbox in a page's Markdown source.
+
+    If ``markdown`` is provided the source is left untouched and the toggled
+    Markdown is returned (used while the page editor is open, so the live
+    CodeMirror document can be updated). Otherwise the stored page at
+    ``path`` is read, toggled, and saved.
+    """
+    path = body.path.strip("/")
+    _check_reserved(path)
+    if body.markdown is not None:
+        new_markdown = toggle_task(body.markdown, body.index)
+        if new_markdown is None:
+            raise HTTPException(400, "invalid task index")
+        return {"markdown": new_markdown}
+    chain = resolve(data.menu, path)
+    node = chain[-1] if chain else None
+    if node is None or node.content is None:
+        raise HTTPException(404, "no such page")
+    new_markdown = toggle_task(node.content, body.index)
+    if new_markdown is None:
+        raise HTTPException(400, "invalid task index")
+    with kanta.transaction("toggle task", extra=path):
+        node.content = new_markdown
+        node.modified = datetime.now(UTC)
+        data.version += 1
+    return {"markdown": new_markdown}
+
+
 @app.put("/_/api/files/{name}")
 async def upload_file(name: str, request: Request) -> dict[str, str]:
     """Store an upload (image, video...) in the content-addressed store.
@@ -342,32 +404,26 @@ async def delete_page(path: str) -> None:
         data.version += 1
 
 
+_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+
+
 def _is_reserved(path: str) -> bool:
-    """Slug shape that content may never use: any segment beginning with
-    "_" or "." ("/_/" is the machinery prefix; dot-segments look like
-    hidden or filesystem paths)."""
-    return any(seg.startswith(("_", ".")) for seg in path.split("/"))
-
-
-# Well-known root file names that content may not occupy (they would
-# shadow real files or carry special meaning to crawlers/clients).
-RESERVED_FILES = {
-    "robots.txt",
-    "ads.txt",
-    "sitemap.xml",
-    "openapi.json",
-    "favicon.ico",
-    "site.webmanifest",
-}
+    """Slug shape that content may never use: each segment must be lower-case
+    ASCII letters, digits, hyphens and underscores (underscores may not be
+    the first character), and dots are never allowed.
+    """
+    if path == "":
+        return False
+    return any(not _SLUG_RE.match(seg) for seg in path.split("/"))
 
 
 def _check_reserved(path: str) -> None:
-    """Reject configured slugs beginning with "_" or ".", and reserved
-    file names at the root."""
+    """Reject paths that do not follow the slug charset."""
     if _is_reserved(path):
-        raise HTTPException(400, 'slugs cannot begin with "_" or "."')
-    if path in RESERVED_FILES:
-        raise HTTPException(400, f'"{path}" is a reserved file name')
+        raise HTTPException(
+            400,
+            'slugs may only use a-z, 0-9, "-" and "_" (not as the first character), and no dots',
+        )
 
 
 @app.websocket("/_/api/ws/editor")
@@ -472,15 +528,21 @@ async def editor_ws(ws: WebSocket) -> None:
                             tnodes[tslug] = node
                         else:
                             node = old if old is not None else _ensure(data.menu, path)
-                        if "title" in msg:
-                            node.title = msg["title"]
+                        removed = False
                         if "markdown" in msg:
-                            node.content = msg["markdown"]
-                        if "published" in msg:
-                            node.published = bool(msg["published"])
-                        if "banner" in msg:
-                            node.banner = msg["banner"]
-                        node.modified = datetime.now(UTC)
+                            if msg["markdown"].strip() == "":
+                                _remove_page_content(data.menu, path)
+                                removed = True
+                            else:
+                                node.content = msg["markdown"]
+                        if not removed:
+                            if "title" in msg:
+                                node.title = msg["title"]
+                            if "published" in msg:
+                                node.published = bool(msg["published"])
+                            if "banner" in msg:
+                                node.banner = msg["banner"]
+                            node.modified = datetime.now(UTC)
                         data.version += 1
                     await ws.send_json({"type": "saved", "path": path})
     except WebSocketDisconnect:
@@ -508,12 +570,12 @@ frontend.route(app, "/")
 async def show_page(request: Request, path: str) -> HTMLResponse | Response:
     """Render the content page at a slug path, or 404.
 
-    A node without content is a category label: its URL redirects to the
-    first child page in menu order.
+    A node without content is a category label: its URL renders a
+    placeholder page (nav links point straight at its first child).
     """
     path = path.strip("/")
-    if path and (_is_reserved(path) or path in RESERVED_FILES):
-        # Reserved slug shape or file name: never content — no tree lookup.
+    if path and _is_reserved(path):
+        # Reserved slug shape: never content — no tree lookup.
         return HTMLResponse(views.render_not_found(data.menu, path, data.brand), 404)
     chain = resolve(data.menu, path)
     node = chain[-1] if chain else None
@@ -528,9 +590,9 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
             headers={"etag": etag},
         )
     if node is not None and node.published and node.content is None:
-        # Category label without a landing page: open its first child.
-        if (leaf := views.first_leaf(data.menu, path)) is not None:
-            return RedirectResponse(f"/{leaf}")
+        # Category label without a landing page: placeholder with the pen
+        # to create it (404 — no page here, but the node is real).
+        return HTMLResponse(views.render_category(data.menu, path, data.brand), 404)
     if node is None and not path:
         # No front page (no top-level node with slug ""): "/" opens the
         # first item of the navigation instead.

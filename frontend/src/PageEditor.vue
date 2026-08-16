@@ -120,8 +120,10 @@ function openPath(p) {
   send({ type: 'open', path: p })
 }
 
-function setDocument(text) {
-  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } })
+function setDocument(text, preserveSelection = false) {
+  const tr = { changes: { from: 0, to: view.state.doc.length, insert: text } }
+  if (preserveSelection) tr.selection = view.state.selection
+  view.dispatch(tr)
 }
 
 function onHashChange() {
@@ -272,6 +274,11 @@ onMounted(() => {
     parent: editorEl.value,
   })
   view.scrollDOM.addEventListener('scroll', syncScroll)
+  window.__pageritePageEditor = {
+    getMarkdown: () => view.state.doc.toString(),
+    setMarkdown: (text) => setDocument(text, true),
+    path: () => path.value,
+  }
   if (props.standalone) addEventListener('hashchange', onHashChange)
   addEventListener('keydown', onKeydown)
 })
@@ -283,6 +290,7 @@ onUnmounted(() => {
     ws.close()
   }
   view?.destroy()
+  delete window.__pageritePageEditor
   if (props.standalone) removeEventListener('hashchange', onHashChange)
   removeEventListener('keydown', onKeydown)
 })

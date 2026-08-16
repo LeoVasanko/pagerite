@@ -5,8 +5,8 @@
 // Every node is real: a label whose title and slug are always editable
 // inline — the title saves while typing (and focusing it opens the page),
 // the slug commits on blur/Enter since it renames the path, moving the
-// whole subtree. Nodes without content are category labels that redirect
-// to their first child; the ➕ on their row gives them a landing page.
+// whole subtree. Nodes without content are category labels whose URL
+// renders a placeholder page; the ➕ on their row gives them a landing page.
 // Every non-empty list (and the root list) ends with a ➕ footer row:
 // clicking it adds a *pending* row (a local-only item persisted to the
 // server only on commit, ✓/Enter, Esc discards) at the end of that list,
@@ -140,13 +140,6 @@ function onEnd() {
             />
             <span class="acts">
               <span v-if="!element.published" class="draft">draft</span>
-              <button
-                v-if="!element.has_content"
-                type="button"
-                class="act"
-                title="add a landing page (currently redirects to the first child)"
-                @click="handlers.addContent(element)"
-              >➕</button>
               <button
                 type="button"
                 class="act del"

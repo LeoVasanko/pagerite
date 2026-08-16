@@ -8,8 +8,9 @@ can swap them without reloading the page chrome.
 Navigation walks the Node tree directly (see data.py): nav_html lists the
 top level — the front page (slug "") is an ordinary top-level item, not
 the parent of the others — and sidebar_html the children of the current
-top-level section. Nodes without content are category labels; their URLs
-redirect to the first child page (first_leaf).
+top-level section. Nodes without content are category labels; nav links
+to them point straight at their first child page (first_leaf), and their
+own URL renders a placeholder page (render_category).
 """
 
 from pathlib import Path
@@ -58,14 +59,18 @@ def _title(slug: str, node: Node) -> str:
     return node.title or prettify(slug) or "Home"
 
 
-def _nav_link(doc, node: Node, path: str, current: str) -> None:
-    """Render one <li> linking the node (category labels redirect to their
-    first child server-side, so linking them is always fine)."""
+def _nav_link(doc, menu: dict[str, Node], node: Node, path: str, current: str) -> None:
+    """Render one <li> linking the node. Category labels (no content of
+    their own) link straight to their first child page, so normal
+    navigation bypasses the placeholder page at their own URL."""
     # A top-level item is current also when viewing any of its subpages.
     is_current = current == path or (path and current.startswith(f"{path}/"))
+    href = f"/{path}"
+    if node.content is None and (leaf := first_leaf(menu, path)) is not None:
+        href = f"/{leaf}"
     doc.li.a(
         _title(path.rpartition("/")[2], node),
-        href=f"/{path}",
+        href=href,
         **{"class": "current"} if is_current else {},
     )
 
@@ -81,7 +86,7 @@ def nav_html(menu: dict[str, Node], current: str) -> HTML:
     with nav:
         for slug, node in sorted_nodes(menu):
             if node.published:
-                _nav_link(nav, node, slug, current)
+                _nav_link(nav, menu, node, slug, current)
     return HTML(str(nav))
 
 
@@ -101,14 +106,14 @@ def sidebar_html(menu: dict[str, Node], current: str) -> HTML:
     with nav:
         for slug, child in sorted_nodes(node.children):
             if child.published:
-                _nav_link(nav, child, f"{section}/{slug}", current)
+                _nav_link(nav, menu, child, f"{section}/{slug}", current)
     return HTML(str(nav))
 
 
 def first_leaf(menu: dict[str, Node], path: str) -> str | None:
     """First published descendant page (content set) in menu order.
 
-    This is the redirect target for content-less category labels.
+    This is the nav-link target for content-less category labels.
     """
     chain = resolve(menu, path)
     if chain is None:
@@ -204,6 +209,37 @@ def render_page(menu: dict[str, Node], path: str, brand: str = SITE_NAME) -> str
             Banner=banner_html(menu, path),
             BannerEdit=HTML(str(E.button("🖊️", **_edit_attrs(path, "site")))),
             Main=page_content(menu, path),
+        ),
+    )
+
+
+def render_category(menu: dict[str, Node], path: str, brand: str = SITE_NAME) -> str:
+    """Render the placeholder for a content-less category label (404).
+
+    The node exists in the tree but has no page of its own. Nav links
+    point straight at its first child, so this is mainly seen in the site
+    editor, where the pen creates the landing page.
+    """
+    node = resolve(menu, path)[-1]
+    title = _title(path.rpartition("/")[2], node)
+    doc = E.article
+    with doc:
+        doc.h1(title)
+        # Editing works here too: the pen creates this category's page.
+        doc.button("🖊️", **_edit_attrs(path))
+        doc.p(
+            "Pages in this section are listed in the menu on the left."
+        )
+    scripts, styles = _page_assets()
+    return str(
+        _layout(styles, scripts)(
+            Title=f"{title} – {brand}" if brand else title,
+            Brand=_brand_link(brand),
+            Nav=nav_html(menu, path),
+            Sidebar=sidebar_html(menu, path),
+            Banner=banner_html(menu, path),
+            BannerEdit=HTML(str(E.button("🖊️", **_edit_attrs(path, "site")))),
+            Main=HTML(str(doc)),
         ),
     )
 

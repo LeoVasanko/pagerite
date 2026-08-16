@@ -169,7 +169,7 @@ import "./assets/style.css";
       const res = await fetch(url);
       const type = res.headers.get("content-type") || "";
       if (!res.ok || !type.includes("text/html")) throw new Error("not a page");
-      // Section URLs redirect to their first child; reflect that.
+      // Reflect any redirect the server issued.
       if (res.redirected) finalUrl = res.url;
       doc = new DOMParser().parseFromString(await res.text(), "text/html");
     } catch {
@@ -254,6 +254,42 @@ import "./assets/style.css";
   });
 
   addEventListener("popstate", () => load(location.href, false, true));
+
+  // --- Task-list checkboxes ------------------------------------------------
+  // Checkboxes in the rendered article are live: toggling them edits the
+  // Markdown source. If the page editor is open, its CodeMirror document is
+  // updated directly; otherwise the server copy is toggled and saved.
+  async function toggleTask(checkbox, index) {
+    const editor = window.__pageritePageEditor;
+    const pagePath = editor ? editor.path() : currentPath;
+    const path = pagePath.replace(/^\/+|\/+$/g, "");
+    const originalChecked = !checkbox.checked;
+    try {
+      const body = { path, index };
+      if (editor) body.markdown = editor.getMarkdown();
+      const res = await fetch("/_/api/toggle-task", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail.detail || res.statusText);
+      }
+      const { markdown } = await res.json();
+      if (editor) editor.setMarkdown(markdown);
+    } catch {
+      checkbox.checked = originalChecked;
+    }
+  }
+
+  addEventListener("change", (ev) => {
+    const checkbox = ev.target.closest(".task-list-item-checkbox");
+    if (!checkbox) return;
+    const index = Number(checkbox.dataset.taskIndex);
+    if (Number.isNaN(index)) return;
+    toggleTask(checkbox, index);
+  });
 
   applyEffects();
 })();

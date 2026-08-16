@@ -424,8 +424,8 @@ DUNES_SVG = """\
 
 #: path -> (title, markdown, {filename: bytes}, banner HTML, menu order).
 #: Note there are deliberately no "docs" or "blog" landing pages: those
-#: labels are created without content, so entering them redirects to the
-#: first child (see views.first_leaf).
+#: labels are created without content, so they render a placeholder page
+#: and their nav links point at the first child (see views.first_leaf).
 PAGES: dict[str, tuple[str, str, dict[str, bytes], str, float]] = {
     "": ("Welcome", WELCOME, {"waves.svg": WAVES_SVG.encode()}, FRONT_BANNER, 1),
     "about": ("About", ABOUT, {}, "", 2),
