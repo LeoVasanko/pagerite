@@ -1,0 +1,695 @@
+/* Shared styles for server-rendered pages and Vue components. */
+@import url("/static/fonts/fonts.css");
+@import url("/static/pygments.css");
+
+:root {
+  color-scheme: dark;
+  --bg: #12101c;
+  --surface: #1b1830;
+  --text: #e8e6f2;
+  --muted: #9a94b8;
+  --accent: #00d4c8;
+  --accent2: #7c5cff;
+  --line: #ffffff1a;
+  /* Width of the docked editor panel (used both here for shifting the page
+     and in the Vue editor's own styles). */
+  --editor-w: min(46rem, 50vw);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: "Literata", Georgia, serif;
+  font-size: 1.05rem;
+  line-height: 1.65;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  /* Full-bleed elements (.wide) size to 100vw, which counts the vertical
+     scrollbar; clip the few stray pixels instead of scrolling. */
+  overflow-x: clip;
+  /* Full height even on short pages: the footer sits at the bottom and the
+     docked editor (sized by #content) never collapses. */
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+#content {
+  flex: 1;
+}
+
+::selection {
+  background: var(--accent2);
+}
+
+/* Full-width banner: image header with the brand and nav overlaid. */
+#banner {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 11rem;
+  background: url("/static/banner.svg") center 40% / cover;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Per-page banner content (img, styled div, canvas...) overlays the
+   default artwork; swapped along with #nav/#main on fetch-navigation. */
+#page-banner {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+#page-banner>* {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+#brand,
+#nav {
+  position: relative;
+}
+
+#brand {
+  font-family: "Fraunces", serif;
+  font-weight: 700;
+  font-size: 2.4rem;
+  text-decoration: none;
+  margin: auto 1.25rem 0;
+  padding-top: 1.5rem;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: none;
+  filter: drop-shadow(0 0 0.1rem #000);
+}
+
+/* Nav overlaid at the bottom of the banner */
+#nav {
+  font-size: 1.3em;
+  text-shadow: 0 0 0.1em black;
+  padding: 0.35rem 1.25rem;
+}
+
+#nav ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  gap: 0.25rem 1.5rem;
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+
+#nav a {
+  text-decoration: none;
+  color: var(--text);
+}
+
+#nav ul ul a {
+  color: var(--muted);
+}
+
+#nav a:hover {
+  color: var(--accent);
+}
+
+#nav span {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+#nav .current {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+/* Sidebar + main row. A symmetric grid: the article column is sized by the
+   viewport alone (never by content), with equally sized flexible gutters
+   on both sides. The sidebar sits in the left gutter, so it appearing or
+   disappearing never shifts the article; the right gutter balances it. */
+#content {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr minmax(0, 78rem) 1fr;
+  /* The docked editor pushes the content (not the header) right. */
+  transition: margin-left 0.25s ease;
+}
+
+body.editing #content {
+  margin-left: var(--editor-w);
+  padding-left: 1rem;
+  /* gap between the docked editor and the content */
+  /* No overflow clipping here: .editor-host lives outside this box
+     (negative left), and .wide shrink-wraps to the remaining space. */
+}
+
+/* The sidebar's gutter space is needed by the editor instead. */
+body.editing #sidebar {
+  display: none;
+}
+
+/* The editor host lives inside #content: it starts below the banner and
+   ends above the footer. The panel itself sticks to the viewport while
+   scrolling (but never taller than the content area). */
+.editor-host {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(0px - var(--editor-w));
+  width: var(--editor-w);
+}
+
+.editor-root.overlay {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  max-height: 100%;
+  background: var(--bg);
+  animation: editor-slide-in 0.25s ease;
+}
+
+.editor-root.overlay.closing {
+  transform: translateX(-100%);
+  transition: transform 0.25s ease;
+}
+
+@keyframes editor-slide-in {
+  from {
+    transform: translateX(-100%);
+  }
+}
+
+/* Site structure tree: while dragging, empty child lists appear as drop
+   zones so a page can be moved under a childless page. */
+body.tree-dragging .treelist:empty {
+  min-height: 1.2rem;
+  outline: 1px dashed var(--line);
+  border-radius: 4px;
+}
+
+/* The banner's own pen: opens the site editor (banner + structure).
+   Qualified with `button` to beat the later .edit-link rule's left offset
+   (both classes apply to the same element). */
+button.banner-edit-link {
+  position: absolute;
+  top: 0.6rem;
+  right: 1.25rem;
+  left: auto;
+  z-index: 10;
+  font: inherit;
+  border: none;
+  cursor: pointer;
+  opacity: 0.55;
+  background: none;
+  padding: 0;
+}
+
+.banner-edit-link:hover {
+  opacity: 1;
+}
+
+#sidebar {
+  grid-column: 1;
+  /* Pinned to the page's left edge (not the article's) and kept in view
+     while scrolling. Translucent + blurred rather than an opaque box, so
+     full-bleed .wide images can pass underneath without a hard edge. */
+  justify-self: start;
+  align-self: start;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  width: 12rem;
+  max-height: 100vh;
+  overflow-y: auto;
+  padding: 1rem 1rem 1rem 1.25rem;
+  border-radius: 0 0 0.5rem 0;
+  background: color-mix(in srgb, var(--bg) 75%, transparent);
+  backdrop-filter: blur(0.5rem);
+}
+
+#sidebar:empty {
+  display: none;
+}
+
+#sidebar ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8em;
+  line-height: 1.0;
+}
+
+#sidebar a {
+  text-decoration: none;
+  color: var(--muted);
+}
+
+#sidebar a:hover {
+  color: var(--accent);
+}
+
+#sidebar .current {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+main {
+  grid-column: 2;
+  /* No top padding: a leading wide image sits flush under the banner, and
+     text-first pages get their spacing from the h1's top margin instead. */
+  padding: 0 1.25rem 3rem;
+}
+
+article h1,
+article h2,
+article h3 {
+  font-family: "Fraunces", serif;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+article h1 {
+  font-size: 2.2rem;
+  margin: 2rem 0 1.2rem;
+  color: var(--accent);
+}
+
+/* Margin strategy: bottom-only inside articles. Top margins misalign
+   column tops and collapse unpredictably; spacing comes from below. */
+article p,
+article ul,
+article ol,
+article dl,
+article blockquote,
+article pre,
+article figure {
+  margin-top: 0;
+  margin-bottom: 1rem;
+}
+
+article h3 {
+  margin: 1.4rem 0 0.4rem;
+  color: color-mix(in oklab, var(--accent2) 60%, var(--muted));
+}
+
+/* Lists: small diamond emoji markers — blue 🔹 on odd nesting levels,
+   orange 🔸 on even. The marker occupies a 1em outdented box so wrapped
+   lines align. */
+article ul {
+  list-style: none;
+  padding-inline-start: 1em;
+}
+
+article ul li::before {
+  content: "🔹";
+  display: inline-block;
+  margin-left: -1.3em;
+  width: 1.3em;
+}
+
+article ul ul li::before {
+  content: "🔸";
+}
+
+article ul ul ul li::before {
+  content: "🔹";
+}
+
+/* Task lists render emoji checkmarks (see markdown.py), no diamond. */
+article .task-list-item::before {
+  content: none;
+}
+
+article {
+  position: relative;
+}
+
+.edit-link {
+  position: absolute;
+  top: 0.2rem;
+  /* In the left gutter, on the same side as the docked editor panel. */
+  left: -2.2rem;
+  z-index: 2;
+  /* stay above full-bleed .wide images */
+  font: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0.7;
+  text-shadow: 0 0 0.1em black;
+}
+
+/* pagerite.js tucks the pen at the end of the article's first h1. */
+article h1 .edit-link {
+  position: static;
+  font-size: 1.1rem;
+  vertical-align: 0.3em;
+  margin-left: 0.4rem;
+}
+
+.edit-link:hover {
+  opacity: 1;
+}
+
+article p,
+article li,
+article dd {
+  text-align: justify;
+  hyphens: auto;
+}
+
+/* Multi-column reading on wide displays, but only for long articles
+   (pagerite.js adds .multicol based on content length and splits the body
+   into .colseg segments separated by full-width h2s and wide figures;
+   only segments with enough text get .cols and thus columns). Columns only
+   reflow text inside the article; the article's width never changes. */
+@media (min-width: 100rem) {
+  .multicol .colseg.cols {
+    columns: 2;
+    column-gap: 3.5rem;
+    column-rule: 1px solid var(--line);
+  }
+}
+
+.multicol .colseg {
+  margin-bottom: 1rem;
+
+  p,
+  li {
+    break-inside: avoid-column;
+  }
+
+  figure,
+  pre,
+  blockquote,
+  table,
+  dl {
+    break-inside: avoid;
+  }
+}
+
+article h2 {
+  font-size: 1.5rem;
+  margin: 2.2rem 0 0.6rem;
+  color: var(--accent2);
+}
+
+article a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+article a:hover {
+  text-decoration: underline;
+}
+
+/* Blockquotes: inner paragraphs carry no margins (spacing comes from the
+   blockquote itself, bottom-only like everything else in articles). The
+   negative left margin pushes the bar out past the text edge, so quoted
+   text aligns with the surrounding paragraphs — same trick as code blocks. */
+blockquote {
+  margin: 0 0 1rem -0.5rem;
+  padding: 0 0 0 0.25rem;
+  border-left: 0.25rem solid var(--accent2);
+  color: var(--muted);
+}
+
+blockquote p {
+  margin: 0;
+}
+
+pre {
+  overflow-x: auto;
+  padding: 0.5rem 0.8rem;
+  /* Code text aligns with the surrounding paragraphs: the box extends
+     past them by its own padding. */
+  margin-left: -0.8rem;
+  margin-right: -0.8rem;
+  background: #ffffff09;
+  border-radius: 4px;
+  position: relative;
+}
+
+/* Inline code integrates with the text, no box of its own */
+p code,
+li code {
+  font-size: 0.85em;
+}
+
+/* Click-to-copy button (added by pagerite.js) */
+.copy {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.6rem;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+pre:hover .copy,
+.copy:focus-visible {
+  opacity: 1;
+}
+
+.copy.copied {
+  color: var(--accent);
+}
+
+code {
+  font-family: "Fira Code", ui-monospace, monospace;
+  font-size: 0.88em;
+}
+
+table {
+  border-collapse: collapse;
+}
+
+th,
+td {
+  border: 1px solid var(--line);
+  padding: 0.35rem 0.8rem;
+}
+
+/* Images and figures */
+img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+
+figure {
+  margin: 0 0 1.5rem;
+}
+
+figcaption {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-top: 0.4rem;
+}
+
+/* Captions of full-bleed images: centered and kept to a readable width. */
+figure:has(.wide) figcaption {
+  max-width: 65ch;
+  margin-inline: auto;
+  text-align: center;
+}
+
+/* Positioning via brace-attribute classes: {.right}, {.left}, {.wide} */
+figure:has(.right),
+img.right {
+  float: right;
+  margin: 0.3rem 0 1rem 1.5rem;
+  max-width: 45%;
+}
+
+figure:has(.left),
+img.left {
+  float: left;
+  margin: 0.3rem 1.5rem 1rem 0;
+  max-width: 45%;
+}
+
+/* .wide is full bleed: edge to edge of the viewport (or of the space left
+   of the docked editor). Centered on the article column — which is itself
+   centered in the available space — via margin-left: 50% + translateX(-50%).
+   The sidebar stacks above it (z-index + opaque background). */
+figure:has(.wide),
+img.wide {
+  display: block;
+  /* no inline strut/descender gaps around the image */
+  width: 100vw;
+  max-width: none;
+  margin-left: 50%;
+  margin-right: 0;
+  /* kill the UA figure margin, it overflowed the body */
+  transform: translateX(-50%);
+}
+
+/* A paragraph wrapping only a wide image must not add its line height. */
+p:has(> img.wide:only-child) {
+  line-height: 0;
+}
+
+body.editing figure:has(.wide),
+body.editing img.wide {
+  width: calc(100vw - var(--editor-w) - 1rem);
+}
+
+/* Scroll reveal (pagerite.js adds .reveal/.in; JS off = fully visible) */
+.reveal {
+  opacity: 0;
+  translate: 0 14px;
+  transition:
+    opacity 0.6s ease,
+    translate 0.6s ease;
+}
+
+.reveal.in {
+  opacity: 1;
+  translate: 0 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .reveal {
+    opacity: 1;
+    translate: none;
+    transition: none;
+  }
+}
+
+.task-list-item {
+  list-style: none;
+}
+
+.footnote {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* The footer element is kept (the editor host ends above it) but currently
+   empty and zero-height. */
+footer {
+  padding: 0;
+}
+
+/* Rotating-cube page transition, adapted from termotohtori.fi.
+   FRAGILE: do not tweak; the view-transition pseudo-tree is picky. */
+::view-transition {
+  perspective: 1000px;
+  background: #000;
+  inset: 0;
+}
+
+::view-transition-group(root),
+::view-transition-image-pair(root) {
+  transform-style: preserve-3d;
+  isolation: auto;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  mix-blend-mode: normal;
+  backface-visibility: hidden;
+  animation: none;
+}
+
+@keyframes group-rotate {
+  to {
+    transform: rotateY(-90deg);
+  }
+}
+
+@keyframes fade-out-a-bit {
+  to {
+    opacity: 0.5;
+  }
+}
+
+@keyframes fade-in-a-bit {
+  from {
+    opacity: 0.5;
+  }
+}
+
+::view-transition-group(root) {
+  transform-origin: 50% 50% -50vw;
+  animation: 300ms ease-in-out forwards group-rotate;
+}
+
+::view-transition-old(root) {
+  animation: 300ms ease-in-out forwards fade-out-a-bit;
+}
+
+::view-transition-new(root) {
+  transform-origin: 0 0;
+  transform: rotateY(90deg);
+  inset: 0 auto 0 100%;
+  animation: 300ms ease-in-out forwards fade-in-a-bit;
+}
+
+/* Reverse direction for browser back navigation (same geometry, mirrored). */
+@keyframes group-rotate-back {
+  to {
+    transform: rotateY(90deg);
+  }
+}
+
+html.nav-back::view-transition-group(root) {
+  animation-name: group-rotate-back;
+}
+
+html.nav-back::view-transition-new(root) {
+  transform-origin: 100% 0;
+  transform: rotateY(-90deg);
+  inset: 0 100% 0 auto;
+}
+
+/* Same-section navigation: a plain crossfade instead of the cube. These
+   rules only override animation/geometry, leaving the FRAGILE block's
+   perspective and layering untouched. The old snapshot stays fully opaque
+   underneath while the new one fades in on top — never a dip to black. */
+@keyframes nav-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+html.nav-fade::view-transition-group(root) {
+  animation: none;
+}
+
+html.nav-fade::view-transition-old(root) {
+  animation: none;
+}
+
+html.nav-fade::view-transition-new(root) {
+  transform: none;
+  inset: 0;
+  animation: 200ms ease-in-out nav-fade-in;
+}
