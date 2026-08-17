@@ -97,13 +97,15 @@ not for the public pages. See `docs/design-principles.md` for the design.
     - `pagerite.js` — public page entry; runs fetch-navigation, scroll-reveal,
       brand shrink-to-fit (the themed size is the maximum; JS reduces the
       font-size so a long brand or narrow viewport still fits one line),
-      code copy buttons, and the auth check: it fetches
-      `/auth/api/validate?perm=pagerite:admin` and only then injects the 🖊️
-      edit pens (asset URLs from the `pagerite:editor-src`/`-css` meta tags);
-      a 401 adds a "log in" link to `/auth/` in the banner corner, a 403
-      nothing, and any other result (no auth server, e.g. dev) leaves
-      editing open. Pages themselves render identically for everyone; the
-      real gate is the auth proxy in front of all of `/_api`. The backend links the shared CSS as two separate
+      code copy buttons, and the auth check: it probes `GET /_api/settings`
+      and only then injects the 🖊️ edit pens (asset URLs from the
+      `pagerite:editor-src`/`-css` meta tags). The same reverse proxy that
+      gates `/_api` returns 401 for anonymous users, 403 for users without
+      the admin permission, and 200 for admins; a 401 adds a "log in" link
+      to `/auth/` in the banner corner, a 403 nothing, and any other
+      result (no auth proxy, e.g. dev) leaves editing open. Pages themselves
+      render identically for everyone; the real gate is the auth proxy in
+      front of all of `/_api`. The backend links the shared CSS as two separate
       stylesheets (base and theme) so they can be swapped or augmented.
     - `assets/` — shared styles and data files built by Vite and served hashed
       under `/_assets/`: `pagerite.css` (base layout + conservative variables),

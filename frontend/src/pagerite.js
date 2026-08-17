@@ -28,11 +28,13 @@
 
   // --- Auth-gated edit pens ---------------------------------------------
   // Pages render identically for everyone; the 🖊️ pens are injected by JS
-  // only after the auth server validates the session (perm pagerite:admin).
+  // only after we know the user has pagerite:admin access. We probe our own
+  // /_api/settings endpoint: the same reverse proxy that gates /_api returns
+  // 401/403 here, and a 200 means the permission is present.
   // 401 = anonymous: show a small login link in the banner corner instead.
   // 403 = logged in without the permission: no pens. Any other outcome
-  // (404, network error — i.e. no auth server deployed, as in dev) leaves
-  // editing open as before: the real gate is the proxy in front of /_api.
+  // (network error — i.e. no auth proxy deployed, as in dev) leaves editing
+  // open as before: the real gate is the proxy in front of /_api.
   let authorized = false;
   let editorMeta = null;
 
@@ -78,9 +80,9 @@
     };
     let status = 0;
     try {
-      status = (await fetch("/auth/api/validate?perm=pagerite:admin")).status;
+      status = (await fetch("/_api/settings")).status;
     } catch {
-      // Auth server unreachable: treat as not deployed.
+      // Auth proxy unreachable: treat as not deployed.
     }
     if (status === 401) addLoginLink();
     else if (status !== 403) {
