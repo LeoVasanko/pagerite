@@ -4,6 +4,8 @@
 //
 // Also: scroll-reveal effects and code copy buttons. These need no
 // support from the article itself and are re-applied after each swap.
+import { showAuthIframe } from 'paskia'
+
 (() => {
   if (import.meta.env.DEV) {
     // The theme is selectable; the backend names the active one in a meta
@@ -31,11 +33,15 @@
   // only after we know the user has pagerite:admin access. We probe our own
   // /_api/settings endpoint: the same reverse proxy that gates /_api returns
   // 401/403 here, and a 200 means the permission is present.
-  // 401 = anonymous: show a small login link in the banner corner instead.
-  // 403 = logged in without the permission: no pens. Any other outcome
-  // (network error — i.e. no auth proxy deployed, as in dev) leaves editing
-  // open as before: the real gate is the proxy in front of /_api.
-  let authorized = false;
+  //
+  // When Paskia SSO is in use, 401/403 responses carry `auth.iframe`, which
+  // we use to open the login/profile dialogs inline instead of navigating
+  // away. A separate probe to /auth/api/settings tells us whether Paskia is
+  // available at all; if it isn't, we treat the site as dev/no-proxy and
+  // leave editing open.
+  let ssoAvailable = false;
+  let isAdmin = false;
+  let loginIframeUrl = null;
   let editorMeta = null;
 
   function makePen(mode) {
@@ -61,7 +67,7 @@
     }
   }
 
-  function addLoginLink() {
+  function addLoginButton(url) {
     const banner = document.getElementById("page-banner");
     if (!banner || banner.parentElement.querySelector(".login-link")) return;
     const btn = document.createElement("button");
@@ -69,10 +75,52 @@
     btn.className = "login-link";
     btn.title = "log in";
     btn.textContent = "🔑";
-    btn.addEventListener("click", () => {
-      location.href = "/auth/";
+    btn.addEventListener("click", async () => {
+      try {
+        await showAuthIframe(url);
+        // Successful login: refresh the auth UI (may now show edit pens).
+        setupAuth();
+      } catch {
+        // Cancelled or error: leave the button in place.
+      }
     });
     banner.after(btn);
+  }
+
+  function injectProfileButton() {
+    const banner = document.getElementById("page-banner");
+    if (!banner || banner.parentElement.querySelector(".profile-link")) return;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "profile-link";
+    btn.title = "profile";
+    btn.textContent = "👤";
+    btn.addEventListener("click", () => {
+      showAuthIframe("/auth/").catch(() => {});
+    });
+    banner.after(btn);
+  }
+
+  function renderAuthUi() {
+    const banner = document.getElementById("page-banner");
+    if (banner) {
+      for (const el of banner.parentElement.querySelectorAll(
+        ".banner-edit-link, .login-link, .profile-link",
+      )) {
+        el.remove();
+      }
+    }
+    if (isAdmin) {
+      injectPens();
+      if (ssoAvailable) injectProfileButton();
+    } else if (ssoAvailable && loginIframeUrl) {
+      addLoginButton(loginIframeUrl);
+    } else if (ssoAvailable) {
+      injectProfileButton();
+    } else {
+      // No Paskia SSO: dev/no-proxy fallback, leave editing open.
+      injectPens();
+    }
   }
 
   async function setupAuth() {
@@ -82,18 +130,32 @@
       src,
       css: document.querySelector('meta[name="pagerite:editor-css"]')?.content,
     };
+
+    // Detect whether Paskia SSO is available on this site.
+    try {
+      const ssoRes = await fetch("/auth/api/settings");
+      ssoAvailable = ssoRes.ok;
+    } catch {
+      ssoAvailable = false;
+    }
+
+    // Check whether the current session has pagerite:admin.
+    isAdmin = false;
+    loginIframeUrl = null;
     let status = 0;
     try {
-      status = (await fetch("/_api/settings")).status;
+      const res = await fetch("/_api/settings");
+      status = res.status;
+      if (status === 401) {
+        const data = await res.json().catch(() => ({}));
+        loginIframeUrl = data.auth?.iframe || null;
+      }
     } catch {
-      // Auth proxy unreachable: treat as not deployed.
+      // No auth proxy / dev.
     }
-    if (status === 401) addLoginLink();
-    else if (status !== 403) {
-      authorized = true;
-      injectPens();
-      placeEditPen();
-    }
+    if (status === 200) isAdmin = true;
+
+    renderAuthUi();
   }
 
   function runScripts(root) {
@@ -158,8 +220,9 @@
     (window.requestIdleCallback || setTimeout)(preload);
     const main = document.getElementById("main");
     addCopyButtons(main);
-    // Fetch-navigation swaps #main, discarding the article pen; re-add it.
-    if (authorized) injectPens();
+    // Fetch-navigation swaps #main, discarding the article pen and corner
+    // buttons; re-add whichever auth UI is appropriate for this session.
+    renderAuthUi();
     placeEditPen();
     // Multi-column layout only when there is enough text to justify it.
     // Split the body into columned segments: h2s and wide figures are

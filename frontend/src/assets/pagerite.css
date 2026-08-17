@@ -432,13 +432,14 @@ article h1 .edit-link {
   opacity: 1;
 }
 
-/* Login button injected by pagerite.js for anonymous visitors when an auth
-   proxy gates /_api (the settings probe answered 401). Same corner as the
-   site pen, styled like the edit pens. */
-button.login-link {
+/* Login/profile buttons injected by pagerite.js when Paskia SSO is in use.
+   Both sit in the banner's top-right corner, to the right of the site pen,
+   and are styled like the edit pens. */
+button.login-link,
+button.profile-link {
   position: absolute;
   top: 0.6rem;
-  right: 1.25rem;
+  right: 0.5rem;
   z-index: 10;
   font: inherit;
   border: none;
@@ -449,7 +450,8 @@ button.login-link {
   text-shadow: 0 0 0.1em black;
 }
 
-button.login-link:hover {
+button.login-link:hover,
+button.profile-link:hover {
   opacity: 1;
 }
 

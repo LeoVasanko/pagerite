@@ -142,6 +142,7 @@ function onEnd() {
             <span class="acts">
               <span v-if="!element.published" class="draft">draft</span>
               <button
+                v-if="element.has_content || !element.children.length"
                 type="button"
                 class="act del"
                 :class="{ armed: handlers.arming() === element.path }"
