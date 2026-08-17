@@ -168,9 +168,10 @@ evolves.
   live under `frontend/src/assets/` and are emitted as hashed assets under
   `/_assets/`
   (Source Serif 4 for headings, Source Sans 3 for body, Fira Code for code
-  by default; Fraunces, Literata, Cormorant, Playfair Display, Inter and
-  Montserrat kept as woff2 options with local `@font-face`, variable-weight
-  where available). No third-party requests.
+  by default; Fraunces, Literata, Cormorant, Playfair Display, Inter,
+  Montserrat, Cause, Exo 2 and UnifrakturMaguntia kept as woff2 options with
+  local `@font-face`, variable-weight where available). No third-party
+  requests.
 
 ## Editing
 

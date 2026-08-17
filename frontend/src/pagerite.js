@@ -421,6 +421,32 @@
     toggleTask(checkbox, index);
   });
 
+  // --- Brand shrink-to-fit ------------------------------------------------
+  // The themed brand size is the maximum: when the text is long or the
+  // viewport narrow, reduce the font size so the brand always fits the
+  // banner on one line. Re-run on resize, webfont load, and brand text
+  // edits (the site editor previews them live).
+  const brand = document.getElementById("brand");
+  if (brand) {
+    const fit = () => {
+      brand.style.fontSize = ""; // restore the themed size
+      const avail = brand.clientWidth;
+      const need = brand.scrollWidth;
+      if (need > avail && need > 0) {
+        brand.style.fontSize =
+          `${parseFloat(getComputedStyle(brand).fontSize) * avail / need}px`;
+      }
+    };
+    new ResizeObserver(fit).observe(brand);
+    new MutationObserver(fit).observe(brand, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+    document.fonts?.ready.then(fit);
+    fit();
+  }
+
   setupAuth();
   applyEffects();
 })();

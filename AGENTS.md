@@ -95,6 +95,8 @@ not for the public pages. See `docs/design-principles.md` for the design.
   - `frontend/src/` — the Vue editor and public-page entries.
     - `main.js` — Vue editor app entry, mounts PageEditor/SiteEditor.
     - `pagerite.js` — public page entry; runs fetch-navigation, scroll-reveal,
+      brand shrink-to-fit (the themed size is the maximum; JS reduces the
+      font-size so a long brand or narrow viewport still fits one line),
       code copy buttons, and the auth check: it fetches
       `/auth/api/validate?perm=pagerite:admin` and only then injects the 🖊️
       edit pens (asset URLs from the `pagerite:editor-src`/`-css` meta tags);
@@ -115,7 +117,7 @@ not for the public pages. See `docs/design-principles.md` for the design.
       an orange racing-tab nav clipped with a bezier `shape()`), `pygments.css`,
       and `fonts/` (self-hosted Source
       Sans 3/Source Serif 4/Fraunces/Literata/Cormorant/Playfair
-      Display/Inter/Montserrat/Fira Code
+      Display/Inter/Montserrat/Fira Code/Cause/Exo 2/UnifrakturMaguntia
       variable woff2). The `::view-transition*` block at the end of `pagerite.css` (from
       termotohtori.fi) is fragile — do not tweak.
     - Vite builds ES-module `.js` outputs; the backend renders `<script

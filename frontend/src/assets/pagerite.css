@@ -40,14 +40,17 @@
   /* One variable per available font family (faces in fonts/fonts.css);
      everything else references these, so font stacks live here only. */
   --font-source-sans: "Source Sans 3", system-ui, sans-serif;
-  --font-source-serif: "Source Serif 4", Georgia, serif;
-  --font-fraunces: "Fraunces", Georgia, serif;
-  --font-literata: "Literata", Georgia, serif;
-  --font-playfair: "Playfair Display", Georgia, serif;
-  --font-cormorant: "Cormorant", Georgia, serif;
+  --font-source-serif: "Source Serif 4", serif;
+  --font-fraunces: "Fraunces", serif;
+  --font-literata: "Literata", serif;
+  --font-playfair: "Playfair Display", serif;
+  --font-cormorant: "Cormorant", serif;
   --font-inter: "Inter", system-ui, sans-serif;
   --font-montserrat: "Montserrat", system-ui, sans-serif;
   --font-fira-code: "Fira Code", ui-monospace, monospace;
+  --font-cause: "Cause", system-ui, sans-serif;
+  --font-exo2: "Exo 2", system-ui, sans-serif;
+  --font-unifraktur: "UnifrakturMaguntia", "Playfair Display", serif;
   --font-body: var(--font-source-sans);
   --font-heading: var(--font-source-serif);
   /* The brand follows the heading font unless overridden separately. */
@@ -134,6 +137,9 @@ body {
   font-weight: 700;
   font-size: 2.4rem;
   text-decoration: none;
+  /* One line always: pagerite.js shrinks the font size to fit instead of
+     wrapping (the themed size is the maximum). */
+  white-space: nowrap;
   margin: auto 1.25rem 0;
   padding-top: 1.5rem;
   color: var(--text);

@@ -423,9 +423,13 @@ const FONT_OPTIONS = [
   { value: 'var(--font-fraunces)', label: 'Fraunces', serif: true },
   { value: 'var(--font-literata)', label: 'Literata', serif: true },
   { value: 'var(--font-cormorant)', label: 'Cormorant', serif: true },
+  { value: 'var(--font-playfair)', label: 'Playfair Display', serif: true },
+  { value: 'var(--font-unifraktur)', label: 'UnifrakturMaguntia', serif: true },
   { value: 'var(--font-source-sans)', label: 'Source Sans 3', serif: false },
   { value: 'var(--font-inter)', label: 'Inter', serif: false },
   { value: 'var(--font-montserrat)', label: 'Montserrat', serif: false },
+  { value: 'var(--font-cause)', label: 'Cause', serif: false },
+  { value: 'var(--font-exo2)', label: 'Exo 2', serif: false },
   { value: 'var(--font-fira-code)', label: 'Fira Code', serif: false },
 ]
 const fontHeading = ref('')
