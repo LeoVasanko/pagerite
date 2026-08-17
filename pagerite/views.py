@@ -96,6 +96,13 @@ def _layout(
     doc = Document(E.Title, lang="en")
     if theme:
         doc.meta(name="pagerite:theme", content=theme)
+    # Editor asset URLs for pagerite.js, which injects the 🖊️ edit pens
+    # itself once it has validated the session (pages render identically
+    # for everyone; editing is gated by the auth proxy in front of /_api).
+    script, editor_css = _editor_assets(theme)
+    doc.meta(name="pagerite:editor-src", content=script[-1])
+    if editor_css:
+        doc.meta(name="pagerite:editor-css", content=editor_css)
     for url in urls:
         doc.link(rel="stylesheet", href=url, blocking="render")
     for src in modules:
@@ -106,7 +113,6 @@ def _layout(
         doc
         .header(
             E.div(E.Banner, id="page-banner"),
-            E.BannerEdit,
             E.Brand,
             E.nav(E.Nav, id="nav"),
             id="banner",
@@ -231,26 +237,6 @@ def banner_source(menu: dict[str, Node], path: str) -> str | None:
     return None
 
 
-def _edit_attrs(path: str, mode: str = "page", theme: str = "") -> dict:
-    """Attributes for a 🖊️ edit button.
-
-    pagerite.js wires these buttons to dynamic-import the editor app
-    (data-editor-src, plus any extra styles it needs) and open the docked
-    editor without leaving the page. mode="page" edits content; mode="site"
-    (the pen on the banner) edits the banner and site structure. They are
-    buttons, not links: editing is an action, not a navigation.
-    """
-    script, editor_css = _editor_assets(theme)
-    return {
-        "type": "button",
-        "class": "edit-link" if mode == "page" else "edit-link banner-edit-link",
-        "title": "edit",
-        "data-editor-src": script[-1],
-        "data-editor-css": editor_css or "",
-        "data-editor-mode": mode,
-    }
-
-
 def page_content(menu: dict[str, Node], path: str) -> HTML:
     """Render the contents of the #main element for a page."""
     node = resolve(menu, path)[-1]
@@ -260,8 +246,6 @@ def page_content(menu: dict[str, Node], path: str) -> HTML:
         # only rendered as h1 when the markdown has none of its own.
         if not has_h1(node.content or ""):
             doc.h1(node.title)
-        # All users are trusted authors for now, so the edit button is public.
-        doc.button("🖊️", **_edit_attrs(path))
         doc.div(HTML(render(node.content or "", path)), class_="body")
     return HTML(str(doc))
 
@@ -284,7 +268,6 @@ def render_page(
             Nav=nav_html(menu, path),
             Sidebar=sidebar_html(menu, path),
             Banner=banner_html(menu, path),
-            BannerEdit=HTML(str(E.button("🖊️", **_edit_attrs(path, "site", theme)))),
             Main=page_content(menu, path),
         ),
     )
@@ -308,8 +291,6 @@ def render_category(
     doc = E.article
     with doc:
         doc.h1(title)
-        # Editing works here too: the pen creates this category's page.
-        doc.button("🖊️", **_edit_attrs(path, "page", theme))
         doc.p(
             "Pages in this section are listed in the menu on the left."
         )
@@ -321,7 +302,6 @@ def render_category(
             Nav=nav_html(menu, path),
             Sidebar=sidebar_html(menu, path),
             Banner=banner_html(menu, path),
-            BannerEdit=HTML(str(E.button("🖊️", **_edit_attrs(path, "site", theme)))),
             Main=HTML(str(doc)),
         ),
     )
@@ -338,8 +318,6 @@ def render_not_found(
     doc = E.article
     with doc:
         doc.h1("Not Found")
-        # Editing works here too: this is how brand new pages get created.
-        doc.button("🖊️", **_edit_attrs(path, "page", theme))
         doc.p(f"No page at /{path}.")
     scripts, styles = _page_assets(theme)
     return str(
@@ -349,7 +327,6 @@ def render_not_found(
             Nav=nav_html(menu, path),
             Sidebar=sidebar_html(menu, path),
             Banner=banner_html(menu, path),
-            BannerEdit=HTML(str(E.button("🖊️", **_edit_attrs(path, "site", theme)))),
             Main=HTML(str(doc)),
         ),
     )

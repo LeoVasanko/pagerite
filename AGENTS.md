@@ -87,8 +87,14 @@ not for the public pages. See `docs/design-principles.md` for the design.
     database (never overwrites existing pages).
   - `frontend/src/` — the Vue editor and public-page entries.
     - `main.js` — Vue editor app entry, mounts PageEditor/SiteEditor.
-    - `pagerite.js` — public page entry; runs fetch-navigation, scroll-reveal and
-      code copy buttons. The backend links the shared CSS as two separate
+    - `pagerite.js` — public page entry; runs fetch-navigation, scroll-reveal,
+      code copy buttons, and the auth check: it fetches
+      `/auth/api/validate?perm=pagerite:admin` and only then injects the 🖊️
+      edit pens (asset URLs from the `pagerite:editor-src`/`-css` meta tags);
+      a 401 adds a "log in" link to `/auth/` in the banner corner, a 403
+      nothing, and any other result (no auth server, e.g. dev) leaves
+      editing open. Pages themselves render identically for everyone; the
+      real gate is the auth proxy in front of all of `/_api`. The backend links the shared CSS as two separate
       stylesheets (base and theme) so they can be swapped or augmented.
     - `assets/` — shared styles and data files built by Vite and served hashed
       under `/_assets/`: `pagerite.css` (base layout + conservative variables),
@@ -136,7 +142,8 @@ not for the public pages. See `docs/design-principles.md` for the design.
   dragged row previews its whole subtree at the target list's depth. The
   two pens swap the docked
   panel for the other editor; clicking the open editor's own pen closes it. Normally dynamic-imported onto the content page by
-  pagerite.js when a 🖊️ edit link is clicked (the link carries
+  pagerite.js when a 🖊️ edit pen is clicked (the pens are injected by
+  pagerite.js after the session validates; they carry
   `data-editor-src`/`data-editor-css`/`data-editor-mode`).
   In dev, modules load from the Vite dev server (`PAGERITE_VITE_URL`),
   in prod from the hashed build assets resolved via
@@ -209,7 +216,10 @@ not for the public pages. See `docs/design-principles.md` for the design.
   folds to ASCII, spaces become hyphens; an empty slug on a new page is
   derived from its title), may not begin with `_` or `.`, and such URLs are
   never looked up as content.
-- No auth in core code; trusted single author. Never add output
+- No auth in core code; the SSO/reverse proxy gates all of `/_api`
+  (forward-auth) and owns `/auth/` (login/logout, session validation).
+  Pages render identically for everyone; pagerite.js adds the editing UI
+  only after the auth server validates the session. Never add output
   sanitization "for safety" against the author — embedded HTML/scripts in
   Markdown are passed through deliberately.
 - Update this file and `docs/design-principles.md` when architecture,

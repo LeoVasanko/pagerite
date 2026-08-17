@@ -1,5 +1,4 @@
 #!/usr/bin/env -S uv run
-# auto-upgrade@fastapi-vue-setup - remove this if you modify this file
 """Run Vite development server for Vue app and FastAPI backend with auto-reload."""
 
 import argparse
@@ -22,7 +21,7 @@ from devutil import (
 
 DEFAULT_VITE_PORT = 3100
 DEFAULT_DEV_PORT = 3200
-HEALTH = "/_api/health?from=devserver.py"
+HEALTH = "/?from=devserver.py"
 
 
 async def run_devserver(

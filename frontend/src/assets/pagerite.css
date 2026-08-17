@@ -378,6 +378,21 @@ article h1 .edit-link {
   opacity: 1;
 }
 
+/* Login link injected by pagerite.js for anonymous visitors when an auth
+   server gates /_api (validate answered 401). Same corner as the site pen. */
+a.login-link {
+  position: absolute;
+  top: 0.6rem;
+  right: 1.25rem;
+  z-index: 10;
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+a.login-link:hover {
+  opacity: 1;
+}
+
 article p,
 article li,
 article dd {

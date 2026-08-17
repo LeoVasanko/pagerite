@@ -24,6 +24,70 @@
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
   let editorModule = null;
 
+  // --- Auth-gated edit pens ---------------------------------------------
+  // Pages render identically for everyone; the 🖊️ pens are injected by JS
+  // only after the auth server validates the session (perm pagerite:admin).
+  // 401 = anonymous: show a small login link in the banner corner instead.
+  // 403 = logged in without the permission: no pens. Any other outcome
+  // (404, network error — i.e. no auth server deployed, as in dev) leaves
+  // editing open as before: the real gate is the proxy in front of /_api.
+  let authorized = false;
+  let editorMeta = null;
+
+  function makePen(mode) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = mode === "page" ? "edit-link" : "edit-link banner-edit-link";
+    btn.title = "edit";
+    btn.textContent = "🖊️";
+    btn.dataset.editorSrc = editorMeta.src;
+    btn.dataset.editorCss = editorMeta.css || "";
+    btn.dataset.editorMode = mode;
+    return btn;
+  }
+
+  function injectPens() {
+    const banner = document.getElementById("page-banner");
+    if (banner && !banner.parentElement.querySelector(".banner-edit-link")) {
+      banner.after(makePen("site"));
+    }
+    const article = document.querySelector("#main article");
+    if (article && !article.querySelector("button.edit-link")) {
+      article.prepend(makePen("page"));
+    }
+  }
+
+  function addLoginLink() {
+    const banner = document.getElementById("page-banner");
+    if (!banner || banner.parentElement.querySelector(".login-link")) return;
+    const a = document.createElement("a");
+    a.className = "login-link";
+    a.href = "/auth/";
+    a.textContent = "log in";
+    banner.after(a);
+  }
+
+  async function setupAuth() {
+    const src = document.querySelector('meta[name="pagerite:editor-src"]')?.content;
+    if (!src) return;
+    editorMeta = {
+      src,
+      css: document.querySelector('meta[name="pagerite:editor-css"]')?.content,
+    };
+    let status = 0;
+    try {
+      status = (await fetch("/auth/api/validate?perm=pagerite:admin")).status;
+    } catch {
+      // Auth server unreachable: treat as not deployed.
+    }
+    if (status === 401) addLoginLink();
+    else if (status !== 403) {
+      authorized = true;
+      injectPens();
+      placeEditPen();
+    }
+  }
+
   function runScripts(root) {
     // Scripts inserted via DOM swapping do not execute; re-create them.
     for (const old of root.querySelectorAll("script")) {
@@ -86,6 +150,8 @@
     (window.requestIdleCallback || setTimeout)(preload);
     const main = document.getElementById("main");
     addCopyButtons(main);
+    // Fetch-navigation swaps #main, discarding the article pen; re-add it.
+    if (authorized) injectPens();
     placeEditPen();
     // Multi-column layout only when there is enough text to justify it.
     // Split the body into columned segments: h2s and wide figures are
@@ -276,7 +342,8 @@
     if (url.origin !== location.origin) return;
     // Same-page anchor links (footnotes etc.): let the browser handle them
     if (url.pathname === location.pathname && url.hash) return;
-    if (url.pathname.startsWith("/_")) return;
+    // Machinery and auth endpoints are never fetch-navigated.
+    if (url.pathname.startsWith("/_") || url.pathname.startsWith("/auth")) return;
     ev.preventDefault();
     load(url);
   });
@@ -319,5 +386,6 @@
     toggleTask(checkbox, index);
   });
 
+  setupAuth();
   applyEffects();
 })();

@@ -163,12 +163,6 @@ class PageIn(BaseModel):
     banner: str | None = None  # None keeps the existing banner
 
 
-@app.get("/_api/health")
-async def health_check() -> dict[str, str]:
-    """Return backend status for health monitoring."""
-    return {"status": "ok"}
-
-
 @app.get("/_api/pages")
 async def list_pages() -> list[dict]:
     """The site tree for the structure editor (all nodes, drafts included).
