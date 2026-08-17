@@ -67,6 +67,31 @@
 
 html {
   scroll-behavior: smooth;
+  /* Overlay scrollbars where supported (Chromium/WebKit, deprecated but
+     working): a scrollbar that appears covers a strip of the layout instead
+     of shifting it, and no space is reserved while absent — so 100vw always
+     equals the body width and .wide breakout margins stay exact. Ignored by
+     Firefox (unknown value), which keeps its thin classic scrollbar. */
+  overflow-y: overlay;
+  /* Lightweight scrollbar styling: thin, theme-muted thumb on a transparent
+     track where supported (Firefox: the two properties; WebKit: the rules
+     below). Full restyling deliberately not attempted. */
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 0.5rem;
+  height: 0.5rem;
+}
+
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--muted) 45%, transparent);
+  border-radius: 0.25rem;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 body {
