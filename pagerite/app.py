@@ -563,8 +563,9 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
     """
     path = path.strip("/")
     if path and _is_reserved(path):
-        # Reserved slug shape: never content — no tree lookup.
-        return HTMLResponse(views.render_not_found(data.menu, path, data.brand, data.custom_css, data.theme), 404)
+        # Invalid slug shape: not a content URL, let FastAPI return its
+        # built-in 404 instead of rendering an editable article page.
+        raise HTTPException(404)
     chain = resolve(data.menu, path)
     node = chain[-1] if chain else None
     if node is not None and node.published and node.content is not None:

@@ -353,7 +353,7 @@ def render_not_found(
     doc = E.article
     with doc:
         doc.h1("Not Found")
-        doc.p(f"No page at /{path}.")
+        doc.p(f"No article at /{path}. If there was before, it may have been deleted.")
     scripts, styles = _page_assets(theme)
     return str(
         _layout(styles, scripts, custom_css, theme)(
