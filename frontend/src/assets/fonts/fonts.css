@@ -1,6 +1,10 @@
 /* Variable fonts: only downloaded when referenced by the page CSS. */
 @font-face { font-family: 'Fraunces'; font-weight: 100 1000; font-style: normal; font-display: swap; src: url('fraunces.woff2') format('woff2'); }
 @font-face { font-family: 'Literata'; font-weight: 100 900; font-style: normal; font-display: swap; src: url('literata.woff2') format('woff2'); }
+@font-face { font-family: 'Playfair Display'; font-weight: 400 900; font-style: normal; font-display: swap; src: url('playfairdisplay.woff2') format('woff2'); }
+@font-face { font-family: 'Playfair Display'; font-weight: 400 900; font-style: italic; font-display: swap; src: url('playfairdisplay-italic.woff2') format('woff2'); }
+@font-face { font-family: 'Cormorant'; font-weight: 300 700; font-style: normal; font-display: swap; src: url('cormorant.woff2') format('woff2'); }
+@font-face { font-family: 'Cormorant'; font-weight: 300 700; font-style: italic; font-display: swap; src: url('cormorant-italic.woff2') format('woff2'); }
 @font-face { font-family: 'Inter'; font-weight: 100 900; font-style: normal; font-display: swap; src: url('inter.woff2') format('woff2'); }
 @font-face { font-family: 'Inter'; font-weight: 100 900; font-style: italic; font-display: swap; src: url('inter-italic.woff2') format('woff2'); }
 @font-face { font-family: 'Montserrat'; font-weight: 100 900; font-style: normal; font-display: swap; src: url('montserrat.woff2') format('woff2'); }

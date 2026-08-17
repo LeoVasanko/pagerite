@@ -94,7 +94,8 @@ not for the public pages. See `docs/design-principles.md` for the design.
       under `/_assets/`: `pagerite.css` (base layout + conservative variables),
       `themes/purple/theme.css` (the purple/dark theme override, including its
       own `banner.svg`), `pygments.css`, and `fonts/` (self-hosted Source
-      Sans 3/Source Serif 4/Fraunces/Literata/Inter/Montserrat/Fira Code
+      Sans 3/Source Serif 4/Fraunces/Literata/Cormorant/Playfair
+      Display/Inter/Montserrat/Fira Code
       variable woff2). The `::view-transition*` block at the end of `pagerite.css` (from
       termotohtori.fi) is fragile — do not tweak.
     - Vite builds ES-module `.js` outputs; the backend renders `<script
@@ -120,8 +121,14 @@ not for the public pages. See `docs/design-principles.md` for the design.
   editable like any other. Every
   non-empty list (and the root) ends with a non-draggable ➕ footer row
   (vuedraggable `#footer` slot): clicking it starts a new pending page at
-  that level, and while dragging it is the list's "end of list" drop
-  target. Dropping ON the lower part of a row moves the page under that
+  that level (its slug placeholder shows the slug derived live from the
+  title being typed), and while dragging it is the list's "end of list" drop
+  target. Committing a pending page PUTs it with empty markdown (creates
+  an empty page that renders with its title — saving never deletes;
+  deletion is the page editor's explicit choice: saving trimmed-empty
+  text issues a REST DELETE), then hands over to the page editor
+  (CodeMirror focuses on mount). Dropping ON the lower part of a row
+  moves the page under that
   row (the child list's container invisibly overlaps its own row's bottom
   via negative margin — Sortable inserts it as the first child natively),
   while a row's exposed top edge inserts a sibling before it. Row

@@ -199,22 +199,21 @@ async def save_page(path: str, page: PageIn) -> None:
     """Create or replace the page at a slug path ("" or "/" = front page).
 
     Missing ancestors are created as content-less category labels. Giving
-    a category markdown turns it into a landing page. An empty markdown
-    string (after stripping) deletes the page instead.
+    a category markdown turns it into a landing page. Empty markdown (after
+    stripping) creates an empty page that renders with just its title —
+    saving never deletes; use DELETE to remove a page (the page editor
+    issues DELETE when you save empty text).
     """
     path = path.strip("/")
     _check_reserved(path)
     with kanta.transaction("save page", extra=path):
-        if page.markdown.strip() == "":
-            _remove_page_content(data.menu, path)
-        else:
-            node = _ensure(data.menu, path)
-            node.title = page.title
-            node.content = page.markdown
-            node.published = page.published
-            if page.banner is not None:
-                node.banner = page.banner
-            node.modified = datetime.now(UTC)
+        node = _ensure(data.menu, path)
+        node.title = page.title
+        node.content = page.markdown
+        node.published = page.published
+        if page.banner is not None:
+            node.banner = page.banner
+        node.modified = datetime.now(UTC)
         data.version += 1
 
 
@@ -532,21 +531,18 @@ async def editor_ws(ws: WebSocket) -> None:
                             tnodes[tslug] = node
                         else:
                             node = old if old is not None else _ensure(data.menu, path)
-                        removed = False
                         if "markdown" in msg:
-                            if msg["markdown"].strip() == "":
-                                _remove_page_content(data.menu, path)
-                                removed = True
-                            else:
-                                node.content = msg["markdown"]
-                        if not removed:
-                            if "title" in msg:
-                                node.title = msg["title"]
-                            if "published" in msg:
-                                node.published = bool(msg["published"])
-                            if "banner" in msg:
-                                node.banner = msg["banner"]
-                            node.modified = datetime.now(UTC)
+                            # Saving never deletes; empty markdown is an
+                            # empty page. Deletion is an explicit choice by
+                            # the page editor (REST DELETE).
+                            node.content = msg["markdown"]
+                        if "title" in msg:
+                            node.title = msg["title"]
+                        if "published" in msg:
+                            node.published = bool(msg["published"])
+                        if "banner" in msg:
+                            node.banner = msg["banner"]
+                        node.modified = datetime.now(UTC)
                         data.version += 1
                     await ws.send_json({"type": "saved", "path": path})
     except WebSocketDisconnect:

@@ -111,7 +111,8 @@ function onEnd() {
             <input
               v-model="element.slug"
               class="edit slug-edit"
-              placeholder="slug — empty: derived from the title"
+              :placeholder="slugify(element.title)"
+              title="Slug (last path segment) — empty: derived from the title"
               @input="onPendingSlugInput(element, $event)"
               @keyup.enter="handlers.commitPending()"
               @keyup.esc="handlers.discardPending()"
@@ -275,7 +276,6 @@ body.tree-dragging .treelist {
 
 .slug-edit {
   font-family: var(--font-code);
-  color: var(--muted);
 }
 
 .acts {

@@ -175,9 +175,9 @@ async function loadPlain(p) {
 }
 
 // Tree row focus: switch the edited page and show it, skipping transitions.
-function navigate(p) {
+async function navigate(p) {
   openPath(p)
-  loadPlain(p)
+  await loadPlain(p)
 }
 
 // If the currently edited page moved (rename/move of itself or an
@@ -244,7 +244,7 @@ async function commitPending() {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       title: node.title.trim() || slug,
-      markdown: '',
+      markdown: '', // empty markdown creates an empty page (never deletes)
       published: true,
     }),
   })
@@ -269,7 +269,10 @@ async function commitPending() {
   }
   pending.value = null
   await refreshPages()
-  navigate(newPath)
+  await navigate(newPath)
+  // Hand over to the page editor for the actual writing: click the fresh
+  // page's pen (pagerite.js swaps the panel; CodeMirror focuses on mount).
+  document.querySelector('#main article button.edit-link')?.click()
 }
 
 // --- Site-wide brand (header link + <title> suffix) ----------------------
@@ -406,6 +409,7 @@ const FONT_OPTIONS = [
   { value: 'var(--font-source-serif)', label: 'Source Serif 4', serif: true },
   { value: 'var(--font-fraunces)', label: 'Fraunces', serif: true },
   { value: 'var(--font-literata)', label: 'Literata', serif: true },
+  { value: 'var(--font-cormorant)', label: 'Cormorant', serif: true },
   { value: 'var(--font-source-sans)', label: 'Source Sans 3', serif: false },
   { value: 'var(--font-inter)', label: 'Inter', serif: false },
   { value: 'var(--font-montserrat)', label: 'Montserrat', serif: false },

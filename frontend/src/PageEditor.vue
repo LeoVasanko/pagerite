@@ -63,11 +63,19 @@ function requestRender() {
 function save() {
   // Path is not editable here (that's the site editor's job); saving
   // never moves the page.
+  const markdown = view.state.doc.toString()
+  if (markdown.trim() === '') {
+    // Empty text means delete — an explicit choice made here, in the page
+    // editor; the save APIs (REST PUT / WS save) never delete on empty.
+    return fetch(`/_api/pages/${path.value}`, { method: 'DELETE' }).then((res) => {
+      saveError.value = res.ok ? '' : '⚠️ changes could not be saved'
+    })
+  }
   const msg = {
     type: 'save',
     path: path.value,
     title: title.value,
-    markdown: view.state.doc.toString(),
+    markdown,
     published: published.value,
   }
   pendingSave = msg
@@ -247,6 +255,8 @@ onMounted(() => {
     parent: editorEl.value,
   })
   view.scrollDOM.addEventListener('scroll', syncScroll)
+  // Opening the editor means you want to write: start focused.
+  view.focus()
   window.__pageritePageEditor = {
     getMarkdown: () => view.state.doc.toString(),
     setMarkdown: (text) => setDocument(text, true),
