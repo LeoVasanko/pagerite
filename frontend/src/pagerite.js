@@ -20,7 +20,9 @@
     });
   }
 
-  const REGIONS = ["page-banner", "nav", "sidebar", "main"];
+  // Regions every page has. #sidebar is NOT among them: it is omitted
+  // entirely when the section has no sub-navigation, and handled below.
+  const REGIONS = ["page-banner", "nav", "main"];
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
   let editorModule = null;
 
@@ -235,6 +237,27 @@
     currentPath = location.pathname;
   });
 
+  // --- Banner parallax ----------------------------------------------------
+  // The banner artwork stays windowed in place while its contents drift
+  // against the scroll. The --pry scroll parameter is also available to
+  // themes for their own effects (e.g. the purple sun rising faster than
+  // the drift). Event-driven only: perfectly still when the page is idle.
+  if (!reduceMotion.matches) {
+    let ticking = false;
+    const drift = () => {
+      ticking = false;
+      document.documentElement.style.setProperty(
+        "--pry", `${Math.min(scrollY * 0.1, 30)}px`,
+      );
+    };
+    addEventListener("scroll", () => {
+      if (!ticking) {
+        ticking = true;
+        requestAnimationFrame(drift);
+      }
+    }, { passive: true });
+  }
+
   // --- Fetch navigation ------------------------------------------------
   async function load(url, push = true, back = false) {
     // Navigating with the editor open closes it; unsaved edits are lost
@@ -263,6 +286,18 @@
       for (const id of REGIONS) {
         const el = document.getElementById(id);
         el.replaceWith(document.importNode(doc.getElementById(id), true));
+      }
+      // #sidebar is omitted entirely when the section has no
+      // sub-navigation, so it may be absent on either side of the swap:
+      // replace, insert (as #main's preceding sibling), or remove.
+      const oldSidebar = document.getElementById("sidebar");
+      const newSidebar = doc.getElementById("sidebar");
+      if (oldSidebar && newSidebar) {
+        oldSidebar.replaceWith(document.importNode(newSidebar, true));
+      } else if (newSidebar) {
+        document.getElementById("main").before(document.importNode(newSidebar, true));
+      } else if (oldSidebar) {
+        oldSidebar.remove();
       }
       // Site-wide custom CSS lives in <head id="pagerite-user"> and must be
       // kept in sync across fetch-navigations. It is kept last in <head>:

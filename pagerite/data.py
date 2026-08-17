@@ -80,7 +80,8 @@ class Data(msgspec.Struct):
     #: site editor. Empty = no brand link in the header, no title suffix.
     brand: str = "Pagerite"
     #: Active theme name (empty = none/base only). Themes live in
-    #: frontend/src/assets/themes/{theme}/theme.css.
+    #: frontend/src/assets/themes/{theme}/theme.css, with their banner
+    #: artwork at pagerite/themes/{theme}/banner.svg (inlined server-side).
     theme: str = "purple"
     #: Raw site-wide custom CSS, injected inline in every page <head>.
     #: Trusted author content; not sanitized.

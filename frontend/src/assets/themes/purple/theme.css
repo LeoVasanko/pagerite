@@ -1,38 +1,74 @@
-/* Purple theme: overrides the conservative base variables and adds the
-   more elaborate visual styling (dark palette, gradient brand, etc.). */
+/* Purple theme: bold dusk palette (sky/violet/pink on deep indigo),
+   editorial typography (Fraunces display over Literata body), the sunrise
+   banner artwork (inlined by the backend into #page-banner) and a
+   playfully oversized tilted brand. */
 
 :root {
   color-scheme: dark;
-  --bg: #12101c;
-  --surface: #1b1830;
-  --text: #e8e6f2;
-  --muted: #9a94b8;
-  --accent: #00d4c8;
-  --accent2: #7c5cff;
-  --line: #ffffff1a;
+  --bg: #131022;
+  --surface: #1e1a36;
+  --text: #ece9f7;
+  --muted: #a79ecb;
+  /* Icy sky-cyan: the cool counterweight to violet/pink (green-leaning
+     teal clashed with them), and complementary to the sunrise's sun. */
+  --accent: #5ad1f5;
+  --accent2: #9b6bff;
+  --accent3: #ff6b9d;
+  --line: #ffffff1c;
+  --font-body: var(--font-literata);
+  --font-heading: var(--font-fraunces);
 }
 
 ::selection {
   background: var(--accent2);
+  color: #fff;
 }
 
+/* Oversized tilted brand in the sky→violet gradient. */
 #brand {
+  font-size: clamp(3.2rem, 9vw, 7.5rem);
+  line-height: 1;
+  margin-bottom: -0.28em;
+  transform: rotate(-2deg);
+  transform-origin: left bottom;
   background: linear-gradient(90deg, var(--accent), var(--accent2));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
   text-shadow: none;
-  filter: drop-shadow(0 0 0.1rem #000);
+  filter: drop-shadow(0 0.15rem 0.6rem #9b6bff55);
+}
+
+/* Sunrise parallax: the sun and its glow rise faster than the artwork
+   drift (pagerite.js sets --pry on <html>), so scrolling the page makes
+   the sun come up. */
+#page-banner .sun,
+#page-banner .sun-glow {
+  transform-box: fill-box;
+  transform: translateY(calc(var(--pry, 0px) * -2));
+}
+
+/* The banner artwork fades into the page background at its bottom edge
+   (baked into the SVG, so a user banner replaces it cleanly). */
+.banner-fade {
+  stop-color: var(--bg);
 }
 
 #banner {
-  background: url("./banner.svg") center 40% / cover;
+  min-height: 13rem;
 }
 
-/* Colored headings are part of the theme's more elaborate styling; the
-   base keeps headings in plain text color. */
+/* Dark artwork: keep the nav readable with a shadow. */
+#nav {
+  text-shadow: 0 0 0.15em black;
+}
+
+/* Colored headings, one accent per level: teal h1 with a gradient
+   underline, violet h2, pink h3 in a quieter weight. */
 article h1 {
   color: var(--accent);
+  padding-bottom: 0.35rem;
+  background: linear-gradient(90deg, var(--accent), var(--accent2) 45%, transparent) bottom left / 100% 2px no-repeat;
 }
 
 article h2 {
@@ -40,17 +76,37 @@ article h2 {
 }
 
 article h3 {
-  color: color-mix(in oklab, var(--accent2) 60%, var(--muted));
+  color: var(--accent3);
+  font-weight: 500;
 }
 
-/* Dark artwork: keep the nav readable with a shadow (the base style uses
-   a scrim instead — shadows only work on dark backgrounds). */
-#nav {
-  text-shadow: 0 0 0.15em black;
+/* Theme-colored diamond markers instead of the base emoji (blue/orange
+   clashes with this palette). */
+article ul li::before {
+  content: "◆";
+  color: var(--accent);
+  font-size: 0.7em;
+  vertical-align: 0.15em;
 }
 
+article ul ul li::before {
+  content: "◆";
+  color: var(--accent2);
+}
+
+article ul ul ul li::before {
+  content: "◆";
+  color: var(--accent3);
+}
+
+blockquote {
+  border-left-color: var(--accent2);
+}
+
+/* Code panels sit slightly lighter than the page; the token colors come
+   from the base dark set (this theme declares color-scheme: dark). */
 pre {
-  background: #ffffff09;
+  --code-bg: var(--surface);
 }
 
 ::view-transition {

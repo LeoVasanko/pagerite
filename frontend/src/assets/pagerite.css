@@ -5,6 +5,9 @@
 @import url("./pygments.css");
 
 :root {
+  /* The base theme is light, period — this also resolves the light-dark()
+     code palette below (themes declare their own color-scheme). */
+  color-scheme: light;
   --bg: #ffffff;
   --surface: #f5f5f5;
   --text: #1a1a1a;
@@ -12,6 +15,28 @@
   --accent: #0056b3;
   --accent2: #003d80;
   --line: #0000001a;
+  /* Links stay quiet — mostly text color with a hint of the accent —
+     and light up to the full accent on hover. */
+  --link: color-mix(in oklab, var(--text) 50%, var(--accent));
+  /* Code highlighting palette, consumed by pygments.css: complete light and
+     dark sets (background included), resolved by light-dark() from the
+     used color-scheme. A theme picks a set simply by declaring
+     color-scheme; a fixed dark code block on a light page pins the dark
+     set with `pre { color-scheme: dark }`. Only override individual
+     --code-* variables for specific theming needs. */
+  --code-bg: light-dark(var(--surface), #0d1117);
+  --code-text: light-dark(#24292f, #e6edf3);
+  --code-muted: light-dark(#6e7781, #6e7681);
+  --code-comment: light-dark(#59636e, #8b949e);
+  --code-keyword: light-dark(#cf222e, #ff7b72);
+  --code-builtin: light-dark(#0550ae, #79c0ff);
+  --code-string: light-dark(#0a3069, #a5d6ff);
+  --code-function: light-dark(#8250df, #d2a8ff);
+  --code-type: light-dark(#953800, #f0883e);
+  --code-tag: light-dark(#116329, #7ee787);
+  --code-error: light-dark(#d1242f, #f85149);
+  --code-added: light-dark(#1a7f37, #56d364);
+  --code-hl: light-dark(#fff8c5, #6e7681);
   /* One variable per available font family (faces in fonts/fonts.css);
      everything else references these, so font stacks live here only. */
   --font-source-sans: "Source Sans 3", system-ui, sans-serif;
@@ -77,8 +102,10 @@ body {
   border-bottom: 1px solid var(--line);
 }
 
-/* Per-page banner content (img, styled div, canvas...) overlays the
-   default artwork; swapped along with #nav/#main on fetch-navigation. */
+/* Per-page banner content (img, styled div, inline SVG...) fills the
+   banner; swapped along with #nav/#main on fetch-navigation. When the page
+   sets no banner of its own, the backend inlines the active theme's SVG
+   artwork here instead (pagerite/themes/{theme}/banner.svg). */
 #page-banner {
   position: absolute;
   inset: 0;
@@ -90,16 +117,11 @@ body {
   width: 100%;
   height: 100%;
   object-fit: cover;
-}
-
-/* Legibility scrim: fade banner artwork into the page background behind
-   the overlaid brand/nav. Text shadows are not used for this — on light
-   backgrounds they just look like blurry text. */
-#page-banner::after {
-  content: "";
-  position: absolute;
-  inset: 30% 0 0;
-  background: linear-gradient(transparent, var(--bg));
+  /* Scroll parallax: pagerite.js sets --pry on <html>; the banner stays
+     windowed in place while the artwork drifts inside it. The scale
+     provides overscan so the drift never reveals an edge. */
+  transform: scale(1.25) translateY(var(--pry, 0px));
+  will-change: transform;
 }
 
 #brand,
@@ -245,10 +267,6 @@ button.banner-edit-link {
   border-radius: 0 0 0.5rem 0;
   background: color-mix(in srgb, var(--bg) 75%, transparent);
   backdrop-filter: blur(0.5rem);
-}
-
-#sidebar:empty {
-  display: none;
 }
 
 #sidebar ul {
@@ -436,12 +454,13 @@ article h2 {
 }
 
 article a {
-  color: var(--accent);
+  color: var(--link);
+  font-weight: 500;
   text-decoration: none;
 }
 
 article a:hover {
-  text-decoration: underline;
+  color: var(--accent);
 }
 
 /* Blockquotes: inner paragraphs carry no margins (spacing comes from the
@@ -463,9 +482,11 @@ pre {
   overflow-x: auto;
   padding: 0.5rem 0.8rem;
   /* Code text aligns with the surrounding paragraphs: the box extends
-     past them by its own padding. */
+     past them by its own padding. Themes that add a left border must
+     extend margin-left by the border width to keep this alignment. */
   margin-left: -0.8rem;
   margin-right: -0.8rem;
+  background: var(--code-bg);
   border-radius: 4px;
   position: relative;
 }
@@ -531,7 +552,6 @@ figure {
 figcaption {
   color: var(--muted);
   font-size: 0.85rem;
-  margin-top: 0.4rem;
 }
 
 /* Captions of full-bleed images: centered and kept to a readable width. */
@@ -546,14 +566,12 @@ figure:has(.right),
 img.right {
   float: right;
   margin: 0.3rem 0 1rem 1.5rem;
-  max-width: 45%;
 }
 
 figure:has(.left),
 img.left {
   float: left;
   margin: 0.3rem 1.5rem 1rem 0;
-  max-width: 45%;
 }
 
 /* .wide is full bleed: edge to edge of the viewport (or of the space left
@@ -575,6 +593,44 @@ img.wide {
 /* A paragraph wrapping only a wide image must not add its line height. */
 p:has(> img.wide:only-child) {
   line-height: 0;
+}
+
+/* A captioned image is a <figure>, and the positioning class lives on the
+   img inside it: only the figure may float/shift, never the img itself,
+   or the caption would wrap beside the image instead of sitting below.
+   The image fills the figure's width. */
+figure:has(.right) img,
+figure:has(.left) img {
+  float: none;
+  margin: 0;
+  width: 100%;
+}
+
+figure:has(.wide) img {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  transform: none;
+}
+
+/* Floats take a fixed share of the text column rather than sizing by the
+   image's intrinsic width, which varies wildly (SVGs have none, and
+   min-content collapses them). A percentage also scales correctly inside
+   two-column segments, where the column is the containing block. The
+   caption wraps within that width. A width attribute ({.right width=300})
+   overrides the default on uncaptioned images. */
+figure:has(.right),
+figure:has(.left),
+img.right:not([width]),
+img.left:not([width]) {
+  width: 30%;
+}
+
+/* Section headings start below any floated figures of the previous
+   section, so images never overflow into the next one. */
+article h1,
+article h2 {
+  clear: both;
 }
 
 body.editing figure:has(.wide),

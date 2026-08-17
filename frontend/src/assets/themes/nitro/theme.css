@@ -1,0 +1,286 @@
+/* Nitro theme: racing/HUD style — saturated orange + cyan, console/HUD-style
+   monospace display type, an orange racing-tab nav with a bezier clip-path,
+   and a dark bezier banner. Follows prefers-color-scheme: the light scheme
+   is a warm light-grey page, the dark scheme a deep violet page; the banner
+   and other dark/bright elements carry over unchanged.
+
+   Color model: the base stylesheet's variables carry the page; nitro adds
+   a small set of theme-specific colors below, and everything else in the
+   file references variables only, so recoloring happens here. */
+
+:root {
+  color-scheme: light dark;
+
+  /* Page palette (base variables) */
+  --bg: #eee;
+  /* warm light grey page background */
+  --surface: #fff;
+  --text: #1a1a1a;
+  --muted: #655f52;
+  /* warm grey secondary text */
+  --line: #1a1a1a1f;
+  /* hairlines: tables, column rules */
+  --accent: #ff6a00;
+  /* racing orange: decorations, nav tab, markers */
+  --accent2: #008ba3;
+  /* deep cyan: h3, blockquote bar, nested markers */
+
+  /* Nitro-specific colors */
+  --orange-deep: #d95a00;
+  /* orange dark enough for body text (h2, links) */
+  --ink: #000;
+  /* pure black details: tab text, brand shadow */
+  --neon: #59ecff;
+  /* glowing cyan: current page on the orange tab */
+  --tab-current: #eee;
+  --tab-hover: #fff;
+  /* glowing white: nav hover (kept bright: the
+                              nav glow is text-shadow, which fades dimmer) */
+  --tab-muted: #0000008c;
+  /* secondary labels on the orange tab */
+
+  --font-body: var(--font-montserrat);
+  --font-heading: var(--font-literata);
+}
+
+/* Dark scheme: same identity, but the page goes deep violet (never muddy
+   near-black); the cyan and orange accents brighten to keep their punch. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17141f;
+    --surface: #231f2e;
+    --text: #f0ede8;
+    --muted: #a89f8f;
+    --line: #ffffff22;
+    --accent2: #2fc3dd;
+    /* brighter cyan, readable on dark */
+    --orange-deep: #ff8a3d;
+    /* brighter orange, readable on dark */
+    --code-bg: #12101b;
+    /* code wells join the violet family */
+  }
+
+  /* Banner dark tones tinted to the same violet family as the page. */
+  .nb-base {
+    fill: #100d18;
+  }
+
+  .nb-s1a {
+    stop-color: #292536;
+  }
+
+  .nb-s1b {
+    stop-color: #100d18;
+  }
+
+  .nb-s2a {
+    stop-color: #1e1a2b;
+  }
+
+  .nb-s2b {
+    stop-color: #090811;
+  }
+
+  .nb-c0 {
+    stop-color: #322d44;
+  }
+
+  .nb-c1 {
+    stop-color: #171422;
+  }
+
+  .nb-c2 {
+    stop-color: #100d18;
+  }
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--ink);
+}
+
+/* Oversized outlined brand, spilling off the banner edge: orange stroke,
+   solid black fill. */
+#brand {
+  font-size: 10rem;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--orange-deep);
+  text-shadow: 0 0 0.1em black;
+}
+
+/* Bezier-swept banner with wide orange stripes (inlined SVG), separated
+   from the page by a straight orange blade. */
+#banner {
+  height: 13rem;
+  border-bottom: 4px solid var(--accent);
+}
+
+/* Banner artwork dark tones: neutral greys in light mode (retinted to the
+   page's violet family by the dark-scheme block above). */
+.nb-base {
+  fill: #0b0b0d;
+}
+
+.nb-s1a {
+  stop-color: #242428;
+}
+
+.nb-s1b {
+  stop-color: #0b0b0d;
+}
+
+.nb-s2a {
+  stop-color: #19191d;
+}
+
+.nb-s2b {
+  stop-color: #060607;
+}
+
+.nb-c0 {
+  stop-color: #2a2a2f;
+}
+
+.nb-c1 {
+  stop-color: #131315;
+}
+
+.nb-c2 {
+  stop-color: #0b0b0d;
+}
+
+#nav {
+  font-family: var(--font-heading);
+  font-size: 0.95em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  /* Racing tab: sitting at the bottom of the banner, with a bezier clip —
+     slanted sides that join top and bottom horizontally, and a shallow
+     wide notch at the top middle. Generous side padding so the em-based
+     slants fit. The border-radius is the fallback for browsers without
+     shape(). */
+  background: var(--accent);
+  width: fit-content;
+  padding: 0.3em 2.5em 0;
+  border-radius: 1.2em 1.2em 0 0;
+  clip-path: shape(
+      /* left side */
+      from 0% 100%,
+      curve to 2.5em 0 with 2em 100% / 1em 0,
+      /* notch: ≈ golden-ratio width of the available top edge */
+      hline to calc(19.1% + 1.7em),
+      line to calc(19.1% + 2.1em) 0.2em,
+      hline to calc(80.9% - 2.1em),
+      line to calc(80.9% - 1.7em) 0,
+      /* right side, bottom */
+      hline to calc(100% - 2.5em),
+      curve to 100% 100% with calc(100% - 1em) 0 / calc(100% - 2em) 100%,
+      close);
+}
+
+#nav a {
+  color: var(--ink);
+}
+
+/* Current page and hover glow on the orange tab; both stay bright colors
+   because the glow is text-shadow. */
+#nav .current {
+  color: var(--tab-current);
+  text-shadow: 0 0 0.1em;
+}
+
+#nav a:hover {
+  color: var(--tab-hover);
+  text-shadow: 0 0 0.1em;
+}
+
+#nav span {
+  color: var(--tab-muted);
+}
+
+/* Console-style headings: uppercase monospace. h1 in the page text color
+   with a hazard-stripe underline, h2 deep orange, h3 cyan. */
+article h1,
+article h2,
+article h3 {
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+article h1 {
+  color: var(--text);
+  font-weight: 700;
+  padding-bottom: 0.5rem;
+  /* The hazard-stripe underline breaks out of the page box: the negative
+     right margin extends the h1's box (and thus its background) all the
+     way to the viewport's right edge. */
+  margin-right: calc((100% - 100vw) / 2);
+  background:
+    linear-gradient(-55deg,
+      transparent 0 0.2rem,
+      var(--accent) 0.2rem 0.9rem,
+      transparent 0.9rem 1.4rem) -0.2rem bottom / 1.4rem 4px repeat-x;
+}
+
+article h2 {
+  color: var(--orange-deep);
+  font-weight: 700;
+}
+
+article h3 {
+  color: var(--accent2);
+  font-weight: 700;
+}
+
+article a:hover {
+  color: var(--accent2);
+  text-decoration: none;
+}
+
+/* Chevron markers instead of the base emoji diamonds. */
+article ul li::before {
+  content: "»";
+  color: var(--accent);
+  font-weight: 700;
+}
+
+article ul ul li::before {
+  content: "›";
+  color: var(--accent2);
+}
+
+article ul ul ul li::before {
+  content: "»";
+  color: var(--accent);
+}
+
+blockquote {
+  border-left-color: var(--accent2);
+  background: color-mix(in oklab, var(--accent2) 6%, transparent);
+  padding: 0.25rem 0.75rem;
+  /* Keep the quoted text on the paragraph edge: the tinted box extends
+     past it by its own border/padding, like code blocks. */
+  margin: 0 -0.75rem 1rem -1rem;
+}
+
+/* Code follows the color scheme; the dark-scheme well joins the violet
+   family (--code-bg above). The orange side bar stays in both. */
+pre {
+  border-left: 0.25rem solid var(--accent);
+  /* Text on the paragraph edge: the box extends by padding + border. */
+  margin-left: calc(-0.8rem - 0.25rem);
+  border-radius: 3px;
+}
+
+img {
+  border-radius: 3px;
+}
+
+::view-transition {
+  background: var(--bg);
+}

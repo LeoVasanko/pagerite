@@ -7,8 +7,9 @@ can swap them without reloading the page chrome.
 
 Navigation walks the Node tree directly (see data.py): nav_html lists the
 top level — the front page (slug "") is an ordinary top-level item, not
-the parent of the others — and sidebar_html the children of the current
-top-level section. Nodes without content are category labels; nav links
+the parent of the others — and sidebar_html the sub-navigation of the
+current top-level section, rendered only when the section offers at
+least two published items. Nodes without content are category labels; nav links
 to them point straight at their first child page (first_leaf), and their
 own URL renders a placeholder page (render_category).
 """
@@ -54,11 +55,13 @@ def _shared_css_urls(vite_url: str | None, theme: str) -> list[str]:
 
     In dev the JS entries import these files, so Vite injects them; the
     backend does not link them, avoiding the HMR-wrapped module output.
+    Themes added after the last frontend build are missing from the
+    manifest — fall back to the base stylesheet rather than failing.
     """
     if vite_url:
         return []
     manifest = _manifest()
-    return [f"/{manifest[key]['file']}" for key in _css_keys(theme)]
+    return [f"/{manifest[key]['file']}" for key in _css_keys(theme) if key in manifest]
 
 
 def _editor_css_url(vite_url: str | None, theme: str) -> str | None:
@@ -118,7 +121,7 @@ def _layout(
             id="banner",
         )
         .div(
-            E.aside(E.Sidebar, id="sidebar"),
+            E.Sidebar,
             E.main(E.Main, id="main"),
             id="content",
         )
@@ -168,10 +171,13 @@ def nav_html(menu: dict[str, Node], current: str) -> HTML:
 
 
 def sidebar_html(menu: dict[str, Node], current: str) -> HTML:
-    """Render the contents of the #sidebar element for the current path.
+    """Render the #sidebar element for the current path (empty when none).
 
-    Lists the direct children of the current main level section; empty when
-    the path is not inside a section or the section has no children.
+    The sidebar is the current main level section's sub-navigation, so it
+    exists only when there is something to navigate: the section must
+    offer at least two published items. The front page, leaf pages and
+    one-page sections get no aside element at all (rather than an empty
+    or one-item box).
     """
     if not current:
         return HTML("")
@@ -179,12 +185,14 @@ def sidebar_html(menu: dict[str, Node], current: str) -> HTML:
     node = menu.get(section)
     if node is None:
         return HTML("")
+    items = [(s, c) for s, c in sorted_nodes(node.children) if c.published]
+    if len(items) < 2:
+        return HTML("")
     nav = E.ul
     with nav:
-        for slug, child in sorted_nodes(node.children):
-            if child.published:
-                _nav_link(nav, menu, child, f"{section}/{slug}", current)
-    return HTML(str(nav))
+        for slug, child in items:
+            _nav_link(nav, menu, child, f"{section}/{slug}", current)
+    return HTML(str(E.aside(nav, id="sidebar")))
 
 
 def first_leaf(menu: dict[str, Node], path: str) -> str | None:
@@ -208,18 +216,36 @@ def _first_leaf(node: Node, path: str) -> str | None:
     return None
 
 
-def banner_html(menu: dict[str, Node], path: str) -> HTML:
+def banner_html(menu: dict[str, Node], path: str, theme: str = "") -> HTML:
     """Resolve the banner for a path: the nearest node on the ancestor
-    chain (the node itself first), then the front page, then the default
-    CSS artwork. The front page is a top-level *sibling* of the other
+    chain (the node itself first), then the front page, then the theme
+    artwork. The front page is a top-level *sibling* of the other
     main-level nodes, not their parent, so it never appears in the chain
     and is consulted explicitly, last. The snippet is raw trusted HTML,
     so a banner can be anything — an img, a styled div, canvas + script.
+
+    With no user banner anywhere in the chain, the active theme's inline
+    SVG artwork is inlined instead: as markup it can be recolored from the
+    theme stylesheet (``var(--accent)`` etc.) and animated, and it is not
+    rendered at all when the user supplies their own banner.
     """
     source = banner_source(menu, path)
-    if source is None:
+    if source is not None:
+        return HTML(resolve(menu, source)[-1].banner)
+    return _theme_banner(theme)
+
+
+_banner_cache: dict[str, HTML] = {}
+
+
+def _theme_banner(theme: str) -> HTML:
+    """The theme's inline banner SVG (empty for none/unknown themes)."""
+    if not theme or "/" in theme:
         return HTML("")
-    return HTML(resolve(menu, source)[-1].banner)
+    if theme not in _banner_cache:
+        path = Path(__file__).parent / "themes" / theme / "banner.svg"
+        _banner_cache[theme] = HTML(path.read_text()) if path.exists() else HTML("")
+    return _banner_cache[theme]
 
 
 def banner_source(menu: dict[str, Node], path: str) -> str | None:
@@ -267,7 +293,7 @@ def render_page(
             Brand=_brand_link(brand),
             Nav=nav_html(menu, path),
             Sidebar=sidebar_html(menu, path),
-            Banner=banner_html(menu, path),
+            Banner=banner_html(menu, path, theme),
             Main=page_content(menu, path),
         ),
     )
@@ -288,20 +314,22 @@ def render_category(
     """
     node = resolve(menu, path)[-1]
     title = _title(path.rpartition("/")[2], node)
+    sidebar = sidebar_html(menu, path)
     doc = E.article
     with doc:
         doc.h1(title)
-        doc.p(
-            "Pages in this section are listed in the menu on the left."
-        )
+        if sidebar:
+            doc.p("Pages in this section are listed in the menu on the left.")
+        else:
+            doc.p("This section has no page of its own yet.")
     scripts, styles = _page_assets(theme)
     return str(
         _layout(styles, scripts, custom_css, theme)(
             Title=f"{title} – {brand}" if brand else title,
             Brand=_brand_link(brand),
             Nav=nav_html(menu, path),
-            Sidebar=sidebar_html(menu, path),
-            Banner=banner_html(menu, path),
+            Sidebar=sidebar,
+            Banner=banner_html(menu, path, theme),
             Main=HTML(str(doc)),
         ),
     )
@@ -326,7 +354,7 @@ def render_not_found(
             Brand=_brand_link(brand),
             Nav=nav_html(menu, path),
             Sidebar=sidebar_html(menu, path),
-            Banner=banner_html(menu, path),
+            Banner=banner_html(menu, path, theme),
             Main=HTML(str(doc)),
         ),
     )

@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 360" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="cbg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" class="cb-bg0"/>
+      <stop offset="1" class="cb-bg1"/>
+    </linearGradient>
+    <linearGradient id="cribbon" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" class="cb-r0"/>
+      <stop offset="1" class="cb-r1"/>
+    </linearGradient>
+    <radialGradient id="cglow" cx="0.78" cy="0.25" r="0.55">
+      <stop offset="0" class="cb-g0" stop-opacity="0.16"/>
+      <stop offset="1" class="cb-g1" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="cdots" width="26" height="26" patternUnits="userSpaceOnUse">
+      <circle cx="4" cy="4" r="3" class="cb-dot"/>
+    </pattern>
+  </defs>
+  <rect width="1600" height="360" fill="url(#cbg)"/>
+  <rect width="1600" height="360" fill="url(#cglow)"/>
+  <!-- Dot-matrix patch, fading towards the middle -->
+  <rect x="40" y="30" width="520" height="150" fill="url(#cdots)" opacity="0.14"/>
+  <rect x="40" y="200" width="340" height="104" fill="url(#cdots)" opacity="0.08"/>
+  <!-- Diagonal ribbons slashing across the right side -->
+  <g transform="rotate(-18 1250 180)">
+    <rect x="1060" y="-140" width="130" height="640" rx="8" fill="url(#cribbon)"/>
+    <rect x="1225" y="-140" width="36" height="640" rx="8" fill="url(#cribbon)" opacity="0.55"/>
+    <rect x="1295" y="-140" width="230" height="640" rx="8" fill="url(#cribbon)" opacity="0.14"/>
+  </g>
+  <!-- Large orbit circles, bottom right -->
+  <g fill="none" class="cb-orbit">
+    <circle cx="1410" cy="310" r="150" stroke-width="2" opacity="0.22"/>
+    <circle cx="1310" cy="335" r="85" stroke-width="2" opacity="0.14"/>
+  </g>
+  <!-- A few accent sparks -->
+  <g class="cb-spark">
+    <circle cx="620" cy="70" r="5" opacity="0.5"/>
+    <circle cx="700" cy="120" r="3.5" opacity="0.35"/>
+    <circle cx="840" cy="55" r="4" opacity="0.4"/>
+    <circle cx="950" cy="290" r="5" opacity="0.3"/>
+  </g>
+</svg>

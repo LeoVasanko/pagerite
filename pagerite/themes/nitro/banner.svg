@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 360" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="flare" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff6a00"/>
+      <stop offset="0.55" stop-color="#ff9e00"/>
+      <stop offset="1" stop-color="#ffd23f"/>
+    </linearGradient>
+    <!-- Layered bezier sweeps shade the panel: no flat fills, no plain
+         one-shot gradients. The dark tones are the nb-* classes so the
+         theme can tint them per color scheme (neutral in light mode,
+         violet to match the dark page in dark mode). -->
+    <linearGradient id="sweep1" x1="0" y1="0" x2="0.7" y2="1">
+      <stop offset="0" stop-color="#242428" class="nb-s1a"/>
+      <stop offset="1" stop-color="#0b0b0d" class="nb-s1b"/>
+    </linearGradient>
+    <linearGradient id="sweep2" x1="1" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#19191d" class="nb-s2a"/>
+      <stop offset="1" stop-color="#060607" class="nb-s2b"/>
+    </linearGradient>
+    <linearGradient id="cowl" x1="0" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#2a2a2f" class="nb-c0"/>
+      <stop offset="0.6" stop-color="#131315" class="nb-c1"/>
+      <stop offset="1" stop-color="#0b0b0d" stop-opacity="0" class="nb-c2"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1600" height="360" fill="#0b0b0d" class="nb-base"/>
+
+  <!-- Sweeping fairing curves shading the panel -->
+  <path d="M 0 360 C 350 240, 700 290, 1050 200 C 1250 150, 1450 170, 1600 110 L 1600 360 L 0 360 Z" fill="url(#sweep1)"/>
+  <path d="M 0 330 C 350 225, 700 272, 1050 188 C 1250 145, 1450 162, 1600 104" fill="none" stroke="#ffffff" stroke-opacity="0.07" stroke-width="3"/>
+  <path d="M 0 360 C 480 295, 950 345, 1600 250 L 1600 360 Z" fill="url(#sweep2)"/>
+  <path d="M 0 352 C 480 288, 950 336, 1600 242" fill="none" stroke="#ffffff" stroke-opacity="0.05" stroke-width="2"/>
+
+  <!-- The wide orange stripes -->
+  <g transform="skewX(-24)">
+    <rect x="880" y="-40" width="96" height="440" fill="url(#flare)"/>
+    <rect x="1002" y="-40" width="26" height="440" fill="#ff6a00"/>
+    <rect x="1050" y="-40" width="10" height="440" fill="#ffd23f"/>
+  </g>
+
+  <!-- Top-right cowl: a glossy bezier brow echoing the console language -->
+  <path d="M 950 -5 C 1150 80, 1380 130, 1605 190 L 1605 -5 Z" fill="url(#cowl)"/>
+  <path d="M 950 -5 C 1150 80, 1380 130, 1605 190" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="3"/>
+  <path d="M 950 -5 C 1150 80, 1380 130, 1605 190" fill="none" stroke="#ff6a00" stroke-opacity="0.3" stroke-width="1.5"/>
+</svg>

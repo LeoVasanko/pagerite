@@ -52,8 +52,12 @@ evolves.
 - Renderer: **markdown-it-py** with mdit-py-plugins (footnotes, definition
   lists, task lists, brace-attributes; tables and strikethrough from the
   default preset), with `html=True` for raw passthrough. Fenced code blocks
-  are highlighted server-side with **Pygments** (github-dark palette in
-  `/_assets/pygments-*.css`); a JS copy button appears on hover. Should this
+  are highlighted server-side with **Pygments** (`nowrap` spans styled by
+  `/_assets/pygments-*.css`, which maps every token class onto the `--code-*`
+  variables; the base stylesheet defines light and dark palette sets resolved
+  via `light-dark()`, so each theme gets the set matching its `color-scheme`
+  and may only retint `--code-bg` to keep the well in the page's color
+  family); a JS copy button appears on hover. Should this
   prove limiting, we implement our own renderer on top of html5tagger,
   which we already use for all HTML generation.
 - **Files are content-addressed.** Uploads (`PUT /_api/files/{filename}`)
@@ -62,10 +66,13 @@ evolves.
   that survive page renames and dedupe identical content; pages no longer
   own files. An image with a title becomes a `<figure>` with
   `<figcaption>`. Positioning is by attribute classes:
-  `![alt](/_f/….avif "Caption"){.right}` — `{.right}`, `{.left}` float,
+  `![alt](/_f/….avif "Caption"){.right}` — `{.right}`, `{.left}` float at
+  30% of the text column (the caption wraps within it; an explicit
+  `width=300` overrides on uncaptioned images),
   `{.wide}` goes full bleed (viewport edge to edge, or up to the docked
   editor; the sidebar stacks on top of it); plain attributes like `width=300`
-  work too.
+  work too. Headings (h1/h2) clear floats, so images never overflow into the
+  next section.
 
 ## Page structure and navigation
 
@@ -78,8 +85,15 @@ evolves.
   **per-page configurable**: `Node.banner` holds an arbitrary trusted HTML
   snippet (an image, a styled div, canvas + script — anything), resolved by
   walking up the node's ancestors to the front page; when nothing in the
-  chain sets one, the active theme's banner artwork shows (the purple theme
-  ships a `banner.svg`; the base stylesheet falls back to a plain gradient).
+  chain sets one, the active theme's banner artwork shows. That artwork is
+  an **inline SVG** (`pagerite/themes/{name}/banner.svg`) the backend
+  inlines into `#page-banner`: as markup it can be recolored from the theme
+  stylesheet (corporate's single SVG serves both light and dark mode via
+  `var()`-driven stops) and it is never rendered underneath a user banner.
+  The base stylesheet falls back to a plain gradient. There is deliberately
+  no scrim fading the banner into the page background — any such fade would
+  ruin user-supplied designs; themes that want one bake it into their SVG
+  (purple does).
 - **Fetch-navigation.** Links are plain `<a href>`; a small script
   (`frontend/src/pagerite.js`) intercepts same-origin clicks, fetches the
   page, and swaps the `#page-banner`, `#nav`, `#sidebar` and `#main` regions,
@@ -99,8 +113,10 @@ evolves.
   cannot have children. The header navbar holds only the top level; a
   top-level item is highlighted when viewing any of its subpages. When the
   current page is inside a main level section with children, those direct
-  children are listed in a **left sidebar** (`#sidebar`), one level deep;
-  the sidebar is empty (and hidden) elsewhere. Other sections' subitems
+  children are listed in a **left sidebar** (`#sidebar`), one level deep.
+  The sidebar exists only when there is something to navigate — sections
+  with fewer than two published items, leaf pages and the front page render
+  no aside element at all. Other sections' subitems
   are never shown without navigating into them first.
 - **Landing pages are optional.** Every label can either have content
   (`Node.content`, a Markdown page) or none — a content-less label renders
@@ -133,13 +149,24 @@ evolves.
 
 - The base stylesheet `frontend/src/assets/pagerite.css` provides the layout,
   typography and interaction rules with conservative CSS variables. A theme layer
-  (`frontend/src/assets/themes/purple/theme.css`) overrides those variables and
+  (`frontend/src/assets/themes/{name}/theme.css` — currently `purple`, `corporate`
+  and `nitro`) overrides those variables and
   adds the visual styling; `Data.theme` selects the active theme (empty = none/base
   only) and the site editor can switch it. Vue may add per-component styles on top
-  where needed.
-- Fonts, the shared stylesheet, pygments styles and the theme's banner SVG
-  live under `frontend/src/assets/` (the banner SVG under
-  `themes/purple/`) and are emitted as hashed assets under `/_assets/`
+  where needed. The corporate and nitro themes switch palettes automatically via
+  `prefers-color-scheme` (corporate is light-first with a matching dark palette;
+  nitro a warm light-grey page or, in dark mode, a deep violet one — its dark
+  banner and orange accents carry over unchanged); purple (dusk) uses one
+  fixed palette for everyone. Themes may restyle structural details the base
+  leaves plain — heading colors and underlines, list markers, nav treatment,
+  brand sizing. The banner artwork has scroll parallax: pagerite.js sets the
+  `--pry` scroll parameter on `<html>` (event-driven, so it is still when the
+  page is idle), the banner contents drift within their window (with scale
+  overscan so no edge shows), and themes may key their own effects off the
+  same parameter — purple's sun rises as you scroll.
+- Fonts, the shared stylesheet and pygments styles
+  live under `frontend/src/assets/` and are emitted as hashed assets under
+  `/_assets/`
   (Source Serif 4 for headings, Source Sans 3 for body, Fira Code for code
   by default; Fraunces, Literata, Cormorant, Playfair Display, Inter and
   Montserrat kept as woff2 options with local `@font-face`, variable-weight

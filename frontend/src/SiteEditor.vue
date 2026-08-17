@@ -105,10 +105,21 @@ function openPath(p) {
 
 // --- In-place navigation (no transitions, replaceState) ------------------
 function swapRegions(doc) {
-  for (const id of ['page-banner', 'nav', 'sidebar', 'main']) {
+  for (const id of ['page-banner', 'nav', 'main']) {
     const fresh = doc.getElementById(id)
     const el = document.getElementById(id)
     if (fresh && el) el.replaceWith(document.importNode(fresh, true))
+  }
+  // #sidebar is omitted entirely when the section has no sub-navigation,
+  // so it may be absent on either side: replace, insert, or remove.
+  const freshSidebar = doc.getElementById('sidebar')
+  const curSidebar = document.getElementById('sidebar')
+  if (freshSidebar && curSidebar) {
+    curSidebar.replaceWith(document.importNode(freshSidebar, true))
+  } else if (freshSidebar) {
+    document.getElementById('main')?.before(document.importNode(freshSidebar, true))
+  } else if (curSidebar) {
+    curSidebar.remove()
   }
   // The brand link lives in the header, outside the swappable regions,
   // and is absent entirely when no brand is configured.
@@ -283,6 +294,8 @@ const theme = ref('purple')
 const THEME_OPTIONS = [
   { value: '', label: 'none' },
   { value: 'purple', label: 'purple' },
+  { value: 'corporate', label: 'corporate' },
+  { value: 'nitro', label: 'nitro' },
 ]
 
 async function loadSettings() {

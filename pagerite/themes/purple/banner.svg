@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b1b4d"/>
+      <stop offset="1" stop-color="#ff8a5c"/>
+    </linearGradient>
+    <radialGradient id="sunglow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffd9a0" stop-opacity="0.9"/>
+      <stop offset="0.35" stop-color="#ffb37a" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#ff8a5c" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#131022" stop-opacity="0"/>
+      <stop offset="1" class="banner-fade"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="300" fill="url(#sky)"/>
+  <!-- Stars in the upper dusk sky -->
+  <g fill="#ffffff">
+    <circle cx="120" cy="38" r="1.6" opacity="0.8"/>
+    <circle cx="240" cy="70" r="1.1" opacity="0.5"/>
+    <circle cx="365" cy="30" r="1.4" opacity="0.7"/>
+    <circle cx="520" cy="58" r="1" opacity="0.45"/>
+    <circle cx="660" cy="26" r="1.5" opacity="0.75"/>
+    <circle cx="790" cy="66" r="1.1" opacity="0.5"/>
+    <circle cx="930" cy="34" r="1.6" opacity="0.8"/>
+    <circle cx="1060" cy="72" r="1" opacity="0.45"/>
+    <circle cx="1140" cy="28" r="1.3" opacity="0.6"/>
+  </g>
+  <!-- Sun low on the horizon with a wide glow (rises on scroll) -->
+  <circle class="sun-glow" cx="600" cy="212" r="120" fill="url(#sunglow)"/>
+  <circle class="sun" cx="600" cy="212" r="42" fill="#ffd9a0"/>
+  <path d="M0 210 Q 300 150 600 210 T 1200 210 V300 H0 Z" fill="#3d2b6b"/>
+  <path d="M0 250 Q 300 200 600 250 T 1200 250 V300 H0 Z" fill="#241842"/>
+  <!-- Gentle fade into the page background behind the nav; part of the
+       theme artwork, so a user banner replaces it entirely. -->
+  <rect y="190" width="1200" height="110" fill="url(#fade)"/>
+</svg>

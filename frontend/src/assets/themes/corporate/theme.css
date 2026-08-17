@@ -1,0 +1,219 @@
+/* Corporate theme: bright and bold professional. Saturated royal-blue
+   gradients on white, geometric Montserrat display type over Inter body,
+   and a genuinely large brand with a soft blue overlap shadow. Automatic
+   dark mode keeps the same saturated blue identity on deep navy; the
+   banner artwork (inlined by the backend) is recolored from here via the
+   cb-* classes, so one SVG serves both modes. */
+
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --surface: #eef3fd;
+  --text: #12203f;
+  --muted: #4d5f83;
+  --accent: #0a5cff;
+  --accent2: #0933a0;
+  --line: #12203f14;
+  --font-body: var(--font-inter);
+  --font-heading: var(--font-montserrat);
+}
+
+/* Banner artwork colors, light mode */
+.cb-bg0 {
+  stop-color: #ffffff;
+}
+
+.cb-bg1 {
+  stop-color: #e6eefe;
+}
+
+.cb-r0 {
+  stop-color: var(--accent);
+}
+
+.cb-r1 {
+  stop-color: #00b3ff;
+}
+
+.cb-g0,
+.cb-g1 {
+  stop-color: var(--accent);
+}
+
+.cb-dot {
+  fill: var(--accent);
+}
+
+.cb-orbit {
+  stroke: var(--accent);
+}
+
+.cb-spark {
+  fill: var(--accent);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b1428;
+    --surface: #142446;
+    --text: #e9eefe;
+    --muted: #93a7d0;
+    --accent: #4d8dff;
+    --accent2: #8ab6ff;
+    --line: #ffffff17;
+    /* Code wells stay navy in dark mode (light mode uses --surface). */
+    --code-bg: #0d1b3e;
+  }
+
+  /* Banner artwork colors, dark mode */
+  .cb-bg0 {
+    stop-color: #0d1830;
+  }
+
+  .cb-bg1 {
+    stop-color: #0a1122;
+  }
+
+  .cb-r0 {
+    stop-color: #2f7bff;
+  }
+
+  .cb-r1 {
+    stop-color: #00d0ff;
+  }
+
+  .cb-g0,
+  .cb-g1 {
+    stop-color: #2f7bff;
+  }
+
+  .cb-dot {
+    fill: #4d8dff;
+  }
+
+  .cb-orbit {
+    stroke: #4d8dff;
+  }
+
+  .cb-spark {
+    fill: #6ea8ff;
+  }
+}
+
+::selection {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Genuinely large solid brand with a soft blue shadow overlapping the
+   artwork — conservative, but unmissable. */
+#brand {
+  font-size: clamp(4rem, 11vw, 8.5rem);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--accent2);
+  filter: drop-shadow(0 0.4rem 1.4rem rgb(10 92 255 / 0.3));
+}
+
+@media (prefers-color-scheme: dark) {
+  #brand {
+    color: #eaf1ff;
+    filter: drop-shadow(0 0.4rem 1.4rem rgb(0 0 0 / 0.6));
+  }
+}
+
+#banner {
+  min-height: 15rem;
+  border-bottom: none;
+}
+
+#nav {
+  font-size: 1.05em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-shadow: none;
+}
+
+#nav .current {
+  color: #fff;
+  background: linear-gradient(120deg, var(--accent), var(--accent2));
+  border-radius: 999px;
+  padding: 0.15rem 0.85rem;
+  margin: -0.15rem -0.85rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  #nav {
+    text-shadow: 0 0 0.15em #000;
+  }
+}
+
+/* Heading hierarchy: h1 navy with a short gradient bar, h2 in accent
+   blue, h3 as an uppercase kicker. */
+article h1 {
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  color: var(--accent2);
+}
+
+@media (prefers-color-scheme: dark) {
+  article h1 {
+    color: var(--text);
+  }
+}
+
+article h1::after {
+  content: "";
+  display: block;
+  width: 3.6rem;
+  height: 0.32rem;
+  margin-top: 0.5rem;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), #00b3ff);
+}
+
+article h2 {
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--accent);
+}
+
+article h3 {
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+blockquote {
+  border-left-color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 6%, transparent);
+  padding: 0.4rem 0.9rem;
+  /* Keep the quoted text on the paragraph edge: the tinted box extends
+     past it by its own border/padding, like code blocks. */
+  margin: 0 -0.9rem 1rem calc(-0.25rem - 0.9rem);
+  border-radius: 6px;
+}
+
+/* Code follows the color scheme: the light set on a faint-blue surface in
+   light mode, a navy well in dark mode (--code-bg above). The accent side
+   bar stays in both. */
+pre {
+  border: 1px solid transparent;
+  border-left: 0.25rem solid var(--accent);
+  /* Text on the paragraph edge: the box extends by padding + border. */
+  margin-left: calc(-0.8rem - 0.25rem);
+  border-radius: 6px;
+}
+
+img {
+  border-radius: 4px;
+}
+
+::view-transition {
+  background: var(--bg);
+}

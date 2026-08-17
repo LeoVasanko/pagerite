@@ -54,7 +54,11 @@ not for the public pages. See `docs/design-principles.md` for the design.
     moves never break them. `Node.banner` is a raw trusted HTML snippet
     for the header banner (img, styled div, canvas+script...); empty
     inherits from the node's ancestors (front page last), then the active
-    theme's banner artwork (or a plain gradient in the base stylesheet).
+    theme's banner artwork: an inline SVG from
+    `pagerite/themes/{theme}/banner.svg`, inlined into `#page-banner` by
+    the backend only when no user banner applies (so it is recolorable
+    from the theme CSS via `var(...)` and never fights user designs; the
+    base stylesheet falls back to a plain gradient).
     `Data.version` is bumped on every write
     and embedded in page ETags so nav-affecting changes invalidate caches.
     `Data.brand` is the site name (header link + `<title>` suffix), editable
@@ -81,8 +85,11 @@ not for the public pages. See `docs/design-principles.md` for the design.
     is NOT rendered as an additional h1 (it still supplies <title> and nav
     labels). The navbar holds
     top-level items only; the current section's subitems go to a left
-    `#sidebar` (empty and hidden elsewhere). Dynamic regions have stable ids
-    (`#page-banner`, `#nav`, `#sidebar`, `#main`) for fetch-navigation swaps.
+    `#sidebar`, which is rendered only when the section offers at least two
+    published items (no aside element at all on the front page, leaf pages
+    and one-page sections). Dynamic regions have stable ids
+    (`#page-banner`, `#nav`, `#sidebar`, `#main`) for fetch-navigation swaps
+    (`#sidebar` may be absent on either side of a swap).
   - `seed.py` — demo content written on startup for paths missing from the
     database (never overwrites existing pages).
   - `frontend/src/` — the Vue editor and public-page entries.
@@ -98,8 +105,15 @@ not for the public pages. See `docs/design-principles.md` for the design.
       stylesheets (base and theme) so they can be swapped or augmented.
     - `assets/` — shared styles and data files built by Vite and served hashed
       under `/_assets/`: `pagerite.css` (base layout + conservative variables),
-      `themes/purple/theme.css` (the purple/dark theme override, including its
-      own `banner.svg`), `pygments.css`, and `fonts/` (self-hosted Source
+      `themes/{purple,corporate,nitro}/theme.css` (theme overrides and font
+      picks: `purple` = dark dusk palette with Fraunces/Literata and a tilted
+      oversized gradient brand; `corporate` = light-first with automatic
+      `prefers-color-scheme` dark mode, Montserrat/Inter and a huge solid
+      brand; `nitro` = racing/HUD style following `prefers-color-scheme`
+      (warm light-grey page, deep violet in dark), Montserrat/Literata,
+      black as an accent only, a straight orange blade under the banner, and
+      an orange racing-tab nav clipped with a bezier `shape()`), `pygments.css`,
+      and `fonts/` (self-hosted Source
       Sans 3/Source Serif 4/Fraunces/Literata/Cormorant/Playfair
       Display/Inter/Montserrat/Fira Code
       variable woff2). The `::view-transition*` block at the end of `pagerite.css` (from
@@ -151,7 +165,10 @@ not for the public pages. See `docs/design-principles.md` for the design.
   `appType: 'mpa'` (no SPA fallback) and builds with `manifest: true`,
   `assetsDir: '_/assets'` (so the build mirrors the URL space;
   `frontend/public/favicon.ico` lands at the build root and is served at
-  `/favicon.ico`). JS inputs are `src/main.js` and `src/pagerite.js`; there
+  `/favicon.ico`). JS inputs are `src/main.js` and `src/pagerite.js`, plus
+  `src/assets/pagerite.css` and every `src/assets/themes/*/theme.css` as
+  separate stylesheet entries (enumerated from the themes directory, so new
+  themes need no config change); there
   is no `index.html` source (it would shadow `/` and turn missing dev paths
   into an empty Vue shell). All outputs are ES modules. The build sets
   `preserveEntrySignatures: 'exports-only'` because main.js is consumed
@@ -202,8 +219,11 @@ not for the public pages. See `docs/design-principles.md` for the design.
     keep its integration points (`Frontend`, build hook) intact.
   - **markdown-it-py** — Markdown rendering with `html=True` raw
     passthrough; mdit-py-plugins for footnote/deflist/tasklists/attrs;
-    **Pygments** for server-side code highlighting (`nowrap` spans, styles
-    in `frontend/src/assets/pygments.css` scoped to "pre code").
+    **Pygments** for server-side code highlighting (`nowrap` spans, styled
+    by `frontend/src/assets/pygments.css` which maps token classes 1:1 onto
+    the `--code-*` variables; light/dark palette sets live in
+    `pagerite.css` and resolve via `light-dark()` from the theme's
+    `color-scheme` — themes pick a set, not individual colors).
 
 ## Conventions
 
