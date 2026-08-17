@@ -106,8 +106,15 @@ def _layout(
     doc.meta(name="pagerite:editor-src", content=script[-1])
     if editor_css:
         doc.meta(name="pagerite:editor-css", content=editor_css)
-    for url in urls:
-        doc.link(rel="stylesheet", href=url, blocking="render")
+    # Stylesheet links carry stable ids so the site editor's hot swap can
+    # keep each sheet at its rendered position (see swapRegions).
+    for i, url in enumerate(urls):
+        doc.link(
+            rel="stylesheet",
+            href=url,
+            blocking="render",
+            id="pagerite-base" if i == 0 else "pagerite-theme",
+        )
     for src in modules:
         doc.script(src=src, type="module")
     if custom_css.strip():

@@ -142,22 +142,33 @@ function swapRegions(doc) {
   } else if (curUserStyle) {
     curUserStyle.remove()
   }
-  // Theme and other public stylesheets live in <head> and must be kept in
-  // sync; editor-only stylesheets are preserved. Diff-based: unchanged
-  // sheets keep their elements, so their @keyframes are never torn down
-  // (re-creating keyframes would replay the editor's slide-in animation).
-  const curLinks = [...document.head.querySelectorAll('link[rel="stylesheet"]')]
-    .filter((l) => !l.dataset.pagerite)
-  const freshHrefs = [...doc.head.querySelectorAll('link[rel="stylesheet"]')]
-    .map((l) => l.href)
-  for (const link of curLinks) {
-    if (!freshHrefs.includes(link.href)) link.remove()
+  // Theme and other public stylesheets live in <head>, rendered with stable
+  // ids by the backend; sync them positionally so the custom CSS (rendered
+  // last) always keeps winning by order. Diff-based: unchanged sheets keep
+  // their elements, so their @keyframes are never torn down (re-creating
+  // keyframes would replay the editor's slide-in animation).
+  const freshLinks = [...doc.head.querySelectorAll('link[rel="stylesheet"]')]
+  const freshIds = new Set(freshLinks.map((l) => l.id))
+  for (const link of [...document.head.querySelectorAll('link[rel="stylesheet"]')]) {
+    if (!link.dataset.pagerite && !freshIds.has(link.id)) link.remove()
   }
-  const have = new Set(
-    [...document.head.querySelectorAll('link[rel="stylesheet"]')].map((l) => l.href),
-  )
-  for (const link of doc.head.querySelectorAll('link[rel="stylesheet"]')) {
-    if (!have.has(link.href)) document.head.appendChild(document.importNode(link, true))
+  // Insert missing sheets in the fresh document's order, each right after
+  // its predecessor's element. The first sheet rendered is always the base
+  // CSS, so its link doubles as the fallback anchor when nothing matched yet
+  // (e.g. no theme was selected before and the position is otherwise lost).
+  let anchor = null
+  for (const link of freshLinks) {
+    const cur = link.id && document.getElementById(link.id)
+    if (cur && cur.href === link.href) {
+      anchor = cur
+      continue
+    }
+    const el = document.importNode(link, true)
+    // Same id, new URL (theme switch): replace in place, keeping position.
+    if (cur) cur.replaceWith(el)
+    else if (anchor) anchor.after(el)
+    else document.getElementById('pagerite-base')?.after(el) ?? document.head.append(el)
+    anchor = el
   }
   document.title = doc.title
 }
