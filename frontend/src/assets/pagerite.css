@@ -187,11 +187,16 @@ body {
 /* Sidebar + main row. A symmetric grid: the article column is sized by the
    viewport alone (never by content), with equally sized flexible gutters
    on both sides. The sidebar sits in the left gutter, so it appearing or
-   disappearing never shifts the article; the right gutter balances it. */
+   disappearing never shifts the article; the right gutter balances it.
+   The outer tracks are minmax(0, 1fr) — a plain 1fr has an `auto` minimum,
+   which let the 12rem sidebar expand its track at narrow widths and push
+   the article off-center; now the sidebar overlays the gutter edge instead
+   (it is translucent/blurred exactly so it can pass over content, and
+   full-bleed .wide images slide underneath it). */
 #content {
   position: relative;
   display: grid;
-  grid-template-columns: 1fr minmax(0, 78rem) 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 78rem) minmax(0, 1fr);
   /* The docked editor pushes the content (not the header) right. */
   transition: margin-left 0.25s ease;
 }
@@ -580,20 +585,23 @@ img.left {
   margin: 0.3rem 1.5rem 1rem 0;
 }
 
-/* .wide is full bleed: edge to edge of the viewport (or of the space left
-   of the docked editor). Centered on the article column — which is itself
-   centered in the available space — via margin-left: 50% + translateX(-50%).
-   The sidebar stacks above it (z-index + opaque background). */
+/* .wide is full bleed: edge to edge of the viewport (or of the space right
+   of the docked editor), while staying in flow so it keeps its vertical
+   space. The article column is centered in the available space, so negative
+   symmetric margins of (50% of the column − 50% of the target width) break
+   out of the column and center the element on the same center — making the
+   left edge land exactly at the viewport's edge (or the editor's right
+   border). The sidebar stacks above it (z-index + translucent blur). */
 figure:has(.wide),
 img.wide {
   display: block;
   /* no inline strut/descender gaps around the image */
   width: 100vw;
   max-width: none;
-  margin-left: 50%;
-  margin-right: 0;
-  /* kill the UA figure margin, it overflowed the body */
-  transform: translateX(-50%);
+  margin-inline: calc(50% - 50vw);
+  /* negative margins also kill the UA figure margin */
+  /* Follow the docked editor's margin-left transition smoothly. */
+  transition: margin-left 0.25s ease;
 }
 
 /* A paragraph wrapping only a wide image must not add its line height. */
@@ -616,7 +624,6 @@ figure:has(.wide) img {
   width: 100%;
   max-width: 100%;
   margin: 0;
-  transform: none;
 }
 
 /* Floats take a fixed share of the text column rather than sizing by the
@@ -639,9 +646,28 @@ article h2 {
   clear: both;
 }
 
+/* Narrow windows with a sidebar: below 102rem the symmetric gutters can no
+   longer both hold the 12rem sidebar, so reserve its space with a fixed
+   left track instead of letting it overlap the article. The article then
+   always starts at 12rem (+ main's 1.25rem padding), so the .wide breakout
+   margin is a plain constant. Scoped by :has(#sidebar) since the sidebar
+   element is omitted entirely on pages without sub-navigation. */
+@media (max-width: 102rem) {
+  body:has(#sidebar):not(.editing) #content {
+    grid-template-columns: 12rem minmax(0, 78rem) minmax(0, 1fr);
+  }
+
+  body:has(#sidebar) figure:has(.wide),
+  body:has(#sidebar) img.wide:not(figure img) {
+    margin-inline: -13.25rem 0;
+  }
+}
+
+/* Editing: shrink the bleed to the space right of the docked editor. */
 body.editing figure:has(.wide),
-body.editing img.wide {
-  width: calc(100vw - var(--editor-w) - 1rem);
+body.editing img.wide:not(figure img) {
+  width: calc(100vw - var(--editor-w));
+  margin-inline: calc(50% - (100vw - var(--editor-w)) / 2);
 }
 
 /* Scroll reveal (pagerite.js adds .reveal/.in; JS off = fully visible) */
