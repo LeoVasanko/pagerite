@@ -64,11 +64,15 @@
   function addLoginLink() {
     const banner = document.getElementById("page-banner");
     if (!banner || banner.parentElement.querySelector(".login-link")) return;
-    const a = document.createElement("a");
-    a.className = "login-link";
-    a.href = "/auth/";
-    a.textContent = "log in";
-    banner.after(a);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "login-link";
+    btn.title = "log in";
+    btn.textContent = "🔑";
+    btn.addEventListener("click", () => {
+      location.href = "/auth/";
+    });
+    banner.after(btn);
   }
 
   async function setupAuth() {
