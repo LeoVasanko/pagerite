@@ -6,11 +6,18 @@
 // support from the article itself and are re-applied after each swap.
 (() => {
   if (import.meta.env.DEV) {
-    import("./assets/pagerite.css");
     // The theme is selectable; the backend names the active one in a meta
     // tag (dev links no stylesheets — Vite injects them from JS).
     const theme = document.querySelector('meta[name="pagerite:theme"]')?.content;
-    if (theme) import(/* @vite-ignore */ `./assets/themes/${theme}/theme.css`);
+    const sheets = [import("./assets/pagerite.css")];
+    if (theme) sheets.push(import(/* @vite-ignore */ `./assets/themes/${theme}/theme.css`));
+    // The injected styles land after the server-rendered custom CSS in
+    // <head>; move the custom CSS back to the end so its equal-specificity
+    // :root rules (font variables) win.
+    Promise.all(sheets).then(() => {
+      const el = document.getElementById("pagerite-user");
+      if (el) document.head.append(el);
+    });
   }
 
   const REGIONS = ["page-banner", "nav", "sidebar", "main"];
@@ -192,11 +199,14 @@
         el.replaceWith(document.importNode(doc.getElementById(id), true));
       }
       // Site-wide custom CSS lives in <head id="pagerite-user"> and must be
-      // kept in sync across fetch-navigations.
+      // kept in sync across fetch-navigations. It is kept last in <head>:
+      // in dev Vite injects the base stylesheet after the server-rendered
+      // tag, and equal-specificity :root rules are decided by order.
       const oldUserStyle = document.getElementById("pagerite-user");
       const newUserStyle = doc.getElementById("pagerite-user");
       if (oldUserStyle && newUserStyle) {
         oldUserStyle.textContent = newUserStyle.textContent;
+        document.head.appendChild(oldUserStyle);
       } else if (newUserStyle) {
         document.head.appendChild(document.importNode(newUserStyle, true));
       } else if (oldUserStyle) {

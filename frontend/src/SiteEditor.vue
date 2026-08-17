@@ -352,6 +352,9 @@ async function onThemeChange() {
     if (theme.value) {
       await import(/* @vite-ignore */ `/src/assets/themes/${theme.value}/theme.css`)
     }
+    // The freshly injected theme style now sits after the custom CSS;
+    // move the custom CSS back to the end so it keeps winning.
+    applyCustomCss(customCss.value)
   }
   loadPlain(path.value)
 }
@@ -364,9 +367,12 @@ function applyCustomCss(css) {
     if (!el) {
       el = document.createElement('style')
       el.id = 'pagerite-user'
-      document.head.append(el)
     }
     el.textContent = css
+    // Keep it last in <head>: in dev Vite injects the base stylesheet
+    // after the server-rendered tag, and equal-specificity :root rules
+    // (font variables) are decided by order.
+    document.head.append(el)
   } else if (el) {
     el.remove()
   }
@@ -386,6 +392,98 @@ function setCssDocument(text) {
   cssView.dispatch({ changes: { from: 0, to: cssView.state.doc.length, insert: text } })
   cssSyncing = false
   customCss.value = text
+}
+
+// --- Font overrides --------------------------------------------------------
+// Font picks live in the custom CSS as plain :root rows in one exact format
+// (`  --font-body: var(--font-source-sans);`), so no marker comments are
+// needed: the rows are parsed out on load, and on change they are stripped
+// and rewritten — adding a :root block if none exists, dropping it when the
+// last font row goes away. Values reference the per-family variables from
+// pagerite.css, so no font stacks are spelled out here.
+const FONT_ROW = /^\s*--font-(body|heading|brand):\s*var\(--font-[a-z-]+\);\s*$/
+const FONT_OPTIONS = [
+  { value: 'var(--font-source-serif)', label: 'Source Serif 4', serif: true },
+  { value: 'var(--font-fraunces)', label: 'Fraunces', serif: true },
+  { value: 'var(--font-literata)', label: 'Literata', serif: true },
+  { value: 'var(--font-source-sans)', label: 'Source Sans 3', serif: false },
+  { value: 'var(--font-inter)', label: 'Inter', serif: false },
+  { value: 'var(--font-montserrat)', label: 'Montserrat', serif: false },
+  { value: 'var(--font-fira-code)', label: 'Fira Code', serif: false },
+]
+const fontHeading = ref('')
+const fontBody = ref('')
+const fontBrand = ref('')
+
+// Font picker popup: a stylized "A" opens a panel with a tab per target
+// (heading/body/brand); each option's name is its own preview, rendered in
+// the candidate font at the size and weight of the element being styled.
+const fontPicker = ref(null) // open tab: 'heading' | 'body' | 'brand' | null
+let fontTabLast = 'body'
+const serifFonts = computed(() => FONT_OPTIONS.filter((o) => o.serif))
+const sansFonts = computed(() => FONT_OPTIONS.filter((o) => !o.serif))
+
+function toggleFontPanel() {
+  if (fontPicker.value) {
+    fontTabLast = fontPicker.value
+    fontPicker.value = null
+  } else {
+    fontPicker.value = fontTabLast
+  }
+}
+
+function fontRefFor(name) {
+  return { heading: fontHeading, body: fontBody, brand: fontBrand }[name]
+}
+
+function fontStyleFor(name) {
+  if (name === 'brand') return { fontWeight: 700, fontSize: '1.5rem' }
+  if (name === 'heading') return { fontWeight: 600, fontSize: '1.3rem' }
+  return {}
+}
+
+function pickFont(value) {
+  const r = fontRefFor(fontPicker.value)
+  // Clicking the current pick clears it back to the base-style default.
+  r.value = r.value === value ? '' : value
+  onFontChange()
+}
+
+function fontRows() {
+  const rows = []
+  if (fontBody.value) rows.push(`  --font-body: ${fontBody.value};`)
+  if (fontHeading.value) rows.push(`  --font-heading: ${fontHeading.value};`)
+  if (fontBrand.value) rows.push(`  --font-brand: ${fontBrand.value};`)
+  return rows
+}
+
+function onFontChange() {
+  const rows = fontRows()
+  // Strip our rows wherever they are, then drop :root blocks left empty.
+  let css = customCss.value
+    .split('\n')
+    .filter((l) => !FONT_ROW.test(l))
+    .join('\n')
+    .replace(/:root\s*\{\s*\}\n?/g, '')
+  if (rows.length) {
+    if (/:root\s*\{/.test(css)) {
+      // Merge into the existing :root block.
+      css = css.replace(/:root\s*\{/, (m) => `${m}\n${rows.join('\n')}`)
+    } else {
+      const rest = css.trimStart()
+      css = `:root {\n${rows.join('\n')}\n}\n${rest ? `\n${rest}` : ''}`
+    }
+  }
+  setCssDocument(css)
+  onCustomCssInput()
+}
+
+function parseFonts(css) {
+  const get = (name) =>
+    css.match(new RegExp(`^\\s*--font-${name}:\\s*(var\\(--font-[a-z-]+\\));`, 'm'))?.[1] || ''
+  fontBody.value = get('body')
+  fontHeading.value = get('heading')
+  fontBrand.value = get('brand')
 }
 
 // Two-step delete (no dialogs): the first click arms the row's button for
@@ -691,6 +789,7 @@ onMounted(async () => {
   })
   addEventListener('keydown', onKeydown)
   await loadSettings()
+  parseFonts(customCss.value)
   setCssDocument(customCss.value)
   applyCustomCss(customCss.value)
 })
@@ -736,7 +835,57 @@ onUnmounted(() => {
             {{ opt.label }}
           </option>
         </select>
+        <button
+          type="button"
+          class="font-btn"
+          :class="{ active: !!fontPicker }"
+          title="Fonts"
+          @click="toggleFontPanel"
+        >
+          A
+        </button>
       </label>
+      <div v-if="fontPicker" class="font-picker">
+          <div class="font-tabs">
+            <button
+              v-for="name in ['body', 'heading', 'brand']"
+              :key="name"
+              type="button"
+              :class="{ active: fontPicker === name }"
+              @click="fontPicker = name"
+            >
+              {{ name }}
+            </button>
+          </div>
+          <div class="font-cols">
+            <div class="font-col">
+              <button
+                v-for="opt in serifFonts"
+                :key="opt.label"
+                type="button"
+                class="font-opt"
+                :class="{ current: fontRefFor(fontPicker).value === opt.value }"
+                :style="{ fontFamily: opt.value, ...fontStyleFor(fontPicker) }"
+                @click="pickFont(opt.value)"
+              >
+                {{ opt.label }}
+              </button>
+            </div>
+            <div class="font-col">
+              <button
+                v-for="opt in sansFonts"
+                :key="opt.label"
+                type="button"
+                class="font-opt"
+                :class="{ current: fontRefFor(fontPicker).value === opt.value }"
+                :style="{ fontFamily: opt.value, ...fontStyleFor(fontPicker) }"
+                @click="pickFont(opt.value)"
+              >
+                {{ opt.label }}
+              </button>
+            </div>
+          </div>
+        </div>
       <div ref="cssEl" class="css-cm" />
     </section>
 
@@ -862,6 +1011,93 @@ onUnmounted(() => {
 .theme-select {
   flex: 0 0 auto;
   width: auto;
+}
+
+/* Stylized "A" icon button opening the font panel — always Fira Code, so
+   it stays distinctive no matter which fonts are configured. */
+.font-btn {
+  font-family: var(--font-fira-code);
+  font-weight: 700;
+  font-size: 1.5rem;
+  padding: 0 0.4rem;
+  color: var(--muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.font-btn:hover {
+  color: var(--text);
+}
+
+.font-btn.active {
+  color: var(--accent);
+}
+
+/* Font picker panel. Colors come from the theme variables, so contrast
+   against the page background is automatic in both light and dark themes. */
+.font-picker {
+  padding: 0.5rem;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px #0004;
+}
+
+.font-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 0.4rem;
+}
+
+.font-tabs button {
+  flex: 1;
+  padding: 0.15rem 0.5rem;
+  font: inherit;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+
+.font-tabs button.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.font-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.25rem 0.75rem;
+}
+
+.font-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+/* Each option's name is its own preview (font family + size/weight of the
+   element being styled are set inline). */
+.font-opt {
+  padding: 0.3rem 0.45rem;
+  line-height: 1.3;
+  color: inherit;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.font-opt:hover {
+  background: var(--surface);
+}
+
+.font-opt.current {
+  border-color: var(--accent);
 }
 
 /* Small CodeMirror window for the banner HTML; scrolls internally. */

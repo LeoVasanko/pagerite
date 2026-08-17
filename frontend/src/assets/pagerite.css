@@ -12,9 +12,20 @@
   --accent: #0056b3;
   --accent2: #003d80;
   --line: #0000001a;
-  --font-body: "Source Sans 3", system-ui, sans-serif;
-  --font-heading: "Source Serif 4", Georgia, serif;
-  --font-code: "Fira Code", ui-monospace, monospace;
+  /* One variable per available font family (faces in fonts/fonts.css);
+     everything else references these, so font stacks live here only. */
+  --font-source-sans: "Source Sans 3", system-ui, sans-serif;
+  --font-source-serif: "Source Serif 4", Georgia, serif;
+  --font-fraunces: "Fraunces", Georgia, serif;
+  --font-literata: "Literata", Georgia, serif;
+  --font-inter: "Inter", system-ui, sans-serif;
+  --font-montserrat: "Montserrat", system-ui, sans-serif;
+  --font-fira-code: "Fira Code", ui-monospace, monospace;
+  --font-body: var(--font-source-sans);
+  --font-heading: var(--font-source-serif);
+  /* The brand follows the heading font unless overridden separately. */
+  --font-brand: var(--font-heading);
+  --font-code: var(--font-fira-code);
   /* Width of the docked editor panel (used both here for shifting the page
      and in the Vue editor's own styles). */
   --editor-w: min(46rem, 50vw);
@@ -79,13 +90,23 @@ body {
   object-fit: cover;
 }
 
+/* Legibility scrim: fade banner artwork into the page background behind
+   the overlaid brand/nav. Text shadows are not used for this — on light
+   backgrounds they just look like blurry text. */
+#page-banner::after {
+  content: "";
+  position: absolute;
+  inset: 30% 0 0;
+  background: linear-gradient(transparent, var(--bg));
+}
+
 #brand,
 #nav {
   position: relative;
 }
 
 #brand {
-  font-family: var(--font-heading);
+  font-family: var(--font-brand);
   font-weight: 700;
   font-size: 2.4rem;
   text-decoration: none;
@@ -97,7 +118,6 @@ body {
 /* Nav overlaid at the bottom of the banner */
 #nav {
   font-size: 1.3em;
-  text-shadow: 0 0 0.1em black;
   padding: 0.35rem 1.25rem;
 }
 
@@ -271,7 +291,6 @@ article h3 {
 article h1 {
   font-size: 2.2rem;
   margin: 2rem 0 1.2rem;
-  color: var(--accent);
 }
 
 /* Margin strategy: bottom-only inside articles. Top margins misalign
@@ -289,7 +308,6 @@ article figure {
 
 article h3 {
   margin: 1.4rem 0 0.4rem;
-  color: color-mix(in oklab, var(--accent2) 60%, var(--muted));
 }
 
 /* Lists: small diamond emoji markers — blue 🔹 on odd nesting levels,
@@ -398,7 +416,6 @@ article dd {
 article h2 {
   font-size: 1.5rem;
   margin: 2.2rem 0 0.6rem;
-  color: var(--accent2);
 }
 
 article a {

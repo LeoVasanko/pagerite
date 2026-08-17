@@ -63,7 +63,13 @@ not for the public pages. See `docs/design-principles.md` for the design.
     none/base only); themes live in `frontend/src/assets/themes/{theme}`.
     `Data.custom_css` is raw trusted CSS injected inline in every page
     `<head>` (id `pagerite-user`) and swapped during fetch-navigation;
-    editable in the site editor.
+    editable in the site editor. Font picks (heading/body/brand) in the
+    site editor are stored as plain `:root` rows in `custom_css`
+    (`--font-body: var(--font-source-sans);` format — parsed out and
+    rewritten on change, the `:root` block added/removed as needed),
+    referencing the per-family variables (`--font-source-sans` etc.) from
+    pagerite.css;
+    the base stylesheet's `--font-brand` defaults to `var(--font-heading)`.
   - `markdown.py` — markdown-it-py renderer (html passthrough + attrs,
     footnote, deflist, tasklists plugins). Custom image rule: relative srcs
     resolve against the page path, titled images become figures.
@@ -88,7 +94,8 @@ not for the public pages. See `docs/design-principles.md` for the design.
       under `/_assets/`: `pagerite.css` (base layout + conservative variables),
       `themes/purple/theme.css` (the purple/dark theme override, including its
       own `banner.svg`), `pygments.css`, and `fonts/` (self-hosted Source
-      Sans 3/Source Serif 4/Inter/Montserrat/Fira Code variable woff2). The `::view-transition*` block at the end of `pagerite.css` (from
+      Sans 3/Source Serif 4/Fraunces/Literata/Inter/Montserrat/Fira Code
+      variable woff2). The `::view-transition*` block at the end of `pagerite.css` (from
       termotohtori.fi) is fragile — do not tweak.
     - Vite builds ES-module `.js` outputs; the backend renders `<script
       type="module">` for them (module scripts defer by default).

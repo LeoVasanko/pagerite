@@ -141,7 +141,8 @@ evolves.
   live under `frontend/src/assets/` (the banner SVG under
   `themes/purple/`) and are emitted as hashed assets under `/_assets/`
   (Source Serif 4 for headings, Source Sans 3 for body, Fira Code for code
-  by default; Inter and Montserrat kept as variable woff2 options with
+  by default; Fraunces, Literata, Inter and Montserrat kept as variable
+  woff2 options with
   local `@font-face`). No third-party requests.
 
 ## Editing
@@ -155,7 +156,9 @@ evolves.
     (no debouncing) straight into the visible article's heading and body.
   - **Site mode** — the 🖊️ on the banner opens a panel with the site
     **brand** (applied to the header live), a **theme** selector (swapping
-    the theme stylesheet in place), a **site-wide custom CSS** field (injected
+    the theme stylesheet in place), **font** picks (heading/body/brand —
+    stored as plain `:root` rows inside the custom CSS, referencing the base
+    stylesheet's per-family font variables), a **site-wide custom CSS** field (injected
     into `<style id="pagerite-user">` in the live page head and swapped during
     fetch-navigation), the page's **banner HTML** field (previewed into the
     real banner region, so you see exactly which banner you're editing) and

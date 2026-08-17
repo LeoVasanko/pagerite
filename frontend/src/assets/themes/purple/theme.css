@@ -29,6 +29,26 @@
   background: url("./banner.svg") center 40% / cover;
 }
 
+/* Colored headings are part of the theme's more elaborate styling; the
+   base keeps headings in plain text color. */
+article h1 {
+  color: var(--accent);
+}
+
+article h2 {
+  color: var(--accent2);
+}
+
+article h3 {
+  color: color-mix(in oklab, var(--accent2) 60%, var(--muted));
+}
+
+/* Dark artwork: keep the nav readable with a shadow (the base style uses
+   a scrim instead — shadows only work on dark backgrounds). */
+#nav {
+  text-shadow: 0 0 0.15em black;
+}
+
 pre {
   background: #ffffff09;
 }
