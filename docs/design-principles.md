@@ -169,7 +169,7 @@ evolves.
   `/_assets/`
   (Source Serif 4 for headings, Source Sans 3 for body, Fira Code for code
   by default; Fraunces, Literata, Cormorant, Playfair Display, Inter,
-  Montserrat, Cause, Exo 2 and UnifrakturMaguntia kept as woff2 options with
+  Montserrat, Cause, Exo 2 and New Rocker kept as woff2 options with
   local `@font-face`, variable-weight where available). No third-party
   requests.
 

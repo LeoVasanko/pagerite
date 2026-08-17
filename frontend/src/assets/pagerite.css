@@ -50,7 +50,7 @@
   --font-fira-code: "Fira Code", ui-monospace, monospace;
   --font-cause: "Cause", system-ui, sans-serif;
   --font-exo2: "Exo 2", system-ui, sans-serif;
-  --font-unifraktur: "UnifrakturMaguntia", "Playfair Display", serif;
+  --font-new-rocker: "New Rocker", "Playfair Display", serif;
   --font-body: var(--font-source-sans);
   --font-heading: var(--font-source-serif);
   /* The brand follows the heading font unless overridden separately. */

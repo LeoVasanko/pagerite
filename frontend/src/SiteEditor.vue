@@ -395,6 +395,8 @@ function applyCustomCss(css) {
 }
 
 function onCustomCssInput() {
+  // Keep the font picker selection in sync with manual edits to the CSS.
+  parseFonts(customCss.value)
   applyCustomCss(customCss.value)
   debounce('custom-css', saveCustomCss, 400)
 }
@@ -417,14 +419,17 @@ function setCssDocument(text) {
 // and rewritten — adding a :root block if none exists, dropping it when the
 // last font row goes away. Values reference the per-family variables from
 // pagerite.css, so no font stacks are spelled out here.
-const FONT_ROW = /^\s*--font-(body|heading|brand):\s*var\(--font-[a-z-]+\);\s*$/
+// Declaration-level match (not line-anchored): user-edited rows may sit
+// inline with other content, and those must be stripped/parsed too or
+// re-picking a font would insert a duplicate row.
+const FONT_DECL = /--font-(?:body|heading|brand)\s*:\s*var\(--font-[a-z0-9-]+\)\s*;/g
 const FONT_OPTIONS = [
   { value: 'var(--font-source-serif)', label: 'Source Serif 4', serif: true },
   { value: 'var(--font-fraunces)', label: 'Fraunces', serif: true },
   { value: 'var(--font-literata)', label: 'Literata', serif: true },
   { value: 'var(--font-cormorant)', label: 'Cormorant', serif: true },
   { value: 'var(--font-playfair)', label: 'Playfair Display', serif: true },
-  { value: 'var(--font-unifraktur)', label: 'UnifrakturMaguntia', serif: true },
+  { value: 'var(--font-new-rocker)', label: 'New Rocker', serif: true },
   { value: 'var(--font-source-sans)', label: 'Source Sans 3', serif: false },
   { value: 'var(--font-inter)', label: 'Inter', serif: false },
   { value: 'var(--font-montserrat)', label: 'Montserrat', serif: false },
@@ -480,10 +485,15 @@ function fontRows() {
 
 function onFontChange() {
   const rows = fontRows()
-  // Strip our rows wherever they are, then drop :root blocks left empty.
+  // Strip our declarations wherever they are (even inline with other
+  // content), drop lines they emptied, then drop :root blocks left empty.
   let css = customCss.value
     .split('\n')
-    .filter((l) => !FONT_ROW.test(l))
+    .map((l) => {
+      const stripped = l.replace(FONT_DECL, '')
+      return stripped === l ? l : stripped.trim() ? stripped : null
+    })
+    .filter((l) => l !== null)
     .join('\n')
     .replace(/:root\s*\{\s*\}\n?/g, '')
   if (rows.length) {
@@ -501,7 +511,7 @@ function onFontChange() {
 
 function parseFonts(css) {
   const get = (name) =>
-    css.match(new RegExp(`^\\s*--font-${name}:\\s*(var\\(--font-[a-z-]+\\));`, 'm'))?.[1] || ''
+    css.match(new RegExp(`--font-${name}\\s*:\\s*(var\\(--font-[a-z0-9-]+\\))\\s*;`))?.[1] || ''
   fontBody.value = get('body')
   fontHeading.value = get('heading')
   fontBrand.value = get('brand')

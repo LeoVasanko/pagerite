@@ -117,7 +117,7 @@ not for the public pages. See `docs/design-principles.md` for the design.
       an orange racing-tab nav clipped with a bezier `shape()`), `pygments.css`,
       and `fonts/` (self-hosted Source
       Sans 3/Source Serif 4/Fraunces/Literata/Cormorant/Playfair
-      Display/Inter/Montserrat/Fira Code/Cause/Exo 2/UnifrakturMaguntia
+      Display/Inter/Montserrat/Fira Code/Cause/Exo 2/New Rocker
       variable woff2). The `::view-transition*` block at the end of `pagerite.css` (from
       termotohtori.fi) is fragile — do not tweak.
     - Vite builds ES-module `.js` outputs; the backend renders `<script
