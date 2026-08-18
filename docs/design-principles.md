@@ -51,8 +51,13 @@ evolves.
   single-trusted-author assumption above.
 - Renderer: **markdown-it-py** with mdit-py-plugins (footnotes, definition
   lists, task lists, brace-attributes; tables and strikethrough from the
-  default preset), with `html=True` for raw passthrough. Fenced code blocks
-  are highlighted server-side with **Pygments** (`nowrap` spans styled by
+  default preset), with `html=True` for raw passthrough,
+  `typographer=True` for SmartyPants-style replacements in body text (curly
+  quotes, `--` / `---` → en / em dashes, `...` → ellipsis, `(c)` → ©, etc.),
+  and `breaks=True` so single line breaks inside paragraphs become `<br>`.
+  Code spans/blocks and raw HTML are left untouched. Fenced code blocks are
+  highlighted server-side with
+  **Pygments** (`nowrap` spans styled by
   `/_assets/pygments-*.css`, which maps every token class onto the `--code-*`
   variables; the base stylesheet defines light and dark palette sets resolved
   via `light-dark()`, so each theme gets the set matching its `color-scheme`

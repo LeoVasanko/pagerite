@@ -6,6 +6,12 @@ single author is trusted. Extensions: tables and strikethrough (from the
 brace-attributes (`{.class width=300}` on any element, images in
 particular).
 
+markdown-it's typographer is enabled, so body text gets SmartyPants-style
+replacements: straight quotes become curly, ``--`` / ``---`` become en / em
+dashes, ``...`` becomes an ellipsis, ``(c)`` becomes ©, and so on. Single
+line breaks inside paragraphs become ``<br>`` (``breaks: True``). Code
+spans/blocks and raw HTML are left untouched.
+
 Images get special treatment: a relative `src` is resolved against the
 page's own path (so `![alt](photo.avif)` in `/docs/design` is served from
 `/docs/design/photo.avif`), and an image with a title becomes a
@@ -110,7 +116,15 @@ def _tag_task_checkboxes(state) -> None:
 
 
 md = (
-    MarkdownIt("default", {"html": True, "highlight": _highlight})
+    MarkdownIt(
+        "default",
+        {
+            "html": True,
+            "highlight": _highlight,
+            "typographer": True,
+            "breaks": True,
+        },
+    )
     .use(attrs_plugin)
     .use(footnote_plugin)
     .use(deflist_plugin)
