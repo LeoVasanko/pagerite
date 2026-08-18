@@ -5,8 +5,20 @@
 // Also: scroll-reveal effects and code copy buttons. These need no
 // support from the article itself and are re-applied after each swap.
 import { showAuthIframe } from 'paskia'
+import { OverlayScrollbars } from "overlayscrollbars";
+import "overlayscrollbars/overlayscrollbars.css";
 
 (() => {
+  // Overlay scrollbars: the native kind reserves a strip of layout (or
+  // shifts the layout when it appears; overflow: overlay is dead), so we
+  // replace it with floating ones that cover content instead. The body
+  // remains the native viewport scroller — window scroll events, scrollY
+  // and scroll restoration are unaffected; only the scrollbar UI is
+  // custom. Theme variables are in pagerite.css.
+  OverlayScrollbars(document.body, {
+    scrollbars: { autoHide: "scroll" },
+  });
+
   if (import.meta.env.DEV) {
     // In dev the base stylesheet is injected by Vite from JS (linking the
     // raw module would pull in its HMR wrapper). Theme and banner-design

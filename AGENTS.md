@@ -119,6 +119,10 @@ not for the public pages. See `docs/design-principles.md` for the design.
   - `frontend/src/` — the Vue editor and public-page entries.
     - `main.js` — Vue editor app entry, mounts PageEditor/SiteEditor.
     - `pagerite.js` — public page entry; runs fetch-navigation, scroll-reveal,
+      OverlayScrollbars on `document.body` (floating, auto-hiding scrollbars
+      that never reserve layout space or shift the page when appearing;
+      native scroll APIs like `window.scrollTo` keep working; themed via the
+      `--os-*` variables in pagerite.css),
       brand shrink-to-fit (the themed size is the maximum; JS reduces the
       font-size so a long brand or narrow viewport still fits one line),
       code copy buttons, and the auth check. It first probes `GET /auth/api/settings`
