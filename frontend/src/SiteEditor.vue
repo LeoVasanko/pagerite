@@ -190,7 +190,7 @@ async function loadPlain(p) {
   history.replaceState(null, '', finalUrl)
   runScripts(document.getElementById('page-banner'))
   runScripts(document.getElementById('main'))
-  dispatchEvent(new CustomEvent('pagerite:preview')) // re-tuck the edit pen
+  dispatchEvent(new CustomEvent('pagerite:preview')) // re-inject + re-tuck the edit pens
   // The swap brought in the server-rendered (inherited) banner; overlay
   // the page's own banner if one is being edited.
   if (banner.value.trim()) previewBanner()

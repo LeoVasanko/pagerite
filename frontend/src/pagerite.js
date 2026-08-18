@@ -214,7 +214,14 @@ import { showAuthIframe } from 'paskia'
     if (btn && h1 && btn.parentElement !== h1) h1.append(btn);
   }
 
-  addEventListener("pagerite:preview", placeEditPen);
+  addEventListener("pagerite:preview", () => {
+    // The editors' in-place swaps (SiteEditor.loadPlain) replace #main
+    // without applyEffects, discarding the injected pens; re-add them
+    // before tucking the article pen into the h1. Without this a freshly
+    // created page has no pen for commitPending's handover click.
+    renderAuthUi();
+    placeEditPen();
+  });
 
   function applyEffects() {
     (window.requestIdleCallback || setTimeout)(preload);
