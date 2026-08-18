@@ -228,6 +228,17 @@ body {
   transition: margin-left 0.25s ease;
 }
 
+/* Long articles (.multicol is added by pagerite.js based on content length)
+   lift the 78rem cap: the center track keeps 78rem as its minimum and then
+   takes a 4:1 share of any extra space against each gutter, so the article
+   grows without limit and its column count follows its width (see the
+   `columns: 30rem` rule below). The gutters stay symmetric, so the .wide
+   breakout math (50% − 50vw) still centers on the viewport — and at very
+   wide windows the gutters still hold the 12rem sidebar. */
+body:has(.multicol) #content {
+  grid-template-columns: minmax(0, 1fr) minmax(78rem, 4fr) minmax(0, 1fr);
+}
+
 body.editing #content {
   margin-left: var(--editor-w);
   padding-left: 1rem;
@@ -464,17 +475,17 @@ article dd {
   hyphens: auto;
 }
 
-/* Multi-column reading on wide displays, but only for long articles
-   (pagerite.js adds .multicol based on content length and splits the body
-   into .colseg segments separated by full-width h2s and wide figures;
-   only segments with enough text get .cols and thus columns). Columns only
-   reflow text inside the article; the article's width never changes. */
-@media (min-width: 100rem) {
-  .multicol .colseg.cols {
-    columns: 2;
-    column-gap: 3.5rem;
-    column-rule: 1px solid var(--line);
-  }
+/* Multi-column reading, but only for long articles (pagerite.js adds
+   .multicol based on content length and splits the body into .colseg segments
+   separated by full-width h2s and wide figures; only segments with enough
+   text get .cols). No fixed breakpoint: `columns: 30rem` lets CSS fit as
+   many columns of at least 30rem as the article's current width allows —
+   since .multicol also uncaps the article width (see #content above), a
+   wider window simply yields more columns. */
+.multicol .colseg.cols {
+  columns: 30rem;
+  column-gap: 3.5rem;
+  column-rule: 1px solid var(--line);
 }
 
 .multicol .colseg {
@@ -664,7 +675,7 @@ figure:has(.wide) img {
 /* Floats take a fixed share of the text column rather than sizing by the
    image's intrinsic width, which varies wildly (SVGs have none, and
    min-content collapses them). A percentage also scales correctly inside
-   two-column segments, where the column is the containing block. The
+   multi-column segments, where the column is the containing block. The
    caption wraps within that width. A width attribute ({.right width=300})
    overrides the default on uncaptioned images. */
 figure:has(.right),
@@ -690,6 +701,14 @@ article h2 {
 @media (max-width: 102rem) {
   body:has(#sidebar):not(.editing) #content {
     grid-template-columns: 12rem minmax(0, 78rem) minmax(0, 1fr);
+  }
+
+  /* Long articles stay uncapped here too: same 12rem reservation for the
+     sidebar, but the center track keeps growing (see the .multicol rule
+     at #content). The article's left edge stays at 12rem either way, so
+     the constant .wide breakout margin below remains correct. */
+  body:has(#sidebar):has(.multicol):not(.editing) #content {
+    grid-template-columns: 12rem minmax(78rem, 4fr) minmax(0, 1fr);
   }
 
   body:has(#sidebar) figure:has(.wide),

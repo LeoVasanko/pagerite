@@ -232,7 +232,7 @@ import { showAuthIframe } from 'paskia'
     renderAuthUi();
     placeEditPen();
     // Multi-column layout only when there is enough text to justify it.
-    // Split the body into columned segments: h2s and wide figures are
+    // Split the body into columned segments: h1s, h2s and wide figures are
     // full-width separators and never go inside columns.
     const article = main.querySelector("article");
     if (article) {
@@ -243,9 +243,11 @@ import { showAuthIframe } from 'paskia'
       );
       if (body && article.classList.contains("multicol")
           && !body.querySelector(".colseg")) {
-        // h2s and anything holding a wide image are full-width separators
+        // h1s, h2s and anything holding a wide image are full-width
+        // separators
         const isSeparator = (el) =>
-          el.tagName === "H2" || el.querySelector("img.wide") !== null;
+          el.tagName === "H1" || el.tagName === "H2"
+          || el.querySelector("img.wide") !== null;
         let seg = null;
         for (const el of [...body.children]) {
           if (isSeparator(el)) {
