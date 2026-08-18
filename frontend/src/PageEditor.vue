@@ -6,7 +6,7 @@
 // exponential backoff after a failure; unsaved text and pending saves
 // survive a disconnect. Editor scroll drives the document scroll, keeping the
 // rendered article at the cursor's position.
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState } from '@codemirror/state'
 import { markdown } from '@codemirror/lang-markdown'
@@ -52,6 +52,19 @@ function ensureConnected() {
 function normPath(p) {
   return p.trim().replace(/^\/+|\/+$/g, '')
 }
+
+function pageLabel() {
+  return title.value.trim() || ('/' + (path.value || ''))
+}
+
+// Show the article title (or path for a new page) plus the edit pen in the
+// window title while editing; the server-rendered public title is restored on
+// close.
+function updateWindowTitle() {
+  document.title = `${pageLabel()} 🖊️`
+}
+
+watch([title, path], updateWindowTitle)
 
 function requestRender() {
   // No debounce: server-side rendering is fast enough per keystroke.
@@ -228,6 +241,7 @@ function connect() {
 
 onMounted(() => {
   connect()
+  updateWindowTitle()
 
   view = new EditorView({
     state: EditorState.create({

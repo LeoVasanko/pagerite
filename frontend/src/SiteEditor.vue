@@ -10,7 +10,7 @@
 // real — a label with a title and slug, with content (landing page) or
 // without (category whose URL renders a placeholder page). The front page
 // is a top-level row with an empty slug, not the parent of the others.
-import { computed, onMounted, onUnmounted, provide, ref } from 'vue'
+import { computed, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import StructureTree from './StructureTree.vue'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState, Compartment } from '@codemirror/state'
@@ -46,19 +46,6 @@ let cssView = null      // CodeMirror for the site-wide custom CSS
 let cssSyncing = false  // set while replacing the CSS document programmatically
 const customCss = ref('')
 const cssEl = ref(null)
-
-// path -> node, for quick lookups (current title, delete checks).
-const flatMap = computed(() => {
-  const map = {}
-  const walk = (nodes) => {
-    for (const n of nodes) {
-      map[n.path] = n
-      walk(n.children)
-    }
-  }
-  walk(tree.value)
-  return map
-})
 
 function normPath(p) {
   return p.trim().replace(/^\/+|\/+$/g, '')
@@ -170,7 +157,11 @@ function swapRegions(doc) {
     else document.getElementById('pagerite-base')?.after(el) ?? document.head.append(el)
     anchor = el
   }
-  document.title = doc.title
+  // The editor keeps its own title while open; only inherit the server title
+  // when navigating outside the editor (e.g. fetch-navigation swaps).
+  if (!document.body.classList.contains('editing')) {
+    document.title = doc.title
+  }
 }
 
 async function loadPlain(p) {
@@ -372,9 +363,10 @@ async function removeFavicon() {
   }
 }
 
-function currentTitle() {
-  return flatMap.value[path.value]?.title
-    || document.title.replace(/ – [^–]*$/, '')
+// The site editor’s window title shows the site brand (or a generic label)
+// plus the edit pen; the current article title is irrelevant here.
+function updateEditorTitle() {
+  document.title = `${brand.value.trim() || 'Pagerite'} 🖊️`
 }
 
 function applyBrand(b) {
@@ -387,17 +379,18 @@ function applyBrand(b) {
       document.getElementById('nav')?.before(el)
     }
     el.textContent = b
-    document.title = `${currentTitle()} – ${b}`
   } else {
     if (el) el.remove()
-    document.title = currentTitle()
   }
+  updateEditorTitle()
 }
 
 function onBrandInput() {
   applyBrand(brand.value)
   debounce('brand', saveBrand)
 }
+
+watch(brand, updateEditorTitle, { immediate: true })
 
 async function saveSettings(opts = {}) {
   const res = await fetch('/_api/settings', {
