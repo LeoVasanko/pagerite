@@ -44,7 +44,9 @@ source = "vcs"
 packages = ["pagerite"]
 
 [tool.hatch.build]
-artifacts = ["pagerite/frontend-build"]
+# `only-packages` drops directories without an __init__.py, so the theme
+# files must be force-included as artifacts (like the frontend build).
+artifacts = ["pagerite/frontend-build", "pagerite/themes"]
 only-packages = true
 
 [tool.hatch.build.targets.sdist.hooks.custom]
