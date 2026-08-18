@@ -128,6 +128,9 @@ def _layout(
     order intact.
     """
     doc = Document(E.Title, lang="en")
+    # Responsive layout (see the 48rem breakpoint in pagerite.css) needs
+    # the real device width, not the default 980px layout viewport.
+    doc.meta(name="viewport", content="width=device-width, initial-scale=1")
     # A custom favicon (from the site editor) is linked explicitly; without
     # one, browsers fall back to the build's /favicon.ico by convention.
     if favicon:

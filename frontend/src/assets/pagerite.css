@@ -855,6 +855,55 @@ article h2 {
   }
 }
 
+/* Phones and other narrow viewports: single-column layout with the
+   sidebar lifted above the article as a wrapping link strip, and no
+   floated figures — .left/.right fall back to plain centered figures
+   (explicit img widths still shrink-wrap), while .wide keeps its full
+   viewport bleed. */
+@media (max-width: 48rem) {
+  #content {
+    display: flex;
+    flex-direction: column;
+  }
+
+  #sidebar {
+    position: static;
+    width: auto;
+    max-height: none;
+    overflow-y: visible;
+    border-radius: 0;
+    padding: 0.5rem 1rem;
+  }
+
+  #sidebar ul {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.2rem;
+  }
+
+  figure:has(.right),
+  figure:has(.left) {
+    float: none;
+    width: 100%;
+    max-width: none;
+    margin: 0 auto 1.5rem;
+  }
+
+  /* An explicit img width still shrink-wraps the figure (redeclared: this
+     block comes after the desktop rule at equal specificity). */
+  figure:has(img[width]) {
+    width: fit-content;
+  }
+
+  /* The 102rem sidebar/multicol .wide margins assume a left sidebar
+     column; with the sidebar on top the article is viewport-wide and the
+     plain centered bleed applies again. */
+  body:has(#sidebar):not(.editing) figure:has(.wide),
+  body:has(.multicol) figure:has(.wide) {
+    margin-inline: calc(50% - 50vw);
+  }
+}
+
 /* Scroll reveal (pagerite.js adds .reveal/.in; JS off = fully visible) */
 .reveal {
   opacity: 0;
