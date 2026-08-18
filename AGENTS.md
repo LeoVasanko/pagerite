@@ -74,6 +74,11 @@ not for the public pages. See `docs/design-principles.md` for the design.
     referencing the per-family variables (`--font-source-sans` etc.) from
     pagerite.css;
     the base stylesheet's `--font-brand` defaults to `var(--font-heading)`.
+    `Data.favicon` names a file in the content-addressed `files` store,
+    uploaded/cleared in the site editor via `PUT`/`DELETE
+    /_api/settings/favicon`; when set it is linked as `<link rel="icon">`
+    on every page, otherwise browsers fall back to the build's
+    `/favicon.ico` by convention.
   - `markdown.py` — markdown-it-py renderer (html passthrough + attrs,
     footnote, deflist, tasklists plugins). Custom image rule: relative srcs
     resolve against the page path, titled images become figures.
@@ -141,7 +146,8 @@ not for the public pages. See `docs/design-principles.md` for the design.
   previewing into the visible article; editor scroll drives document
   scroll) opened by the article pen — it edits content and title only,
   never the path — and `SiteEditor.vue` (site brand + theme selector +
-  site-wide custom CSS + banner HTML edited in small CodeMirror windows;
+  favicon upload/remove + site-wide custom CSS + banner HTML edited in
+  small CodeMirror windows;
   banner previewed into `#page-banner`, CSS injected into
   `<head id="pagerite-user">`) + vue-draggable structure tree with
   always-editable title/slug inputs per row, opened by the banner pen —

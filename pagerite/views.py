@@ -86,6 +86,7 @@ def _layout(
     modules: list[str] = (),
     custom_css: str = "",
     theme: str = "",
+    favicon: str = "",
 ) -> Template:
     """Page layout template with standard asset URLs and ES-module scripts.
 
@@ -99,6 +100,10 @@ def _layout(
     doc = Document(E.Title, lang="en")
     if theme:
         doc.meta(name="pagerite:theme", content=theme)
+    # A custom favicon (from the site editor) is linked explicitly; without
+    # one, browsers fall back to the build's /favicon.ico by convention.
+    if favicon:
+        doc.link(rel="icon", href=f"/_f/{favicon}", id="pagerite-favicon")
     # Editor asset URLs for pagerite.js, which injects the 🖊️ edit pens
     # itself once it has validated the session (pages render identically
     # for everyone; editing is gated by the auth proxy in front of /_api).
@@ -294,13 +299,14 @@ def render_page(
     brand: str = SITE_NAME,
     custom_css: str = "",
     theme: str = "",
+    favicon: str = "",
 ) -> str:
     """Render a full HTML page for the slug path."""
     node = resolve(menu, path)[-1]
     title = _title(path.rpartition("/")[2], node)
     scripts, styles = _page_assets(theme)
     return str(
-        _layout(styles, scripts, custom_css, theme)(
+        _layout(styles, scripts, custom_css, theme, favicon)(
             Title=f"{title} – {brand}" if brand else title,
             Brand=_brand_link(brand),
             Nav=nav_html(menu, path),
@@ -317,6 +323,7 @@ def render_category(
     brand: str = SITE_NAME,
     custom_css: str = "",
     theme: str = "",
+    favicon: str = "",
 ) -> str:
     """Render the placeholder for a content-less category label (404).
 
@@ -336,7 +343,7 @@ def render_category(
             doc.p("This section has no page of its own yet.")
     scripts, styles = _page_assets(theme)
     return str(
-        _layout(styles, scripts, custom_css, theme)(
+        _layout(styles, scripts, custom_css, theme, favicon)(
             Title=f"{title} – {brand}" if brand else title,
             Brand=_brand_link(brand),
             Nav=nav_html(menu, path),
@@ -353,6 +360,7 @@ def render_not_found(
     brand: str = SITE_NAME,
     custom_css: str = "",
     theme: str = "",
+    favicon: str = "",
 ) -> str:
     """Render a 404 page within the normal layout."""
     doc = E.article
@@ -361,7 +369,7 @@ def render_not_found(
         doc.p(f"No article at /{path}. If there was before, it may have been deleted.")
     scripts, styles = _page_assets(theme)
     return str(
-        _layout(styles, scripts, custom_css, theme)(
+        _layout(styles, scripts, custom_css, theme, favicon)(
             Title=f"Not Found – {brand}" if brand else "Not Found",
             Brand=_brand_link(brand),
             Nav=nav_html(menu, path),

@@ -86,6 +86,9 @@ class Data(msgspec.Struct):
     #: Raw site-wide custom CSS, injected inline in every page <head>.
     #: Trusted author content; not sanitized.
     custom_css: str = ""
+    #: Favicon: name of a file in `files` (content-addressed), linked as
+    #: <link rel="icon"> on every page. Empty = the build's /favicon.ico.
+    favicon: str = ""
     #: Legacy flat page store (pre-tree databases); migrated into `menu`
     #: on startup, then cleared. Never written otherwise.
     pages: dict[str, Page] = {}

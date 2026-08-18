@@ -315,7 +315,58 @@ async function loadSettings() {
     brand.value = s.brand
     theme.value = s.theme || ''
     customCss.value = s.custom_css || ''
+    favicon.value = s.favicon || ''
   } catch { /* keep default */ }
+}
+
+// --- Favicon ---------------------------------------------------------------
+// Uploaded into the content-addressed file store (PUT /_api/settings/favicon)
+// and linked on every page as <link rel="icon">; empty falls back to the
+// build's /favicon.ico. Applies to the live page immediately.
+const favicon = ref('')
+const faviconInput = ref(null)
+
+function applyFavicon(url) {
+  let link = document.querySelector('link[rel="icon"]')
+  if (url) {
+    if (!link) {
+      link = document.createElement('link')
+      link.rel = 'icon'
+      link.id = 'pagerite-favicon'
+      document.head.append(link)
+    }
+    link.href = url
+  } else if (link?.id === 'pagerite-favicon') {
+    link.remove()
+  }
+}
+
+async function uploadFavicon(file) {
+  if (!file || !file.type.startsWith('image/')) return
+  const res = await fetch('/_api/settings/favicon', {
+    method: 'PUT',
+    headers: { 'x-filename': file.name.replace(/[^\w.-]/g, '-') },
+    body: file,
+  })
+  if (res.ok) {
+    saveError.value = ''
+    const { path: url } = await res.json()
+    favicon.value = url
+    applyFavicon(url)
+  } else {
+    saveError.value = `⚠️ ${await errorDetail(res)}`
+  }
+}
+
+async function removeFavicon() {
+  const res = await fetch('/_api/settings/favicon', { method: 'DELETE' })
+  if (res.ok) {
+    saveError.value = ''
+    favicon.value = ''
+    applyFavicon('')
+  } else {
+    saveError.value = `⚠️ ${await errorDetail(res)}`
+  }
 }
 
 function currentTitle() {
@@ -887,6 +938,28 @@ onUnmounted(() => {
           A
         </button>
       </label>
+      <div class="favicon-row">
+        <img v-if="favicon" :src="favicon" class="favicon-preview" alt="" />
+        <span v-else class="favicon-preview favicon-empty">?</span>
+        <button
+          type="button"
+          title="upload favicon (ico, png, svg...)"
+          @click="faviconInput.click()"
+        >{{ favicon ? 'replace favicon' : 'upload favicon' }}</button>
+        <button
+          v-if="favicon"
+          type="button"
+          title="remove favicon (back to the default)"
+          @click="removeFavicon"
+        >remove</button>
+        <input
+          ref="faviconInput"
+          type="file"
+          accept="image/*"
+          hidden
+          @change="(ev) => { uploadFavicon(ev.target.files[0]); ev.target.value = '' }"
+        />
+      </div>
       <div v-if="fontPicker" class="font-picker">
           <div class="font-tabs">
             <button
@@ -1023,6 +1096,42 @@ onUnmounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Favicon row: tiny preview (or placeholder tile) + upload/remove buttons. */
+.favicon-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.favicon-preview {
+  width: 1.4rem;
+  height: 1.4rem;
+  object-fit: contain;
+  border-radius: 3px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+
+.favicon-empty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.favicon-row button {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.15rem 0.6rem;
+  background: var(--accent2);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
 .block-head button {

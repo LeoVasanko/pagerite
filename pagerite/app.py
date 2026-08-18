@@ -274,8 +274,13 @@ async def update_structure(op: StructureOp) -> None:
 
 @app.get("/_api/settings")
 async def get_settings() -> dict[str, str]:
-    """Site-wide settings (brand, theme and custom CSS)."""
-    return {"brand": data.brand, "theme": data.theme, "custom_css": data.custom_css}
+    """Site-wide settings (brand, theme, custom CSS and favicon URL)."""
+    return {
+        "brand": data.brand,
+        "theme": data.theme,
+        "custom_css": data.custom_css,
+        "favicon": f"/_f/{data.favicon}" if data.favicon else "",
+    }
 
 
 class SettingsIn(BaseModel):
@@ -293,6 +298,36 @@ async def put_settings(settings: SettingsIn) -> None:
         data.brand = settings.brand
         data.theme = settings.theme
         data.custom_css = settings.custom_css
+        data.version += 1
+
+
+@app.put("/_api/settings/favicon")
+async def put_favicon(request: Request) -> dict[str, str]:
+    """Upload a favicon into the content-addressed store and activate it.
+
+    Raw image body (ico/png/svg...); the stored name is a blake3 hash
+    prefix + extension, and pages link it as <link rel="icon">. Returns
+    {"path": "/_f/..."}.
+    """
+    body = await request.body()
+    if not body:
+        raise HTTPException(400, "empty file")
+    stored = _hash_name(body, request.headers.get("x-filename", "favicon.ico"))
+    with kanta.transaction("upload favicon"):
+        data.files[stored] = body
+        data.favicon = stored
+        data.version += 1
+    return {"path": f"/_f/{stored}"}
+
+
+@app.delete("/_api/settings/favicon", status_code=204)
+async def delete_favicon() -> None:
+    """Clear the custom favicon (back to the build's /favicon.ico).
+
+    The blob stays in the content-addressed store; only the reference goes.
+    """
+    with kanta.transaction("clear favicon"):
+        data.favicon = ""
         data.version += 1
 
 
@@ -575,17 +610,17 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
         if request.headers.get("if-none-match") == etag:
             return Response(status_code=304)
         return HTMLResponse(
-            views.render_page(data.menu, path, data.brand, data.custom_css, data.theme),
+            views.render_page(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon),
             headers={"etag": etag},
         )
     if node is not None and node.published and node.content is None:
         # Category label without a landing page: placeholder with the pen
         # to create it (404 — no page here, but the node is real).
-        return HTMLResponse(views.render_category(data.menu, path, data.brand, data.custom_css, data.theme), 404)
+        return HTMLResponse(views.render_category(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon), 404)
     if node is None and not path:
         # No front page (no top-level node with slug ""): "/" opens the
         # first item of the navigation instead.
         for slug, item in sorted_nodes(data.menu):
             if item.published:
                 return RedirectResponse(f"/{slug}")
-    return HTMLResponse(views.render_not_found(data.menu, path, data.brand, data.custom_css, data.theme), 404)
+    return HTMLResponse(views.render_not_found(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon), 404)
