@@ -20,7 +20,7 @@ classes, e.g. `![alt](photo.avif "Caption"){.right}`.
 """
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from markdown_it import MarkdownIt
 from markdown_it.common.utils import escapeHtml
@@ -156,13 +156,12 @@ def render(
 
 
 def _dateline(created: datetime, modified: datetime | None) -> str:
-    """Published/updated line for the ``{dates}`` tag. The updated date is
-    shown only when it falls on a later day than the publication."""
-    pub = f'<time datetime="{created.isoformat()}">{created.day} {created:%B %Y}</time>'
-    out = f"Published {pub}"
-    if modified is not None and modified.date() > created.date():
-        upd = f'<time datetime="{modified.isoformat()}">{modified.day} {modified:%B %Y}</time>'
-        out += f", updated {upd}"
+    """Dateline for the ``{dates}`` tag: "1 Jan 2026", plus
+    " – edited 3 Jan 2026" when the last edit came >= 24h after
+    publishing (quick fixes right after posting stay unmentioned)."""
+    out = f'<time datetime="{created.isoformat()}">{created.day} {created:%b %Y}</time>'
+    if modified is not None and modified - created >= timedelta(hours=24):
+        out += f' – edited <time datetime="{modified.isoformat()}">{modified.day} {modified:%b %Y}</time>'
     return f'<p class="dateline">{out}</p>'
 
 

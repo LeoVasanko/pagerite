@@ -668,13 +668,20 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
     node = chain[-1] if chain else None
     if node is not None and node.published and node.content is not None:
         # ETag on content + render version; clients revalidate cheaply,
-        # which keeps prefetched pages warm and current.
+        # which keeps prefetched pages warm and current. no-cache forces
+        # that revalidation: with Last-Modified but no Cache-Control,
+        # browsers would otherwise cache heuristically and serve stale
+        # pages (e.g. after a theme change) without asking us at all.
         etag = f'"{path}@{node.modified.timestamp()}v{data.version}"'
         if request.headers.get("if-none-match") == etag:
             return Response(status_code=304)
         return HTMLResponse(
             views.render_page(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon),
-            headers={"etag": etag, "last-modified": _http_date(node.modified)},
+            headers={
+                "etag": etag,
+                "last-modified": _http_date(node.modified),
+                "cache-control": "no-cache",
+            },
         )
     if node is not None and node.published and node.content is None:
         # Category label without a landing page: placeholder with the pen
@@ -682,7 +689,10 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
         return HTMLResponse(
             views.render_category(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon),
             404,
-            headers={"last-modified": _http_date(node.modified)},
+            headers={
+                "last-modified": _http_date(node.modified),
+                "cache-control": "no-cache",
+            },
         )
     if node is None and not path:
         # No front page (no top-level node with slug ""): "/" opens the
