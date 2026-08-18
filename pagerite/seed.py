@@ -10,10 +10,8 @@ Welcome to your new **Pagerite** site. Pages are written in Markdown — includi
 
 Have a look around:
 
-- The [docs](/docs) section explains [how to write content](/docs/editing),
-  including images and positioning.
-- [The Long Read](/blog/the-long-read) demonstrates a longer article with
-  scroll effects.
+- The [docs](/docs) section explains [how to write content](/docs/editing), including images and positioning.
+- [The Long Read](/blog/the-long-read) demonstrates a longer article with scroll effects.
 - The [about](/about) page shows off assorted formatting.
 
 ![Abstract waves](waves.svg "Generated SVG artwork, attached to this page")
@@ -188,134 +186,7 @@ CANVAS_BANNER = """\
 </script>
 """
 
-EYES_BANNER = """\
-<canvas id="eyes"></canvas>
-<script>
-(() => {
-  const c = document.getElementById("eyes");
-  const ctx = c.getContext("2d");
-  const BG = "#f3e9d7";
-  const fit = () => { c.width = c.clientWidth; c.height = c.clientHeight; };
-  fit();
-  addEventListener("resize", fit);
-
-  // Mouse in canvas coordinates; pupils wander idly when it goes stale.
-  let mx = 0, my = 0, lastMove = 0;
-  addEventListener("mousemove", (e) => {
-    const r = c.getBoundingClientRect();
-    mx = e.clientX - r.left;
-    my = e.clientY - r.top;
-    lastMove = performance.now();
-  });
-
-  // The pair of eyes is one critter: it wanders around the banner, and
-  // every so often ducks below the bottom edge, then pops back up.
-  let gx = 0.5, gy = 0.5;   // group position (fractions of the canvas)
-  let tx = 0.5, ty = 0.5;   // wander target
-  let yoff = 0, vy = 0;     // vertical hide/pop spring (px)
-  let hidePhase = 0;        // 0 = up, 1 = ducking, 2 = down, waiting
-  let nextMove = 0, nextHide = 4000 + Math.random() * 5000, resurfaceAt = 0;
-
-  // Per-eye pupil state: spring physics for goofy lag and overshoot.
-  const eyes = [{ x: 0, y: 0, vx: 0, vy: 0, pr: 0.3 }, { x: 0, y: 0, vx: 0, vy: 0, pr: 0.3 }];
-
-  let prev = performance.now();
-  (function frame(now) {
-    if (!c.isConnected) return;
-    const dt = Math.min(now - prev, 100) / 16.7; prev = now;
-    ctx.fillStyle = BG;
-    ctx.fillRect(0, 0, c.width, c.height);
-    const R = Math.min(c.height * 0.32, 70);
-
-    // Wander: ease toward a spot, pick a new one every few seconds.
-    if (now > nextMove && !hidePhase) {
-      tx = 0.15 + Math.random() * 0.7;
-      ty = 0.3 + Math.random() * 0.4;
-      nextMove = now + 2500 + Math.random() * 3500;
-    }
-    gx += (tx - gx) * 0.02 * dt;
-    gy += (ty - gy) * 0.02 * dt;
-
-    // Duck down, wait hidden, then spring back (underdamped = pops past
-    // the resting point and wobbles). Resurfaces at a new spot.
-    if (hidePhase === 0 && now > nextHide) hidePhase = 1;
-    if (hidePhase === 1 && yoff > c.height * 0.9) {
-      hidePhase = 2;
-      resurfaceAt = now + 500 + Math.random() * 900;
-    }
-    if (hidePhase === 2 && now > resurfaceAt) {
-      hidePhase = 0;
-      nextHide = now + 5000 + Math.random() * 7000;
-      tx = 0.15 + Math.random() * 0.7;
-      gx = tx;
-      nextMove = now + 3000 + Math.random() * 3000;
-    }
-    const yTarget = hidePhase ? c.height : 0;
-    vy += (yTarget - yoff) * 0.06 * dt;
-    vy *= 0.85;
-    yoff += vy * dt;
-
-    const cy0 = gy * c.height + yoff;
-    const cx0 = gx * c.width;
-    const watching = now - lastMove < 4000;
-    eyes.forEach((e, i) => {
-      const cx = cx0 + (i ? 1.3 : -1.3) * R;
-      // Pupil target: toward the cursor, or a slow idle drift.
-      let ptx, pty;
-      if (watching) {
-        const dx = mx - cx, dy = my - cy0;
-        const d = Math.hypot(dx, dy) || 1;
-        const reach = R * 0.45 * Math.min(1, d / 200);
-        ptx = (dx / d) * reach; pty = (dy / d) * reach;
-      } else {
-        ptx = Math.sin(now / 900 + i * 2) * R * 0.3;
-        pty = Math.cos(now / 1300 + i * 3) * R * 0.2;
-      }
-      // Spring toward the target (underdamped: overshoots, wobbles).
-      e.vx += (ptx - e.x) * 0.08 * dt; e.vy += (pty - e.y) * 0.08 * dt;
-      e.vx *= 0.82; e.vy *= 0.82;
-      e.x += e.vx * dt; e.y += e.vy * dt;
-      // Pupils dilate when the cursor comes close to the eye.
-      const near = Math.hypot(mx - cx, my - cy0) < R * 2.5;
-      e.pr += ((near ? 0.42 : 0.3) - e.pr) * 0.1 * dt;
-      // Sclera.
-      ctx.fillStyle = "#fff";
-      ctx.beginPath();
-      ctx.ellipse(cx, cy0, R, R * 1.15, 0, 0, 7);
-      ctx.fill();
-      // Iris + pupil + glint, clipped to the sclera.
-      ctx.save();
-      ctx.beginPath();
-      ctx.ellipse(cx, cy0, R, R * 1.15, 0, 0, 7);
-      ctx.clip();
-      ctx.fillStyle = "#7c5cff";
-      ctx.beginPath();
-      ctx.arc(cx + e.x, cy0 + e.y, R * 0.55, 0, 7);
-      ctx.fill();
-      ctx.fillStyle = "#1d1730";
-      ctx.beginPath();
-      ctx.arc(cx + e.x, cy0 + e.y, R * e.pr, 0, 7);
-      ctx.fill();
-      ctx.fillStyle = "#fff";
-      ctx.beginPath();
-      ctx.arc(cx + e.x - R * 0.15, cy0 + e.y - R * 0.18, R * 0.09, 0, 7);
-      ctx.fill();
-      ctx.restore();
-      ctx.strokeStyle = "#2b2440";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.ellipse(cx, cy0, R, R * 1.15, 0, 0, 7);
-      ctx.stroke();
-    });
-    requestAnimationFrame(frame);
-  })(prev);
-})();
-</script>
-"""
-
 BLOG_BANNER = '<div style="background: linear-gradient(100deg, #14243d, #3d2b6b 45%, #7c5cff 75%, #ff5c8a)"></div>'
-
-FRONT_BANNER = '<img src="/waves.svg" alt="">'
 
 WAVES_SVG = """\
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400">
@@ -359,19 +230,22 @@ DUNES_SVG = """\
 </svg>
 """
 
-#: path -> (title, markdown, {filename: bytes}, banner HTML, menu order).
+#: path -> (title, markdown, {filename: bytes}, banner HTML, menu order,
+#: banner design). Banners are deliberately set only on select sub pages
+#: (not the front page), so the theme's default design shows elsewhere.
 #: Note there are deliberately no "docs" or "blog" landing pages: those
 #: labels are created without content, so they render a placeholder page
 #: and their nav links point at the first child (see views.first_leaf).
-PAGES: dict[str, tuple[str, str, dict[str, bytes], str, float]] = {
-    "": ("Welcome", WELCOME, {"waves.svg": WAVES_SVG.encode()}, FRONT_BANNER, 1),
-    "about": ("About", ABOUT, {}, "", 2),
+PAGES: dict[str, tuple[str, str, dict[str, bytes], str, float, str | None]] = {
+    "": ("Welcome", WELCOME, {"waves.svg": WAVES_SVG.encode()}, "", 1, None),
+    "about": ("About", ABOUT, {}, "", 2, None),
     "docs/editing": (
         "Writing Content",
         EDITING,
         {"shapes.svg": SHAPES_SVG.encode()},
         "",
         1,
+        None,
     ),
     "blog/the-long-read": (
         "The Long Read",
@@ -379,8 +253,11 @@ PAGES: dict[str, tuple[str, str, dict[str, bytes], str, float]] = {
         {"dunes.svg": DUNES_SVG.encode()},
         BLOG_BANNER,
         1,
+        None,
     ),
-    "blog/notes-on-urls": ("Notes on URLs", NOTES_ON_URLS, {}, EYES_BANNER, 2),
-    "blog/canvas-nights": ("Canvas Nights", CANVAS_NIGHTS, {}, CANVAS_BANNER, 3),
-    "blog/small-releases": ("Small Releases", SMALL_RELEASES, {}, "", 4),
+    # The eyes critter is a named banner design (pagerite/themes/eyes/),
+    # not code embedded in the page.
+    "blog/notes-on-urls": ("Notes on URLs", NOTES_ON_URLS, {}, "", 2, "eyes"),
+    "blog/canvas-nights": ("Canvas Nights", CANVAS_NIGHTS, {}, CANVAS_BANNER, 3, None),
+    "blog/small-releases": ("Small Releases", SMALL_RELEASES, {}, "", 4, None),
 }

@@ -89,11 +89,13 @@ evolves.
   navigation bar overlaid on it — no separate chrome header. The banner
   combines two layers, stacked in `#page-banner` (a grid, so they overlay):
   first the **banner design** — a named design living in a theme folder
-  (`pagerite/themes/{name}/banner.css` + `banner.svg`), chosen per page via
+  (`pagerite/themes/{name}/banner.css` plus artwork as `banner.html` —
+  arbitrary markup like canvas + style + script — or `banner.svg`),
+  chosen per page via
   `Node.banner_design` (a design name, "" for none, None to inherit from
   the nearest ancestor, then the front page, then the active theme's own
-  design). The artwork is an **inline SVG** (marked `svg[data-design]`): as
-  markup it can be recolored from the theme stylesheet (corporate's single
+  design). The artwork is inlined into a `div[data-design]` wrapper: SVG
+  artwork can be recolored from the theme stylesheet (corporate's single
   SVG serves both light and dark mode via `var()`-driven stops). Second,
   **per-page author code**: `Node.banner` holds an arbitrary trusted HTML
   snippet (an image, a styled div, canvas + script — anything), resolved by

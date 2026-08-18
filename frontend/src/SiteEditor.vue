@@ -775,12 +775,14 @@ function previewBanner() {
   if (!el) return
   if (banner.value.trim()) {
     // Own banner code supplements the design: the inlined design artwork
-    // (marked svg[data-design]) stays in place, the author code goes after
-    // it so its styles win.
-    const artwork = [...el.querySelectorAll('svg[data-design]')]
+    // (marked with [data-design]) is detached while the author code is
+    // swapped in (so runScripts never re-runs the design's own scripts),
+    // then put back first — author code stays last so its styles win.
+    const artwork = [...el.querySelectorAll('[data-design]')]
+    for (const a of artwork) a.remove()
     el.innerHTML = banner.value
-    el.prepend(...artwork)
     runScripts(el)
+    el.prepend(...artwork)
   } else {
     // No banner code of its own: the region must show the inherited/design
     // banner — re-render from the server (an empty write here would wipe it).

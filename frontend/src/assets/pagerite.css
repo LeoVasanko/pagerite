@@ -160,6 +160,15 @@ body {
   will-change: transform;
 }
 
+/* The design artwork wrapper (div[data-design]) takes the sizing and
+   parallax above; an svg inside it fills it (it is what used to be the
+   direct child before designs got a wrapper). */
+#page-banner [data-design]>svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 #brand,
 #nav {
   position: relative;

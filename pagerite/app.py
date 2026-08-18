@@ -130,13 +130,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     if missing:
         with kanta.transaction("seed missing pages"):
             for path in missing:
-                title, markdown, files, banner, order = seed.PAGES[path]
+                title, markdown, files, banner, order, design = seed.PAGES[path]
                 for orig, body in files.items():
                     markdown, banner = _store_seed_file(markdown, banner, orig, body)
                 node = _ensure(data.menu, path)
                 node.title = title
                 node.content = markdown
                 node.banner = banner
+                node.banner_design = design
                 node.order = order
     await frontend.load()
     yield

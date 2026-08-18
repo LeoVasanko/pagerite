@@ -52,11 +52,12 @@ def _theme_names() -> list[str]:
 
 
 def _banner_design_names() -> list[str]:
-    """Available banner designs: theme folders with banner.css or banner.svg."""
+    """Available banner designs: theme folders with artwork and/or styles."""
     return sorted(
         d.name
         for d in THEMES.iterdir()
-        if d.is_dir() and ((d / "banner.css").exists() or (d / "banner.svg").exists())
+        if d.is_dir()
+        and any((d / f).exists() for f in ("banner.css", "banner.svg", "banner.html"))
     )
 
 
@@ -284,18 +285,26 @@ def banner_html(menu: dict[str, Node], path: str, theme: str = "") -> HTML:
 
 
 def _design_banner(design: str) -> HTML:
-    """The design's inline banner SVG (empty for none/unknown designs).
+    """The design's inline banner artwork (empty for none/unknown designs).
 
-    Read from disk on every request: design files are never built/cached,
-    so editing them on disk shows on the next page load, even in prod."""
+    banner.html (arbitrary markup: canvas + style + script...) takes
+    precedence over banner.svg. Read from disk on every request: design
+    files are never built/cached, so editing them on disk shows on the
+    next page load, even in prod. The data-design wrapper marks the
+    artwork as the design's (not author code), so the site editor's live
+    banner preview keeps it in place.
+    """
     if not _valid_name(design):
         return HTML("")
-    path = THEMES / design / "banner.svg"
-    if not path.exists():
+    html = THEMES / design / "banner.html"
+    svg = THEMES / design / "banner.svg"
+    if html.exists():
+        body = html.read_text()
+    elif svg.exists():
+        body = svg.read_text()
+    else:
         return HTML("")
-    # data-design marks the artwork as the design's (not author code), so
-    # the site editor's live banner preview keeps it in place.
-    return HTML(path.read_text().replace("<svg", "<svg data-design", 1))
+    return HTML(f'<div data-design="{design}">{body}</div>')
 
 
 def banner_design(menu: dict[str, Node], path: str, theme: str = "") -> str:
@@ -316,8 +325,10 @@ def banner_design(menu: dict[str, Node], path: str, theme: str = "") -> str:
         return front.banner_design
     if (
         _valid_name(theme)
-        and ((THEMES / theme / "banner.css").exists()
-             or (THEMES / theme / "banner.svg").exists())
+        and any(
+            (THEMES / theme / f).exists()
+            for f in ("banner.css", "banner.svg", "banner.html")
+        )
     ):
         return theme
     return ""

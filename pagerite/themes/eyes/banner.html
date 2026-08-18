@@ -1,0 +1,423 @@
+<canvas id="eyes"></canvas>
+<style>
+  #eyes {
+    width: 100%;
+    height: 240px;
+    display: block;
+  }
+</style>
+<script><!--
+(() => {
+  const c = document.getElementById('eyes')
+  const ctx = c.getContext('2d')
+  const DPR = devicePixelRatio || 1
+
+  const fit = () => {
+    const w = Math.max(1, c.clientWidth)
+    const h = Math.max(1, c.clientHeight)
+    c.width = Math.round(w * DPR)
+    c.height = Math.round(h * DPR)
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0)
+  }
+
+  fit()
+  addEventListener('resize', fit)
+
+  let mx = 0
+  let my = 0
+  let lastMove = 0
+
+  addEventListener('mousemove', e => {
+    const r = c.getBoundingClientRect()
+
+    // Convert viewport coordinates into the canvas' CSS-pixel coordinate
+    // system. This remains correct with browser zoom, CSS transforms, etc.
+    mx = (e.clientX - r.left) * c.clientWidth / r.width
+    my = (e.clientY - r.top) * c.clientHeight / r.height
+    lastMove = performance.now()
+  })
+
+  let gx = 0.5
+  let gy = 0.5
+  let tx = 0.5
+  let ty = 0.5
+  let yoff = 0
+  let vy = 0
+  let hidePhase = 0
+  let nextMove = 0
+  let nextHide = 4000 + Math.random() * 5000
+  let resurfaceAt = 0
+
+  const eyes = [
+    { x: 0, y: 0, vx: 0, vy: 0, pr: 0.3 },
+    { x: 0, y: 0, vx: 0, vy: 0, pr: 0.3 }
+  ]
+
+  const ridgeY = (x, w, h) =>
+    h * 0.72 +
+    Math.sin(x * 0.012) * 10 +
+    Math.sin(x * 0.003 + 1.4) * 16 +
+    Math.sin(x * 0.02 + 0.7) * 3
+
+  const drawCloud = (x, y, s) => {
+    ctx.fillStyle = 'rgba(255,255,255,0.85)'
+    ctx.beginPath()
+    ctx.arc(x - s * 0.55, y + s * 0.05, s * 0.38, 0, 7)
+    ctx.arc(x - s * 0.12, y - s * 0.08, s * 0.48, 0, 7)
+    ctx.arc(x + s * 0.32, y, s * 0.42, 0, 7)
+    ctx.arc(x + s * 0.64, y + s * 0.1, s * 0.28, 0, 7)
+    ctx.fill()
+  }
+
+  const drawHills = (w, h) => {
+    ctx.fillStyle = '#b7d7a8'
+    ctx.beginPath()
+    ctx.moveTo(0, h)
+    ctx.lineTo(0, h * 0.63)
+    ctx.quadraticCurveTo(w * 0.18, h * 0.48, w * 0.35, h * 0.62)
+    ctx.quadraticCurveTo(w * 0.52, h * 0.78, w * 0.68, h * 0.58)
+    ctx.quadraticCurveTo(w * 0.82, h * 0.43, w, h * 0.57)
+    ctx.lineTo(w, h)
+    ctx.closePath()
+    ctx.fill()
+
+    ctx.fillStyle = '#99c685'
+    ctx.beginPath()
+    ctx.moveTo(0, h)
+    ctx.lineTo(0, h * 0.72)
+    ctx.quadraticCurveTo(w * 0.14, h * 0.6, w * 0.28, h * 0.7)
+    ctx.quadraticCurveTo(w * 0.46, h * 0.82, w * 0.62, h * 0.66)
+    ctx.quadraticCurveTo(w * 0.82, h * 0.5, w, h * 0.68)
+    ctx.lineTo(w, h)
+    ctx.closePath()
+    ctx.fill()
+  }
+
+  const drawBackground = (w, h) => {
+    const sky = ctx.createLinearGradient(0, 0, 0, h)
+    sky.addColorStop(0, '#8ed0ff')
+    sky.addColorStop(0.62, '#d9f1ff')
+    sky.addColorStop(1, '#eef9ff')
+    ctx.fillStyle = sky
+    ctx.fillRect(0, 0, w, h)
+
+    ctx.fillStyle = 'rgba(255,240,170,0.5)'
+    ctx.beginPath()
+    ctx.arc(w * 0.83, h * 0.2, h * 0.16, 0, 7)
+    ctx.fill()
+
+    drawCloud(w * 0.18, h * 0.2, h * 0.16)
+    drawCloud(w * 0.43, h * 0.14, h * 0.12)
+    drawCloud(w * 0.68, h * 0.24, h * 0.15)
+
+    drawHills(w, h)
+
+    for (let i = 0; i < 5; i++) {
+      const x = (i + 0.5) * w / 5
+      const y = h * 0.58 + Math.sin(i * 1.7) * 8
+
+      ctx.fillStyle = '#5f8d4e'
+      ctx.beginPath()
+      ctx.arc(x, y, 18, Math.PI, 0)
+      ctx.arc(x - 14, y + 2, 14, Math.PI, 0)
+      ctx.arc(x + 14, y + 3, 12, Math.PI, 0)
+      ctx.fill()
+    }
+  }
+
+  const drawCritter = (cx0, eyeY, R, now, dt) => {
+    const headR = R * 2
+    const headCx = cx0
+    const headCy = eyeY + R * 0.52
+
+    ctx.fillStyle = '#5fbe61'
+    ctx.strokeStyle = '#285838'
+    ctx.lineWidth = 3
+
+    ctx.beginPath()
+    ctx.moveTo(headCx - headR * 0.45, headCy - headR * 0.84)
+    ctx.quadraticCurveTo(
+      headCx - headR * 0.62,
+      headCy - headR * 1.18,
+      headCx - headR * 0.2,
+      headCy - headR * 0.94
+    )
+    ctx.fill()
+    ctx.stroke()
+
+    ctx.beginPath()
+    ctx.moveTo(headCx + headR * 0.45, headCy - headR * 0.84)
+    ctx.quadraticCurveTo(
+      headCx + headR * 0.62,
+      headCy - headR * 1.18,
+      headCx + headR * 0.2,
+      headCy - headR * 0.94
+    )
+    ctx.fill()
+    ctx.stroke()
+
+    ctx.beginPath()
+    ctx.arc(headCx, headCy, headR, 0, 7)
+    ctx.fill()
+    ctx.stroke()
+
+    ctx.fillStyle = 'rgba(255,255,255,0.12)'
+    ctx.beginPath()
+    ctx.arc(
+      headCx - headR * 0.28,
+      headCy - headR * 0.22,
+      headR * 0.4,
+      0,
+      7
+    )
+    ctx.fill()
+
+    ctx.fillStyle = '#4caa50'
+
+    for (let i = -1; i <= 1; i++) {
+      ctx.beginPath()
+      ctx.arc(
+        headCx + i * headR * 0.42,
+        headCy - headR * 0.16,
+        headR * 0.13,
+        0,
+        7
+      )
+      ctx.fill()
+    }
+
+    ctx.strokeStyle = '#285838'
+    ctx.lineCap = 'round'
+
+    for (let i = -1; i <= 1; i++) {
+      ctx.lineWidth = 4
+      ctx.beginPath()
+      ctx.moveTo(headCx + i * 10, headCy - headR * 0.94)
+      ctx.lineTo(
+        headCx + i * 16,
+        headCy - headR * 1.1 - Math.sin(now / 180 + i) * 3
+      )
+      ctx.stroke()
+    }
+
+    eyes.forEach((e, i) => {
+      const cx = cx0 + (i ? 1.3 : -1.3) * R
+      const watching = now - lastMove < 4000
+
+      let ptx
+      let pty
+
+      if (watching) {
+        const dx = mx - cx
+        const dy = my - eyeY
+        const d = Math.hypot(dx, dy) || 1
+
+        const maxReach = R * 0.43
+        const responseDistance = R * 4
+
+        // Direction points exactly at the cursor, while reach increases
+        // smoothly with cursor distance.
+        const reach = maxReach * Math.min(1, d / responseDistance)
+
+        ptx = dx / d * reach
+        pty = dy / d * reach
+      } else {
+        ptx = Math.sin(now / 900 + i * 2) * R * 0.3
+        pty = Math.cos(now / 1300 + i * 3) * R * 0.2
+      }
+
+      e.vx += (ptx - e.x) * 0.08 * dt
+      e.vy += (pty - e.y) * 0.08 * dt
+      e.vx *= Math.pow(0.82, dt)
+      e.vy *= Math.pow(0.82, dt)
+      e.x += e.vx * dt
+      e.y += e.vy * dt
+
+      const near = Math.hypot(mx - cx, my - eyeY) < R * 2.5
+      e.pr += ((near ? 0.42 : 0.3) - e.pr) * 0.1 * dt
+
+      ctx.fillStyle = '#fff'
+      ctx.strokeStyle = '#1f2d22'
+      ctx.lineWidth = 2.5
+      ctx.beginPath()
+      ctx.ellipse(cx, eyeY, R, R * 1.12, 0, 0, 7)
+      ctx.fill()
+      ctx.stroke()
+
+      ctx.save()
+      ctx.beginPath()
+      ctx.ellipse(cx, eyeY, R, R * 1.12, 0, 0, 7)
+      ctx.clip()
+
+      ctx.fillStyle = '#f2b84b'
+      ctx.beginPath()
+      ctx.arc(cx + e.x, eyeY + e.y, R * 0.56, 0, 7)
+      ctx.fill()
+
+      ctx.strokeStyle = 'rgba(140,84,8,0.45)'
+      ctx.lineWidth = 1
+
+      for (let a = 0; a < 12; a++) {
+        const ang = a / 12 * Math.PI * 2
+
+        ctx.beginPath()
+        ctx.moveTo(cx + e.x, eyeY + e.y)
+        ctx.lineTo(
+          cx + e.x + Math.cos(ang) * R * 0.5,
+          eyeY + e.y + Math.sin(ang) * R * 0.5
+        )
+        ctx.stroke()
+      }
+
+      ctx.fillStyle = '#191919'
+      ctx.beginPath()
+      ctx.arc(cx + e.x, eyeY + e.y, R * e.pr, 0, 7)
+      ctx.fill()
+
+      ctx.fillStyle = '#fff'
+      ctx.beginPath()
+      ctx.arc(
+        cx + e.x - R * 0.14,
+        eyeY + e.y - R * 0.17,
+        R * 0.09,
+        0,
+        7
+      )
+      ctx.fill()
+
+      ctx.restore()
+
+      ctx.strokeStyle = '#1f2d22'
+      ctx.lineWidth = 3
+      ctx.beginPath()
+      ctx.moveTo(cx - R * 0.7, eyeY - R * 1.2)
+      ctx.quadraticCurveTo(
+        cx,
+        eyeY - R * 1.48 - (i ? -1 : 1) * 2,
+        cx + R * 0.72,
+        eyeY - R * 1.12
+      )
+      ctx.stroke()
+    })
+  }
+
+  const drawForeground = (w, h) => {
+    ctx.fillStyle = '#69ae4b'
+    ctx.beginPath()
+    ctx.moveTo(0, h)
+    ctx.lineTo(0, ridgeY(0, w, h))
+
+    for (let x = 0; x <= w; x += 8)
+      ctx.lineTo(x, ridgeY(x, w, h))
+
+    ctx.lineTo(w, h)
+    ctx.closePath()
+    ctx.fill()
+
+    ctx.fillStyle = 'rgba(48,102,34,0.18)'
+    ctx.beginPath()
+    ctx.moveTo(0, h)
+    ctx.lineTo(0, ridgeY(0, w, h) + 10)
+
+    for (let x = 0; x <= w; x += 8)
+      ctx.lineTo(x, ridgeY(x, w, h) + 10)
+
+    ctx.lineTo(w, h)
+    ctx.closePath()
+    ctx.fill()
+
+    ctx.strokeStyle = '#4d8d37'
+    ctx.lineWidth = 2
+    ctx.lineCap = 'round'
+
+    for (let x = 0; x <= w; x += 16) {
+      const y = ridgeY(x, w, h)
+
+      ctx.beginPath()
+      ctx.moveTo(x, y + 6)
+      ctx.quadraticCurveTo(x - 4, y - 10, x + 1, y - 2)
+      ctx.moveTo(x + 1, y + 6)
+      ctx.quadraticCurveTo(x + 4, y - 12, x + 3, y - 1)
+      ctx.stroke()
+    }
+
+    for (let i = 0; i < 8; i++) {
+      const x = (i + 0.4) * w / 8 + Math.sin(i * 2.4) * 10
+      const y = ridgeY(x, w, h) + 2
+
+      ctx.fillStyle = i % 2 ? '#ffdc6b' : '#ff8aa7'
+      ctx.beginPath()
+      ctx.arc(x, y, 3, 0, 7)
+      ctx.arc(x - 4, y + 2, 3, 0, 7)
+      ctx.arc(x + 4, y + 2, 3, 0, 7)
+      ctx.fill()
+    }
+  }
+
+  let prev = performance.now()
+
+  const frame = now => {
+    if (!c.isConnected) return
+
+    const dt = Math.min(now - prev, 100) / 16.7
+    prev = now
+
+    const w = c.clientWidth
+    const h = c.clientHeight
+    const R = Math.min(h * 0.11, 38)
+
+    if (now > nextMove && !hidePhase) {
+      tx = 0.15 + Math.random() * 0.7
+      ty = 0.3 + Math.random() * 0.4
+      nextMove = now + 2500 + Math.random() * 3500
+    }
+
+    gx += (tx - gx) * 0.02 * dt
+    gy += (ty - gy) * 0.02 * dt
+
+    if (hidePhase === 0 && now > nextHide)
+      hidePhase = 1
+
+    if (hidePhase === 1 && yoff > h * 0.9) {
+      hidePhase = 2
+      resurfaceAt = now + 500 + Math.random() * 900
+    }
+
+    if (hidePhase === 2 && now > resurfaceAt) {
+      hidePhase = 0
+      nextHide = now + 5000 + Math.random() * 7000
+      tx = 0.15 + Math.random() * 0.7
+      ty = 0.3 + Math.random() * 0.4
+      gx = tx
+      gy = ty
+      nextMove = now + 3000 + Math.random() * 3000
+    }
+
+    const yTarget = hidePhase ? h : 0
+
+    vy += (yTarget - yoff) * 0.06 * dt
+    vy *= Math.pow(0.85, dt)
+    yoff += vy * dt
+
+    drawBackground(w, h)
+
+    const cx0 = gx * w
+    const ridge = ridgeY(cx0, w, h)
+
+    // Normally the full pair of eyes sits above the grass. gy gives it
+    // a small amount of bobbing/wandering without burying it again.
+    const eyeY =
+      ridge -
+      R * 1.25 +
+      (gy - 0.5) * R * 0.8 +
+      yoff
+
+    drawCritter(cx0, eyeY, R, now, dt)
+    drawForeground(w, h)
+
+    requestAnimationFrame(frame)
+  }
+
+  requestAnimationFrame(frame)
+})()
+</script>

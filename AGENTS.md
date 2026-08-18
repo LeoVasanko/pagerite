@@ -57,10 +57,11 @@ not for the public pages. See `docs/design-principles.md` for the design.
     AFTER the banner design's artwork, so author code (e.g. a `<style>`
     override) always wins over the design's own styles.
     `Node.banner_design` picks a banner design: a theme folder name whose
-    `banner.css`/`banner.svg` supply the design's styles and inline SVG
-    artwork (marked `svg[data-design]`); "" = explicitly no design, None =
+    `banner.css` styles it and whose `banner.html` (arbitrary markup:
+    canvas + style + script) or `banner.svg` supplies the inline artwork
+    (wrapped in `div[data-design]`); "" = explicitly no design, None =
     inherit (nearest ancestor, front page last, then the active theme's
-    own design if it ships banner.css/banner.svg). The design's banner.css
+    own design if it ships banner.css/banner.svg/banner.html). The design's banner.css
     is linked in `<head>` (id `pagerite-banner`) between the theme and the
     custom CSS.
     `Data.version` is bumped on every write
