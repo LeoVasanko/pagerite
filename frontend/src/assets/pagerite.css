@@ -375,7 +375,8 @@ article ol,
 article dl,
 article blockquote,
 article pre,
-article figure {
+article figure,
+article table {
   margin-top: 0;
   margin-bottom: 1rem;
 }
@@ -590,14 +591,68 @@ code {
   font-size: 0.88em;
 }
 
+/* Tables separate by color, not lines: the header is a soft vertical
+   gradient tinted with the theme's accent (themes can override the
+   --table-head-* stops outright), body cells carry a very faint diagonal
+   wash of --table-tint that lifts them apart, and only a whisper of a row
+   separator remains. */
 table {
   border-collapse: collapse;
 }
 
 th,
 td {
-  border: 1px solid var(--line);
   padding: 0.35rem 0.8rem;
+  border: none;
+}
+
+th {
+  text-align: left;
+  background: linear-gradient(180deg,
+      var(--table-head-a, color-mix(in srgb, var(--accent) 10%, var(--surface))),
+      var(--table-head-b, color-mix(in srgb, var(--accent) 18%, var(--surface))));
+}
+
+td {
+  background: linear-gradient(160deg,
+      color-mix(in srgb, var(--table-tint, var(--accent)) 5%, transparent),
+      transparent 75%);
+}
+
+tbody tr:nth-child(even) td {
+  background: linear-gradient(160deg,
+      color-mix(in srgb, var(--table-tint, var(--accent)) 9%, transparent),
+      color-mix(in srgb, var(--table-tint, var(--accent)) 3%, transparent) 75%);
+}
+
+tbody tr+tr td {
+  border-top: 1px solid color-mix(in srgb, var(--table-tint, var(--accent)) 12%, transparent);
+}
+
+/* Definition lists are laid out as a lightweight two-column grid — terms
+   in an accent column with a sensible minimum width, descriptions filling
+   the rest — with no borders or fills (tables carry the heavier shading).
+   Explicit grid columns keep runs of multiple <dt>s or <dd>s stacking
+   correctly. */
+dl {
+  display: grid;
+  grid-template-columns: minmax(6rem, max-content) 1fr;
+}
+
+dt {
+  grid-column: 1;
+  font-weight: 550;
+  color: var(--accent);
+}
+
+dd {
+  grid-column: 2;
+  margin: 0;
+}
+
+dt,
+dd {
+  padding: 0.2rem 0;
 }
 
 /* Images and figures
@@ -802,8 +857,8 @@ article h2 {
   text-align: left;
 }
 
-.footnote {
-  font-size: 0.85rem;
+.footnotes {
+  font-size: 0.7rem;
   color: var(--muted);
 }
 
