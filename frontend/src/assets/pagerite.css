@@ -140,7 +140,9 @@ body {
   overflow: hidden;
 }
 
-#page-banner>* {
+/* :not(style, script): author-level display:block would override the UA's
+   display:none on those and render their source as banner text. */
+#page-banner>*:not(style, script) {
   display: block;
   width: 100%;
   height: 100%;
