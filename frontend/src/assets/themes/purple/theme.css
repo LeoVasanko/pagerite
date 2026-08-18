@@ -28,7 +28,9 @@
 #brand {
   font-size: clamp(3.2rem, 9vw, 7.5rem);
   line-height: 1;
-  margin-bottom: -0.28em;
+  /* Ensure below baseline stays visible */
+  padding-bottom: 0.3em;
+  margin-bottom: -0.3em;
   transform: rotate(-2deg);
   transform-origin: left bottom;
   background: linear-gradient(90deg, var(--accent), var(--accent2));
