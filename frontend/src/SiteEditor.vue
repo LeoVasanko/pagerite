@@ -432,11 +432,19 @@ async function onThemeChange() {
     if (link) {
       link.href = href
     } else {
+      // Re-create after "none": keep base < theme < design < custom CSS.
+      // In dev there is no #pagerite-base link (the base is a
+      // Vite-injected <style>), so anchor to the next sheet instead of
+      // prepending before the base styles.
       link = document.createElement('link')
       link.rel = 'stylesheet'
       link.id = 'pagerite-theme'
-      document.getElementById('pagerite-base')?.after(link)
-        ?? document.head.prepend(link)
+      link.href = href
+      const before = document.getElementById('pagerite-base')?.nextSibling
+        ?? document.getElementById('pagerite-banner')
+        ?? document.getElementById('pagerite-user')
+      if (before) before.before(link)
+      else document.head.append(link)
     }
   } else if (link) {
     link.remove()
