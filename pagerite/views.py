@@ -258,14 +258,15 @@ def _theme_banner(theme: str) -> HTML:
 def banner_source(menu: dict[str, Node], path: str) -> str | None:
     """Which node's banner applies at ``path``: the nearest ancestor with
     one set (the front page, a top-level sibling of the chain, last).
-    None = the default artwork."""
+    None = the default artwork. Whitespace-only banners count as empty:
+    clearing the editor can leave a stray newline behind."""
     chain = resolve(menu, path) or []
     segs = path.split("/")
     for i in range(len(chain) - 1, -1, -1):
-        if chain[i].banner:
+        if chain[i].banner.strip():
             return "/".join(segs[: i + 1])
     front = menu.get("")
-    if front and front.banner:
+    if front and front.banner.strip():
         return ""
     return None
 
