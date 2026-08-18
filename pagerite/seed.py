@@ -6,8 +6,7 @@ positioning, footnotes, definition lists, task lists, tables and raw HTML.
 """
 
 WELCOME = """\
-Welcome to your new **Pagerite** site. Pages are written in Markdown —
-including raw HTML — and served from pretty URLs.
+Welcome to your new **Pagerite** site. Pages are written in Markdown — including raw HTML — and served from pretty URLs.
 
 Have a look around:
 
@@ -21,8 +20,7 @@ Have a look around:
 """
 
 ABOUT = """\
-This site runs on **Pagerite**: FastAPI + html5tagger + kanta, with content
-written in Markdown.
+This site runs on **Pagerite**: FastAPI + html5tagger + kanta, with content written in Markdown.
 
 Some formatting samples:
 
@@ -47,15 +45,11 @@ Footnotes work too.[^1]
 """
 
 EDITING = """\
-Pages are written in Markdown with extensions. Everything below is plain
-Markdown source — no special support from the article is needed for the
-site's layout or scroll effects.
+Pages are written in Markdown with extensions. Everything below is plain Markdown source — no special support from the article is needed for the site's layout or scroll effects.
 
 ## Images
 
-Upload a file (`PUT /_api/files/{filename}`) and it lands in the
-content-addressed store, served immutable from `/_f/{hash}.ext` — an
-absolute URL that survives page moves:
+Upload a file (`PUT /_api/files/{filename}`) and it lands in the content-addressed store, served immutable from `/_f/{hash}.ext` — an absolute URL that survives page moves:
 
 ```
 ![Abstract shapes](/_f/....svg "A captioned figure"){.right width=280}
@@ -63,15 +57,11 @@ absolute URL that survives page moves:
 
 ![Abstract shapes](shapes.svg "A captioned figure, floated right with an attribute class"){.right width=280}
 
-The title becomes a `<figcaption>`, and brace attributes (the attrs
-plugin) control positioning: `{.right}`, `{.left}`, `{.wide}`, plus plain
-attributes like `width=280`. Absolute and external URLs pass through
-unchanged.
+The title becomes a `<figcaption>`, and brace attributes (the attrs plugin) control positioning: `{.right}`, `{.left}`, `{.wide}`, plus plain attributes like `width=280`. Absolute and external URLs pass through unchanged.
 
 ## Text
 
-*Emphasis*, **strong**, ~~strikethrough~~, `inline code`, and
-[links](/about) as usual. Blockquotes:
+*Emphasis*, **strong**, ~~strikethrough~~, `inline code`, and [links](/about) as usual. Blockquotes:
 
 > The URL space is the author's. Pretty slugs at the root, nesting only
 > where the content is genuinely structured.
@@ -85,71 +75,33 @@ def render(text: str, page_path: str) -> str:
 """
 
 LONG_READ = """\
-*An essay long enough to scroll, to demonstrate the gentle reveal of
-headings, figures and code blocks as they enter the viewport.*
+*An essay long enough to scroll, to demonstrate the gentle reveal of headings, figures and code blocks as they enter the viewport.*
 
 ![Layered dunes](dunes.svg "Full-width artwork between sections"){.wide}
 
 ## Chapter one
 
-The distinction between a blog and a website is largely an accident of
-history. Early content management systems filed everything under "posts",
-stamped them with a date, and arranged them in reverse chronological order
-under a `/blog/` prefix. Anything else was a "page", which lived somewhere
-else entirely, often in a separate editing interface with separate rules.
+The distinction between a blog and a website is largely an accident of history. Early content management systems filed everything under "posts", stamped them with a date, and arranged them in reverse chronological order under a `/blog/` prefix. Anything else was a "page", which lived somewhere else entirely, often in a separate editing interface with separate rules.
 
-But readers do not think in these terms. A reader follows a link, reads
-what is there, and follows another link. The URL is a promise about where
-something lives, not about which database table it came from. Pagerite
-therefore treats every piece of content as a page: named, addressable, and
-rendered on the fly.
+But readers do not think in these terms. A reader follows a link, reads what is there, and follows another link. The URL is a promise about where something lives, not about which database table it came from. Pagerite therefore treats every piece of content as a page: named, addressable, and rendered on the fly.
 
 ## Chapter two
 
-Consider what happens to URLs when the tooling leads the design. You get
-addresses like `/cms/frontpage` or `/blog/post1` — the name of the machine
-leaking into the name of the thing. The slug should be chosen by the
-author, the way a book's title is chosen, and it should sit at the root of
-the site like the title sits on the cover.
+Consider what happens to URLs when the tooling leads the design. You get addresses like `/cms/frontpage` or `/blog/post1` — the name of the machine leaking into the name of the thing. The slug should be chosen by the author, the way a book's title is chosen, and it should sit at the root of the site like the title sits on the cover.
 
-Nesting still has its place. Structured content — documentation, a series,
-a portfolio — benefits from paths that mirror the structure. The
-navigation on this very site is derived from the paths: open a section,
-and you see what it contains. No menu editor, no duplication of structure
-in two places.
+Nesting still has its place. Structured content — documentation, a series, a portfolio — benefits from paths that mirror the structure. The navigation on this very site is derived from the paths: open a section, and you see what it contains. No menu editor, no duplication of structure in two places.
 
-Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
-tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim
-veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea
-commodo consequat. Duis aute irure dolor in reprehenderit in voluptate
-velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat
-cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id
-est laborum.
+Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
 
-Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium
-doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo
-inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo.
-Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut
-fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem
-sequi nesciunt.
+Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt.
 
 ## Chapter three
 
-On the reading experience itself: motion on the web is usually either
-absent or obnoxious. The interesting middle ground is motion that
-acknowledges the reader's own movement — the scroll. Elements that fade
-in as they enter the viewport give the page a sense of depth, as if the
-content were arriving just in time.
+On the reading experience itself: motion on the web is usually either absent or obnoxious. The interesting middle ground is motion that acknowledges the reader's own movement — the scroll. Elements that fade in as they enter the viewport give the page a sense of depth, as if the content were arriving just in time.
 
-Crucially, none of this may depend on the article. The author writes
-Markdown; the effects come from the layout. And when the reader prefers
-reduced motion, everything must hold still.
+Crucially, none of this may depend on the article. The author writes Markdown; the effects come from the layout. And when the reader prefers reduced motion, everything must hold still.
 
-Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet,
-consectetur, adipisci velit, sed quia non numquam eius modi tempora
-incidunt ut labore et dolore magnam aliquam quaerat voluptatem. Ut enim ad
-minima veniam, quis nostrum exercitationem ullam corporis suscipit
-laboriosam, nisi ut aliquid ex ea commodi consequatur?
+Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem. Ut enim ad minima veniam, quis nostrum exercitationem ullam corporis suscipit laboriosam, nisi ut aliquid ex ea commodi consequatur?
 
 ```text
 Quis autem vel eum iure reprehenderit
@@ -158,24 +110,13 @@ molestiae consequatur, vel illum qui
 dolorem eum fugiat quo voluptas nulla pariatur?
 ```
 
-At vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis
-praesentium voluptatum deleniti atque corrupti quos dolores et quas
-molestias excepturi sint occaecati cupiditate non provident, similique
-sunt in culpa qui officia deserunt mollitia animi, id est laborum et
-dolorum fuga. Et harum quidem rerum facilis est et expedita distinctio.
+At vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum deleniti atque corrupti quos dolores et quas molestias excepturi sint occaecati cupiditate non provident, similique sunt in culpa qui officia deserunt mollitia animi, id est laborum et dolorum fuga. Et harum quidem rerum facilis est et expedita distinctio.
 
 ## Chapter four
 
-Nam libero tempore, cum soluta nobis est eligendi optio cumque nihil
-impedit quo minus id quod maxime placeat facere possimus, omnis voluptas
-assumenda est, omnis dolor repellendus. Temporibus autem quibusdam et aut
-officiis debitis aut rerum necessitatibus saepe eveniet ut et voluptates
-repudiandae sint et molestiae non recusandae.
+Nam libero tempore, cum soluta nobis est eligendi optio cumque nihil impedit quo minus id quod maxime placeat facere possimus, omnis voluptas assumenda est, omnis dolor repellendus. Temporibus autem quibusdam et aut officiis debitis aut rerum necessitatibus saepe eveniet ut et voluptates repudiandae sint et molestiae non recusandae.
 
-Itaque earum rerum hic tenetur a sapiente delectus, ut aut reiciendis
-voluptatibus maiores alias consequatur aut perferendis doloribus
-asperiores repellat. And so we arrive back where we started: the blog and
-the website were one thing all along. [Return to the front page](/).
+Itaque earum rerum hic tenetur a sapiente delectus, ut aut reiciendis voluptatibus maiores alias consequatur aut perferendis doloribus asperiores repellat. And so we arrive back where we started: the blog and the website were one thing all along. [Return to the front page](/).
 """
 
 NOTES_ON_URLS = """\
@@ -191,32 +132,26 @@ That's all. Short posts are posts too.
 """
 
 CANVAS_NIGHTS = """\
-This post's banner is not an image at all — it's a `<canvas>` animated by
-a few lines of JavaScript embedded in the page's banner HTML.
+This post's banner is not an image at all — it's a `<canvas>` animated by a few lines of JavaScript embedded in the page's banner HTML.
 
-Banners on this site are arbitrary markup: an image, a gradient div, or a
-small animated scene like the one above. Subpages inherit the nearest
-banner up their path, so a whole section can share one look.
+Banners on this site are arbitrary markup: an image, a gradient div, or a small animated scene like the one above. Subpages inherit the nearest banner up their path, so a whole section can share one look.
 
 ```js
 // the essence of the banner above
 stars.forEach(s => { s.x = (s.x + s.speed * dt) % 1 })
 ```
 
-No build step, no framework — the snippet is stored with the page and
-dropped into the header as-is.
+No build step, no framework — the snippet is stored with the page and dropped into the header as-is.
 """
 
 SMALL_RELEASES = """\
-Software wants to be shipped. The longer a change sits unmerged, the more
-it rots: context fades, conflicts accumulate, and the diff grows teeth.
+Software wants to be shipped. The longer a change sits unmerged, the more it rots: context fades, conflicts accumulate, and the diff grows teeth.
 
 1. Cut the scope until it fits in a day.
 2. Ship it behind whatever door you like.
 3. Let real use argue with your assumptions.
 
-A release is a conversation with reality. Small releases keep the
-conversation lively.
+A release is a conversation with reality. Small releases keep the conversation lively.
 """
 
 CANVAS_BANNER = """\
