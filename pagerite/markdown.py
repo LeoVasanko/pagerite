@@ -20,6 +20,7 @@ classes, e.g. `![alt](photo.avif "Caption"){.right}`.
 """
 
 import re
+from datetime import datetime
 
 from markdown_it import MarkdownIt
 from markdown_it.common.utils import escapeHtml
@@ -135,9 +136,34 @@ md.core.ruler.push("unwrap_lone_figures", _unwrap_lone_figures)
 md.core.ruler.push("tag_task_checkboxes", _tag_task_checkboxes)
 
 
-def render(text: str, page_path: str = "") -> str:
-    """Render Markdown text to an HTML string."""
-    return md.render(text, {"page_path": page_path})
+def render(
+    text: str,
+    page_path: str = "",
+    created: datetime | None = None,
+    modified: datetime | None = None,
+) -> str:
+    """Render Markdown text to an HTML string.
+
+    A ``{dates}`` line expands to the article's published/updated dateline
+    (needs ``created``/``modified``; left as-is in contexts without them,
+    e.g. the editor preview). Position is the author's choice — typically
+    right after the article's h1.
+    """
+    html = md.render(text, {"page_path": page_path})
+    if created is not None and "<p>{dates}</p>" in html:
+        html = html.replace("<p>{dates}</p>", _dateline(created, modified))
+    return html
+
+
+def _dateline(created: datetime, modified: datetime | None) -> str:
+    """Published/updated line for the ``{dates}`` tag. The updated date is
+    shown only when it falls on a later day than the publication."""
+    pub = f'<time datetime="{created.isoformat()}">{created.day} {created:%B %Y}</time>'
+    out = f"Published {pub}"
+    if modified is not None and modified.date() > created.date():
+        upd = f'<time datetime="{modified.isoformat()}">{modified.day} {modified:%B %Y}</time>'
+        out += f", updated {upd}"
+    return f'<p class="dateline">{out}</p>'
 
 
 def has_h1(text: str) -> bool:

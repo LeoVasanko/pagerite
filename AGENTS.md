@@ -89,8 +89,11 @@ not for the public pages. See `docs/design-principles.md` for the design.
     on every page, otherwise browsers fall back to the build's
     `/favicon.ico` by convention.
   - `markdown.py` — markdown-it-py renderer (html passthrough + attrs,
-    footnote, deflist, tasklists plugins). Custom image rule: relative srcs
-    resolve against the page path, titled images become figures.
+    footnote, deflist, tasklists plugins; typographer + breaks on). Custom
+    image rule: relative srcs resolve against the page path, titled images
+    become figures. A `{dates}` line expands to the article's
+    published/updated dateline (`p.dateline`, from `Node.created`/
+    `modified`; left literal in previews of unsaved pages).
   - `views.py` — the shared page layout as an html5tagger `Template` with
     placeholders (`Title`, `Brand`, `Banner`, `Nav`, `Sidebar`, `Main`), nav
     rendering straight from the `Data.menu` tree (siblings sorted by

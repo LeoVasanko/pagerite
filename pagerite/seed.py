@@ -77,6 +77,8 @@ def render(text: str, page_path: str) -> str:
 LONG_READ = """\
 *An essay long enough to scroll, to demonstrate the gentle reveal of headings, figures and code blocks as they enter the viewport.*
 
+{dates}
+
 ![Layered dunes](dunes.svg "Full-width artwork between sections"){.wide}
 
 ## Chapter one

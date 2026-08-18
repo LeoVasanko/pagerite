@@ -366,7 +366,10 @@ def page_content(menu: dict[str, Node], path: str) -> HTML:
         # only rendered as h1 when the markdown has none of its own.
         if not has_h1(node.content or ""):
             doc.h1(node.title)
-        doc.div(HTML(render(node.content or "", path)), class_="body")
+        doc.div(
+            HTML(render(node.content or "", path, node.created, node.modified)),
+            class_="body",
+        )
     return HTML(str(doc))
 
 

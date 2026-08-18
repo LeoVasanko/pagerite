@@ -18,6 +18,7 @@ import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from email.utils import format_datetime
 from pathlib import Path
 
 import blake3
@@ -152,6 +153,14 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+
+
+@app.middleware("http")
+async def _headers(request: Request, call_next) -> Response:
+    """Replace uvicorn's default Server header with ours (no version)."""
+    response = await call_next(request)
+    response.headers["server"] = "pagerite"
+    return response
 
 
 class PageIn(BaseModel):
@@ -471,6 +480,11 @@ async def delete_page(path: str) -> None:
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 
+def _http_date(dt: datetime) -> str:
+    """RFC 7231 date for the Last-Modified header."""
+    return format_datetime(dt.astimezone(UTC), usegmt=True)
+
+
 def _is_reserved(path: str) -> bool:
     """Slug shape that content may never use: each segment must be lower-case
     ASCII letters, digits, hyphens and underscores (underscores may not be
@@ -542,10 +556,17 @@ async def editor_ws(ws: WebSocket) -> None:
                     })
                 case "render":
                     markdown = msg.get("markdown", "")
+                    chain = resolve(data.menu, path)
+                    node = chain[-1] if chain else None
                     await ws.send_json({
                         "type": "html",
                         "path": path,
-                        "html": render(markdown, path),
+                        "html": render(
+                            markdown,
+                            path,
+                            node.created if node else None,
+                            node.modified if node else None,
+                        ),
                         "has_h1": has_h1(markdown),
                     })
                 case "save":
@@ -653,12 +674,16 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
             return Response(status_code=304)
         return HTMLResponse(
             views.render_page(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon),
-            headers={"etag": etag},
+            headers={"etag": etag, "last-modified": _http_date(node.modified)},
         )
     if node is not None and node.published and node.content is None:
         # Category label without a landing page: placeholder with the pen
         # to create it (404 — no page here, but the node is real).
-        return HTMLResponse(views.render_category(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon), 404)
+        return HTMLResponse(
+            views.render_category(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon),
+            404,
+            headers={"last-modified": _http_date(node.modified)},
+        )
     if node is None and not path:
         # No front page (no top-level node with slug ""): "/" opens the
         # first item of the navigation instead.

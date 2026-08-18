@@ -777,6 +777,14 @@ body.editing:has(.multicol) img.wide:not(figure img) {
   list-style: none;
 }
 
+/* Published/updated line, expanded from the {dates} tag in the markdown
+   (typically placed right after the article's h1). */
+.dateline {
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-align: left;
+}
+
 .footnote {
   font-size: 0.85rem;
   color: var(--muted);
