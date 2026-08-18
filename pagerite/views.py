@@ -171,8 +171,12 @@ def _layout(
     )
 
 
-def _brand_link(brand: str) -> HTML:
-    """Header brand link; omitted entirely when no brand is configured."""
+def _brand_link(brand: str, brand_html: str = "") -> HTML:
+    """Header brand: custom HTML (in a #brand wrapper, rendered instead of
+    the link) when configured, else the plain brand link; omitted entirely
+    when neither is set."""
+    if brand_html.strip():
+        return HTML(str(E.div(HTML(brand_html), id="brand")))
     return HTML(str(E.a(brand, href="/", id="brand"))) if brand else HTML("")
 
 
@@ -391,6 +395,7 @@ def render_page(
     custom_css: str = "",
     theme: str = "",
     favicon: str = "",
+    brand_html: str = "",
 ) -> str:
     """Render a full HTML page for the slug path."""
     node = resolve(menu, path)[-1]
@@ -398,7 +403,7 @@ def render_page(
     return str(
         _layout(_page_assets(), custom_css, theme, banner_design(menu, path, theme), favicon)(
             Title=f"{title} – {brand}" if brand else title,
-            Brand=_brand_link(brand),
+            Brand=_brand_link(brand, brand_html),
             Nav=nav_html(menu, path),
             Sidebar=sidebar_html(menu, path),
             Banner=banner_html(menu, path, theme),
@@ -414,6 +419,7 @@ def render_category(
     custom_css: str = "",
     theme: str = "",
     favicon: str = "",
+    brand_html: str = "",
 ) -> str:
     """Render the placeholder for a content-less category label (404).
 
@@ -434,7 +440,7 @@ def render_category(
     return str(
         _layout(_page_assets(), custom_css, theme, banner_design(menu, path, theme), favicon)(
             Title=f"{title} – {brand}" if brand else title,
-            Brand=_brand_link(brand),
+            Brand=_brand_link(brand, brand_html),
             Nav=nav_html(menu, path),
             Sidebar=sidebar,
             Banner=banner_html(menu, path, theme),
@@ -450,6 +456,7 @@ def render_not_found(
     custom_css: str = "",
     theme: str = "",
     favicon: str = "",
+    brand_html: str = "",
 ) -> str:
     """Render a 404 page within the normal layout."""
     doc = E.article
@@ -459,7 +466,7 @@ def render_not_found(
     return str(
         _layout(_page_assets(), custom_css, theme, banner_design(menu, path, theme), favicon)(
             Title=f"Not Found – {brand}" if brand else "Not Found",
-            Brand=_brand_link(brand),
+            Brand=_brand_link(brand, brand_html),
             Nav=nav_html(menu, path),
             Sidebar=sidebar_html(menu, path),
             Banner=banner_html(menu, path, theme),

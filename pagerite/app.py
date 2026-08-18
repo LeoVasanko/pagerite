@@ -288,6 +288,7 @@ async def get_settings() -> dict:
     the themes and banner designs available on disk for the selectors."""
     return {
         "brand": data.brand,
+        "brand_html": data.brand_html,
         "theme": data.theme,
         "custom_css": data.custom_css,
         "favicon": f"/_f/{data.favicon}" if data.favicon else "",
@@ -302,6 +303,7 @@ class SettingsIn(BaseModel):
     brand: str
     theme: str
     custom_css: str
+    brand_html: str = ""
 
 
 @app.put("/_api/settings", status_code=204)
@@ -309,6 +311,7 @@ async def put_settings(settings: SettingsIn) -> None:
     """Update site-wide settings; bumps the version so ETags invalidate."""
     with kanta.transaction("update settings"):
         data.brand = settings.brand
+        data.brand_html = settings.brand_html
         data.theme = settings.theme
         data.custom_css = settings.custom_css
         data.version += 1
@@ -682,7 +685,7 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
         if request.headers.get("if-none-match") == etag:
             return Response(status_code=304)
         return HTMLResponse(
-            views.render_page(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon),
+            views.render_page(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html),
             headers={
                 "etag": etag,
                 "last-modified": _http_date(node.modified),
@@ -693,7 +696,7 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
         # Category label without a landing page: placeholder with the pen
         # to create it (404 — no page here, but the node is real).
         return HTMLResponse(
-            views.render_category(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon),
+            views.render_category(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html),
             404,
             headers={
                 "last-modified": _http_date(node.modified),
@@ -706,4 +709,4 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
         for slug, item in sorted_nodes(data.menu):
             if item.published:
                 return RedirectResponse(f"/{slug}")
-    return HTMLResponse(views.render_not_found(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon), 404)
+    return HTMLResponse(views.render_not_found(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html), 404)

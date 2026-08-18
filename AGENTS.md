@@ -68,7 +68,11 @@ not for the public pages. See `docs/design-principles.md` for the design.
     and embedded in page ETags so nav-affecting changes invalidate caches.
     `Data.brand` is the site name (header link + `<title>` suffix), editable
     in the site editor via `/_api/settings`; empty = no header link and
-    no `<title>` suffix. `Data.theme` is the active theme name (empty =
+    no `<title>` suffix. `Data.brand_html` is raw trusted HTML replacing the
+    brand link entirely (rendered in a `#brand` div on top of the banner,
+    next to the nav) — site-wide, not per-page like banners; edited in the
+    site editor with image/video upload into `Data.files`. `Data.theme` is
+    the active theme name (empty =
     none/base only); themes are folders in `pagerite/themes/{name}`
     containing `theme.css` and/or `banner.css` (+ `banner.svg` artwork and
     any extra assets the CSS references, like summer's `grass.svg`),
@@ -175,7 +179,9 @@ not for the public pages. See `docs/design-principles.md` for the design.
   (CodeMirror + server-rendered preview over WebSocket `/_api/ws/editor`,
   previewing into the visible article; editor scroll drives document
   scroll) opened by the article pen — it edits content and title only,
-  never the path — and `SiteEditor.vue` (site brand + theme selector +
+  never the path — and `SiteEditor.vue` (site brand + optional custom
+  brand HTML (with image/video upload, replaces the brand link) + theme
+  selector +
   favicon upload/remove + site-wide custom CSS + per-page banner design
   selector (inherit/none/named design, inherited by children) + banner
   HTML edited in small CodeMirror windows;

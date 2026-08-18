@@ -149,7 +149,6 @@ main {
 article h1 {
   color: var(--accent);
   width: fit-content;
-  padding-bottom: 0.12em;
   text-shadow: 0 1px #ffffffaa;
   background: url("grass.svg") bottom left / auto 0.35em repeat-x;
 }

@@ -85,6 +85,11 @@ class Data(msgspec.Struct):
     #: Site name shown in the header and <title> suffix; editable in the
     #: site editor. Empty = no brand link in the header, no title suffix.
     brand: str = "Pagerite"
+    #: Raw trusted HTML replacing the brand link entirely (a logo image,
+    #: styled markup, canvas+script...), site-wide — not per-page
+    #: overridable like banners. Rendered in the header on top of the
+    #: banner artwork, next to the nav. Empty = the plain brand link.
+    brand_html: str = ""
     #: Active theme name (empty = none/base only). Themes live in
     #: frontend/src/assets/themes/{theme}/theme.css, with their banner
     #: artwork at pagerite/themes/{theme}/banner.svg (inlined server-side).

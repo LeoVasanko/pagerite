@@ -47,6 +47,12 @@ let cssSyncing = false  // set while replacing the CSS document programmatically
 const customCss = ref('')
 const cssEl = ref(null)
 
+let brandView = null      // CodeMirror for the custom brand HTML
+let brandSyncing = false  // set while replacing the document programmatically
+const brandHtml = ref('')
+const brandEl = ref(null)
+const brandInput = ref(null)
+
 function normPath(p) {
   return p.trim().replace(/^\/+|\/+$/g, '')
 }
@@ -108,16 +114,22 @@ function swapRegions(doc) {
   } else if (curSidebar) {
     curSidebar.remove()
   }
-  // The brand link lives in the header, outside the swappable regions,
-  // and is absent entirely when no brand is configured.
+  // The brand lives in the header, outside the swappable regions, and is
+  // absent entirely when neither a brand nor custom brand HTML is set. A
+  // plain link keeps its element (text swap only, preserving the shrink-
+  // to-fit observers); anything else (custom HTML wrapper) is replaced.
   const freshBrand = doc.getElementById('brand')
   const curBrand = document.getElementById('brand')
-  if (freshBrand && curBrand) {
+  if (freshBrand && curBrand && freshBrand.tagName === 'A' && curBrand.tagName === 'A') {
     curBrand.textContent = freshBrand.textContent
+  } else if (freshBrand && curBrand) {
+    curBrand.replaceWith(document.importNode(freshBrand, true))
+    runScripts(document.getElementById('brand'))
   } else if (curBrand) {
     curBrand.remove()
   } else if (freshBrand) {
     document.getElementById('nav')?.before(document.importNode(freshBrand, true))
+    runScripts(document.getElementById('brand'))
   }
   // Site-wide custom CSS is in <head> and must be swapped too.
   const freshUserStyle = doc.getElementById('pagerite-user')
@@ -302,6 +314,9 @@ async function loadSettings() {
   try {
     const s = await (await fetch('/_api/settings')).json()
     brand.value = s.brand
+    brandHtml.value = s.brand_html || ''
+    setBrandDocument(brandHtml.value)
+    previewBrand()
     theme.value = s.theme || ''
     customCss.value = s.custom_css || ''
     favicon.value = s.favicon || ''
@@ -372,6 +387,11 @@ function updateEditorTitle() {
 function applyBrand(b) {
   let el = document.getElementById('brand')
   if (b) {
+    if (el && el.tagName !== 'A') {
+      // Currently the custom-HTML wrapper: swap back to a plain link.
+      el.remove()
+      el = null
+    }
     if (!el) {
       el = document.createElement('a')
       el.id = 'brand'
@@ -385,8 +405,63 @@ function applyBrand(b) {
   updateEditorTitle()
 }
 
+// Custom brand HTML (site-wide, replaces the brand link entirely) is
+// previewed into the header on every keystroke and saves debounced.
+function previewBrand() {
+  if (brandHtml.value.trim()) {
+    const el = document.createElement('div')
+    el.id = 'brand'
+    el.innerHTML = brandHtml.value
+    const old = document.getElementById('brand')
+    if (old) old.replaceWith(el)
+    else document.getElementById('nav')?.before(el)
+    runScripts(el)
+  } else {
+    applyBrand(brand.value)
+  }
+}
+
+function setBrandDocument(text) {
+  brandSyncing = true
+  brandView.dispatch({ changes: { from: 0, to: brandView.state.doc.length, insert: text } })
+  brandSyncing = false
+  brandHtml.value = text
+}
+
+function onBrandHtmlInput() {
+  previewBrand()
+  debounce('brand-html', () => saveSettings(), 400)
+}
+
+// Brand media goes to the shared content store, like banner media.
+async function uploadBrandMedia(file) {
+  if (!file || !/^(image|video)\//.test(file.type)) return
+  const name = file.name.replace(/[^\w.-]/g, '-')
+  const res = await fetch(`/_api/files/${encodeURIComponent(name)}`, { method: 'PUT', body: file })
+  if (!res.ok) return
+  const { path: stored } = await res.json()
+  const tag = file.type.startsWith('video/')
+    ? `<video src="${stored}" autoplay muted loop playsinline></video>`
+    : `<img src="${stored}" alt="">`
+  const rest = stripBannerMedia(brandHtml.value)
+  setBrandDocument(rest ? `${tag}\n${rest}` : tag)
+  previewBrand()
+  saveSettings()
+}
+
+function onBrandPaste(ev) {
+  const file = [...(ev.clipboardData?.files || [])]
+    .find((f) => /^(image|video)\//.test(f.type))
+  if (file) {
+    ev.preventDefault()
+    uploadBrandMedia(file)
+  }
+}
+
 function onBrandInput() {
-  applyBrand(brand.value)
+  // Custom brand HTML wins over the plain text brand in the header.
+  if (!brandHtml.value.trim()) applyBrand(brand.value)
+  else updateEditorTitle()
   debounce('brand', saveBrand)
 }
 
@@ -400,6 +475,7 @@ async function saveSettings(opts = {}) {
       brand: brand.value,
       theme: theme.value,
       custom_css: customCss.value,
+      brand_html: brandHtml.value,
       ...opts,
     }),
   })
@@ -722,6 +798,9 @@ provide('structureHandlers', {
 // (null = the theme default), shown in the selector's inherit option.
 const bannerDesign = ref(null)
 const bannerDesignFrom = ref(null)
+// One-shot callback run on the next save ack (set by onBannerDesignChange,
+// whose re-render must not race the save it triggers).
+let refreshOnSave = null
 
 const inheritLabel = computed(() => {
   if (bannerDesignFrom.value === null) {
@@ -732,7 +811,8 @@ const inheritLabel = computed(() => {
 
 function onBannerDesignChange() {
   // Saves immediately; the preview needs a server re-render (the design's
-  // inline SVG and its stylesheet link both change).
+  // inline SVG and its stylesheet link both change), and the re-fetch must
+  // wait for the save ack or it races ahead and renders the old design.
   const msg = {
     type: 'save',
     path: normPath(path.value),
@@ -740,7 +820,7 @@ function onBannerDesignChange() {
   }
   pendingSave = msg
   send(msg)
-  loadPlain(path.value)
+  refreshOnSave = () => loadPlain(path.value)
 }
 
 // --- Banner editing ------------------------------------------------------
@@ -845,6 +925,10 @@ function onMessage(ev) {
     saveError.value = ''
     pendingSave = null
     refreshPages()
+    // A one-shot re-render requested by a save that must be visible first
+    // (banner design change). Only the most recent one matters.
+    refreshOnSave?.()
+    refreshOnSave = null
   } else if (msg.type === 'error') {
     saveError.value = '⚠️ changes could not be saved'
   }
@@ -925,6 +1009,26 @@ onMounted(async () => {
     }),
     parent: cssEl.value,
   })
+  brandView = new EditorView({
+    state: EditorState.create({
+      doc: '',
+      extensions: [
+        basicSetup,
+        html(),
+        cmTheme,
+        cmHighlight,
+        EditorView.lineWrapping,
+        placeholder('custom brand HTML (replaces the brand link; empty = plain link)'),
+        EditorView.updateListener.of((u) => {
+          if (u.docChanged && !brandSyncing) {
+            brandHtml.value = brandView.state.doc.toString()
+            onBrandHtmlInput()
+          }
+        }),
+      ],
+    }),
+    parent: brandEl.value,
+  })
   addEventListener('keydown', onKeydown)
   await loadSettings()
   parseFonts(customCss.value)
@@ -942,6 +1046,7 @@ onUnmounted(() => {
   }
   view?.destroy()
   cssView?.destroy()
+  brandView?.destroy()
   removeEventListener('keydown', onKeydown)
 })
 </script>
@@ -983,6 +1088,24 @@ onUnmounted(() => {
           A
         </button>
       </label>
+      <div class="brand-code" @paste="onBrandPaste">
+        <div class="block-head">
+          <span class="field-label">brand code (replaces the brand link)</span>
+          <button
+            type="button"
+            title="upload brand image/video (replaces existing media) — pasting works too"
+            @click="brandInput.click()"
+          >add image/video</button>
+          <input
+            ref="brandInput"
+            type="file"
+            accept="image/*,video/*"
+            hidden
+            @change="(ev) => { uploadBrandMedia(ev.target.files[0]); ev.target.value = '' }"
+          />
+        </div>
+        <div ref="brandEl" class="banner-cm" />
+      </div>
       <div class="favicon-row">
         <img v-if="favicon" :src="favicon" class="favicon-preview" alt="" />
         <span v-else class="favicon-preview favicon-empty">?</span>
