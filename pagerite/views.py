@@ -148,12 +148,13 @@ def _title(slug: str, node: Node) -> str:
 
 def _nav_link(doc, menu: dict[str, Node], node: Node, path: str, current: str) -> None:
     """Render one <li> linking the node. Category labels (no content of
-    their own) link straight to their first child page, so normal
-    navigation bypasses the placeholder page at their own URL."""
+    their own — None, or empty markdown as left by the site editor's
+    page creation) link straight to their first child page, so normal
+    navigation bypasses the placeholder/empty page at their own URL."""
     # A top-level item is current also when viewing any of its subpages.
     is_current = current == path or (path and current.startswith(f"{path}/"))
     href = f"/{path}"
-    if node.content is None and (leaf := first_leaf(menu, path)) is not None:
+    if not node.content and (leaf := first_leaf(menu, path)) is not None:
         href = f"/{leaf}"
     doc.li.a(
         _title(path.rpartition("/")[2], node),
@@ -182,9 +183,12 @@ def sidebar_html(menu: dict[str, Node], current: str) -> HTML:
 
     The sidebar is the current main level section's sub-navigation, so it
     exists only when there is something to navigate: the section must
-    offer at least two published items. The front page, leaf pages and
-    one-page sections get no aside element at all (rather than an empty
-    or one-item box).
+    offer at least two published items, or exactly one while viewing
+    anything else than that only page — the section index, a 404, a
+    grandchild (otherwise those pages offer no way to reach the child).
+    The front page, leaf pages, the sole page of a one-page section and
+    childless sections get no aside element at all (rather than an empty
+    or useless one-item box).
     """
     if not current:
         return HTML("")
@@ -193,7 +197,7 @@ def sidebar_html(menu: dict[str, Node], current: str) -> HTML:
     if node is None:
         return HTML("")
     items = [(s, c) for s, c in sorted_nodes(node.children) if c.published]
-    if len(items) < 2:
+    if not items or (len(items) == 1 and current == f"{section}/{items[0][0]}"):
         return HTML("")
     nav = E.ul
     with nav:
@@ -216,7 +220,7 @@ def first_leaf(menu: dict[str, Node], path: str) -> str | None:
 def _first_leaf(node: Node, path: str) -> str | None:
     for slug, child in sorted_nodes(node.children):
         cpath = f"{path}/{slug}" if path else slug
-        if child.published and child.content is not None:
+        if child.published and child.content:
             return cpath
         if (leaf := _first_leaf(child, cpath)) is not None:
             return leaf

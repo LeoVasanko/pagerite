@@ -85,9 +85,13 @@ not for the public pages. See `docs/design-principles.md` for the design.
     is NOT rendered as an additional h1 (it still supplies <title> and nav
     labels). The navbar holds
     top-level items only; the current section's subitems go to a left
-    `#sidebar`, which is rendered only when the section offers at least two
-    published items (no aside element at all on the front page, leaf pages
-    and one-page sections). Dynamic regions have stable ids
+    `#sidebar`, which is rendered when the section offers at least two
+    published items, or exactly one while viewing anything other than that
+    only page — the section index, a 404, a grandchild (so those pages can
+    reach the child); no aside element at all on the front page, leaf
+    pages and the sole page of a one-page section. Also,
+    category labels are nodes without content — None *or* empty markdown —
+    and their nav links point at their first child page. Dynamic regions have stable ids
     (`#page-banner`, `#nav`, `#sidebar`, `#main`) for fetch-navigation swaps
     (`#sidebar` may be absent on either side of a swap).
   - `seed.py` — demo content written on startup for paths missing from the
