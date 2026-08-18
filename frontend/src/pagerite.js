@@ -8,17 +8,18 @@ import { showAuthIframe } from 'paskia'
 
 (() => {
   if (import.meta.env.DEV) {
-    // The theme is selectable; the backend names the active one in a meta
-    // tag (dev links no stylesheets — Vite injects them from JS).
-    const theme = document.querySelector('meta[name="pagerite:theme"]')?.content;
-    const sheets = [import("./assets/pagerite.css")];
-    if (theme) sheets.push(import(/* @vite-ignore */ `./assets/themes/${theme}/theme.css`));
-    // The injected styles land after the server-rendered custom CSS in
-    // <head>; move the custom CSS back to the end so its equal-specificity
-    // :root rules (font variables) win.
-    Promise.all(sheets).then(() => {
-      const el = document.getElementById("pagerite-user");
-      if (el) document.head.append(el);
+    // In dev the base stylesheet is injected by Vite from JS (linking the
+    // raw module would pull in its HMR wrapper). Theme and banner-design
+    // stylesheets are plain files served by the backend (/_themes/...), so
+    // the backend renders their <link>s in both dev and prod. The injected
+    // base styles land at the end of <head> — after them, restore the
+    // canonical order: base < theme < banner design < custom CSS (whose
+    // equal-specificity :root rules — font variables — must win by order).
+    import("./assets/pagerite.css").then(() => {
+      for (const id of ["pagerite-theme", "pagerite-banner", "pagerite-user"]) {
+        const el = document.getElementById(id);
+        if (el) document.head.append(el);
+      }
     });
   }
 

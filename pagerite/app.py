@@ -273,13 +273,16 @@ async def update_structure(op: StructureOp) -> None:
 
 
 @app.get("/_api/settings")
-async def get_settings() -> dict[str, str]:
-    """Site-wide settings (brand, theme, custom CSS and favicon URL)."""
+async def get_settings() -> dict:
+    """Site-wide settings (brand, theme, custom CSS and favicon URL), plus
+    the themes and banner designs available on disk for the selectors."""
     return {
         "brand": data.brand,
         "theme": data.theme,
         "custom_css": data.custom_css,
         "favicon": f"/_f/{data.favicon}" if data.favicon else "",
+        "themes": views._theme_names(),
+        "banner_designs": views._banner_design_names(),
     }
 
 
@@ -397,6 +400,35 @@ async def delete_file(name: str) -> None:
         data.version += 1
 
 
+@app.get("/_themes/{name}/{filename}")
+async def theme_file(name: str, filename: str, request: Request) -> Response:
+    """Serve a theme/banner-design stylesheet from pagerite/themes/{name}/.
+
+    Read from disk on every request (etag by mtime+size): theme files are
+    never built or content-hashed, so edits on disk show on the next page
+    load, in prod as well as dev.
+    """
+    if (
+        filename not in {"theme.css", "banner.css"}
+        or "/" in name
+        or name.startswith(".")
+    ):
+        raise HTTPException(404)
+    path = views.THEMES / name / filename
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        raise HTTPException(404) from None
+    etag = f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304)
+    return Response(
+        path.read_bytes(),
+        media_type="text/css",
+        headers={"etag": etag, "cache-control": "no-cache"},
+    )
+
+
 @app.get("/_f/{name}")
 async def stored_file(name: str, request: Request) -> Response:
     """Serve a file from the content-addressed store (immutable: the name
@@ -465,12 +497,12 @@ async def editor_ws(ws: WebSocket) -> None:
     Stateless protocol (each message carries the path):
       <- {"type": "open", "path"}
       -> {"type": "doc", "path", "exists", "title", "markdown", "published",
-          "banner"}
+          "banner", "banner_design"}
       <- {"type": "render", "path", "markdown"}
       -> {"type": "html", "path", "html"}
       <- {"type": "save", "path", "title"?, "markdown"?, "published"?,
-          "banner"?, "move_from"?}   (absent fields keep their old values;
-          move_from: rename/move a page, subtree included)
+          "banner"?, "banner_design"?, "move_from"?}   (absent fields keep
+          their old values; move_from: rename/move a page, subtree included)
       -> {"type": "saved", "path"} | {"type": "error", "detail"}
     """
     await ws.accept()
@@ -495,10 +527,18 @@ async def editor_ws(ws: WebSocket) -> None:
                         "markdown": node.content if node and node.content is not None else "",
                         "published": node.published if node else True,
                         "banner": node.banner if node else "",
+                        # Own banner design setting: null = inherit,
+                        # "" = none, otherwise a design name.
+                        "banner_design": node.banner_design if node else None,
                         # Which node's banner applies here ("" = front page,
                         # null = default artwork); the site editor shows it
                         # as the banner field's placeholder.
                         "banner_from": views.banner_source(data.menu, path),
+                        # Which node's banner-design setting applies here
+                        # (null = the active theme's default design).
+                        "banner_design_from": views.banner_design_source(
+                            data.menu, path, data.theme
+                        ),
                     })
                 case "render":
                     markdown = msg.get("markdown", "")
@@ -571,6 +611,8 @@ async def editor_ws(ws: WebSocket) -> None:
                             node.published = bool(msg["published"])
                         if "banner" in msg:
                             node.banner = msg["banner"]
+                        if "banner_design" in msg:
+                            node.banner_design = msg["banner_design"]
                         node.modified = datetime.now(UTC)
                         data.version += 1
                     await ws.send_json({"type": "saved", "path": path})

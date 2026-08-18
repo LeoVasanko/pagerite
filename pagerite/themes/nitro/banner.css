@@ -1,0 +1,79 @@
+/* Nitro banner design: the bezier-swept artwork with wide orange stripes
+   (inlined by the backend into #page-banner), in neutral dark greys that
+   follow the page's color scheme. */
+
+/* Bezier-swept banner with wide orange stripes (inlined SVG), separated
+   from the page by a straight orange blade. */
+#banner {
+  height: 13rem;
+  border-bottom: 4px solid var(--accent);
+}
+
+/* Banner artwork dark tones: neutral greys in light mode (retinted to the
+   page's violet family by the dark-scheme block below). */
+.nb-base {
+  fill: #0b0b0d;
+}
+
+.nb-s1a {
+  stop-color: #242428;
+}
+
+.nb-s1b {
+  stop-color: #0b0b0d;
+}
+
+.nb-s2a {
+  stop-color: #19191d;
+}
+
+.nb-s2b {
+  stop-color: #060607;
+}
+
+.nb-c0 {
+  stop-color: #2a2a2f;
+}
+
+.nb-c1 {
+  stop-color: #131315;
+}
+
+.nb-c2 {
+  stop-color: #0b0b0d;
+}
+
+@media (prefers-color-scheme: dark) {
+  /* Banner dark tones tinted to the same violet family as the page. */
+  .nb-base {
+    fill: #100d18;
+  }
+
+  .nb-s1a {
+    stop-color: #292536;
+  }
+
+  .nb-s1b {
+    stop-color: #100d18;
+  }
+
+  .nb-s2a {
+    stop-color: #1e1a2b;
+  }
+
+  .nb-s2b {
+    stop-color: #090811;
+  }
+
+  .nb-c0 {
+    stop-color: #322d44;
+  }
+
+  .nb-c1 {
+    stop-color: #171422;
+  }
+
+  .nb-c2 {
+    stop-color: #100d18;
+  }
+}

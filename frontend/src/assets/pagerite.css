@@ -131,18 +131,24 @@ body {
 }
 
 /* Per-page banner content (img, styled div, inline SVG...) fills the
-   banner; swapped along with #nav/#main on fetch-navigation. When the page
-   sets no banner of its own, the backend inlines the active theme's SVG
-   artwork here instead (pagerite/themes/{theme}/banner.svg). */
+   banner; swapped along with #nav/#main on fetch-navigation. The backend
+   inlines the effective banner design's SVG artwork here first
+   (pagerite/themes/{design}/banner.svg, marked svg[data-design]), then the
+   page's own banner code after it. */
 #page-banner {
   position: absolute;
   inset: 0;
   overflow: hidden;
+  /* Stack the design artwork and the page's own banner code on top of
+     each other (artwork first): the banner is a background layer, author
+     code overlays it. A single child behaves exactly as before. */
+  display: grid;
 }
 
 /* :not(style, script): author-level display:block would override the UA's
    display:none on those and render their source as banner text. */
 #page-banner>*:not(style, script) {
+  grid-area: 1 / 1;
   display: block;
   width: 100%;
   height: 100%;

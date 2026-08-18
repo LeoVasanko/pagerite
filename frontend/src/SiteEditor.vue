@@ -302,12 +302,10 @@ async function commitPending() {
 // empty brand removes the header link and the title suffix entirely.
 const brand = ref('')
 const theme = ref('purple')
-const THEME_OPTIONS = [
-  { value: '', label: 'none' },
-  { value: 'purple', label: 'purple' },
-  { value: 'corporate', label: 'corporate' },
-  { value: 'nitro', label: 'nitro' },
-]
+// Theme and banner-design options come from the backend (theme folders on
+// disk, see GET /_api/settings), so added themes need no frontend changes.
+const themeOptions = ref([{ value: '', label: 'none' }])
+const bannerDesigns = ref([])
 
 async function loadSettings() {
   try {
@@ -316,6 +314,11 @@ async function loadSettings() {
     theme.value = s.theme || ''
     customCss.value = s.custom_css || ''
     favicon.value = s.favicon || ''
+    themeOptions.value = [
+      { value: '', label: 'none' },
+      ...(s.themes || []).map((t) => ({ value: t, label: t })),
+    ]
+    bannerDesigns.value = s.banner_designs || []
   } catch { /* keep default */ }
 }
 
@@ -420,19 +423,23 @@ function saveBrand() {
 
 async function onThemeChange() {
   await saveSettings()
-  if (import.meta.env.DEV) {
-    // Dev: styles are Vite-injected <style> tags, not <link>s, so the
-    // stylesheet sync in swapRegions can't switch themes. Drop the old
-    // theme's injected styles and import the new theme module instead.
-    for (const el of document.head.querySelectorAll('style[data-vite-dev-id]')) {
-      if (el.dataset.viteDevId.includes('/themes/')) el.remove()
+  // Theme CSS is backend-served at /_themes/{theme}/theme.css in both dev
+  // and prod: swap the link in place, then re-render (the theme's default
+  // banner design and the page's stylesheet links may change with it).
+  let link = document.getElementById('pagerite-theme')
+  if (theme.value) {
+    const href = `/_themes/${theme.value}/theme.css`
+    if (link) {
+      link.href = href
+    } else {
+      link = document.createElement('link')
+      link.rel = 'stylesheet'
+      link.id = 'pagerite-theme'
+      document.getElementById('pagerite-base')?.after(link)
+        ?? document.head.prepend(link)
     }
-    if (theme.value) {
-      await import(/* @vite-ignore */ `/src/assets/themes/${theme.value}/theme.css`)
-    }
-    // The freshly injected theme style now sits after the custom CSS;
-    // move the custom CSS back to the end so it keeps winning.
-    applyCustomCss(customCss.value)
+  } else if (link) {
+    link.remove()
   }
   loadPlain(path.value)
 }
@@ -707,6 +714,34 @@ provide('structureHandlers', {
   newPage,
 })
 
+// --- Banner design ---------------------------------------------------------
+// The page's banner design: null = inherit (nearest ancestor's setting,
+// then the theme's default), '' = explicitly none, otherwise a design
+// name. bannerDesignFrom tells where an inherited setting comes from
+// (null = the theme default), shown in the selector's inherit option.
+const bannerDesign = ref(null)
+const bannerDesignFrom = ref(null)
+
+const inheritLabel = computed(() => {
+  if (bannerDesignFrom.value === null) {
+    return `inherit (theme: ${theme.value || 'none'})`
+  }
+  return `inherit (/${bannerDesignFrom.value})`
+})
+
+function onBannerDesignChange() {
+  // Saves immediately; the preview needs a server re-render (the design's
+  // inline SVG and its stylesheet link both change).
+  const msg = {
+    type: 'save',
+    path: normPath(path.value),
+    banner_design: bannerDesign.value,
+  }
+  pendingSave = msg
+  send(msg)
+  loadPlain(path.value)
+}
+
 // --- Banner editing ------------------------------------------------------
 // The banner HTML is edited in a small CodeMirror window (HTML syntax),
 // previewed into the real #page-banner region on every keystroke.
@@ -731,11 +766,15 @@ function previewBanner() {
   const el = document.getElementById('page-banner')
   if (!el) return
   if (banner.value.trim()) {
-    // Own banner: preview it live over the region.
+    // Own banner code supplements the design: the inlined design artwork
+    // (marked svg[data-design]) stays in place, the author code goes after
+    // it so its styles win.
+    const artwork = [...el.querySelectorAll('svg[data-design]')]
     el.innerHTML = banner.value
+    el.prepend(...artwork)
     runScripts(el)
   } else {
-    // No banner of its own: the region must show the inherited/default
+    // No banner code of its own: the region must show the inherited/design
     // banner — re-render from the server (an empty write here would wipe it).
     loadPlain(path.value)
   }
@@ -785,12 +824,15 @@ function onMessage(ev) {
   const msg = JSON.parse(ev.data)
   if (msg.type === 'doc' && msg.path === path.value) {
     setDocument(msg.banner ?? '')
-    // Placeholder tells where an empty banner falls back to.
+    bannerDesign.value = msg.banner_design ?? null
+    bannerDesignFrom.value = msg.banner_design_from ?? null
+    // Placeholder tells where an empty banner code field falls back to;
+    // the design artwork renders regardless (this code supplements it).
     view.dispatch({
       effects: bannerPh.reconfigure(placeholder(
         msg.banner_from == null
-          ? 'using default artwork'
-          : `inherited from /${msg.banner_from}`,
+          ? 'own banner code (added after the design)'
+          : `code inherited from /${msg.banner_from}`,
       )),
     })
     // Overlay this page's own banner on the swapped region. Empty means
@@ -924,7 +966,7 @@ onUnmounted(() => {
           title="Theme"
           @change="onThemeChange"
         >
-          <option v-for="opt in THEME_OPTIONS" :key="opt.value" :value="opt.value">
+          <option v-for="opt in themeOptions" :key="opt.value" :value="opt.value">
             {{ opt.label }}
           </option>
         </select>
@@ -1007,6 +1049,16 @@ onUnmounted(() => {
     <section class="block" @paste="onBannerPaste">
       <div class="block-head">
         <span class="field-label">Banner on /{{ path }}</span>
+        <select
+          v-model="bannerDesign"
+          class="text-input design-select"
+          title="Banner design (artwork + its own styles)"
+          @change="onBannerDesignChange"
+        >
+          <option :value="null">{{ inheritLabel }}</option>
+          <option value="">none</option>
+          <option v-for="d in bannerDesigns" :key="d" :value="d">{{ d }}</option>
+        </select>
         <button
           type="button"
           title="upload banner image/video (replaces existing media) — pasting works too"
@@ -1145,6 +1197,14 @@ onUnmounted(() => {
   border-radius: 4px;
   cursor: pointer;
   white-space: nowrap;
+}
+
+/* The banner design selector sits between the label and the upload button
+   (which stays pushed right by its auto margin). */
+.design-select {
+  flex: 0 1 auto;
+  width: auto;
+  font-size: 0.85rem;
 }
 
 .text-input {

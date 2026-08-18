@@ -41,25 +41,6 @@
   filter: drop-shadow(0 0.15rem 0.6rem #9b6bff55);
 }
 
-/* Sunrise parallax: the sun and its glow rise faster than the artwork
-   drift (pagerite.js sets --pry on <html>), so scrolling the page makes
-   the sun come up. */
-#page-banner .sun,
-#page-banner .sun-glow {
-  transform-box: fill-box;
-  transform: translateY(calc(var(--pry, 0px) * -2));
-}
-
-/* The banner artwork fades into the page background at its bottom edge
-   (baked into the SVG, so a user banner replaces it cleanly). */
-.banner-fade {
-  stop-color: var(--bg);
-}
-
-#banner {
-  min-height: 13rem;
-}
-
 /* Dark artwork: keep the nav readable with a shadow. */
 #nav {
   text-shadow: 0 0 0.15em black;

@@ -1,0 +1,79 @@
+/* Corporate banner design: sizing and colors for the geometric artwork
+   (inlined by the backend into #page-banner). The cb-* classes recolor the
+   SVG from the active palette (var(--accent)), so one SVG serves light
+   and dark — and other themes too. */
+
+#banner {
+  min-height: 15rem;
+  border-bottom: none;
+}
+
+/* Artwork colors, light mode */
+.cb-bg0 {
+  stop-color: #ffffff;
+}
+
+.cb-bg1 {
+  stop-color: #e6eefe;
+}
+
+.cb-r0 {
+  stop-color: var(--accent);
+}
+
+.cb-r1 {
+  stop-color: #00b3ff;
+}
+
+.cb-g0,
+.cb-g1 {
+  stop-color: var(--accent);
+}
+
+.cb-dot {
+  fill: var(--accent);
+}
+
+.cb-orbit {
+  stroke: var(--accent);
+}
+
+.cb-spark {
+  fill: var(--accent);
+}
+
+/* Artwork colors, dark mode */
+@media (prefers-color-scheme: dark) {
+  .cb-bg0 {
+    stop-color: #0d1830;
+  }
+
+  .cb-bg1 {
+    stop-color: #0a1122;
+  }
+
+  .cb-r0 {
+    stop-color: #2f7bff;
+  }
+
+  .cb-r1 {
+    stop-color: #00d0ff;
+  }
+
+  .cb-g0,
+  .cb-g1 {
+    stop-color: #2f7bff;
+  }
+
+  .cb-dot {
+    fill: #4d8dff;
+  }
+
+  .cb-orbit {
+    stroke: #4d8dff;
+  }
+
+  .cb-spark {
+    fill: #6ea8ff;
+  }
+}

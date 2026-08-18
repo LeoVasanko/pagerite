@@ -25,11 +25,13 @@ from pagerite.markdown import has_h1, render
 
 SITE_NAME = "Pagerite"
 BUILD = Path(__file__).with_name("frontend-build")
+THEMES = Path(__file__).parent / "themes"
 
-# Shared CSS built as separate entries so the backend can link base and theme
-# independently. Order matters: base first, theme overrides it.
+# The base CSS is built by Vite as a separate entry so the backend can link
+# it independently of the theme. Themes and banner designs are plain .css
+# files in THEMES/{name}/, served by the backend at /_themes/{name}/... and
+# re-read from disk on every request (see app.py), so they are never built.
 _BASE_CSS_KEY = "src/assets/pagerite.css"
-_THEME_CSS_KEY = "src/assets/themes/{theme}/theme.css"
 
 _manifest_cache: dict | None = None
 _asset_cache: dict[str, tuple] = {}
@@ -42,29 +44,53 @@ def _manifest() -> dict:
     return _manifest_cache
 
 
-def _css_keys(theme: str) -> list[str]:
-    """Manifest keys for the stylesheets to load for ``theme`` (empty = none)."""
-    keys = [_BASE_CSS_KEY]
-    if theme:
-        keys.append(_THEME_CSS_KEY.format(theme=theme))
-    return keys
+def _theme_names() -> list[str]:
+    """Theme folders on disk (a folder is a theme when it has theme.css)."""
+    return sorted(
+        d.name for d in THEMES.iterdir() if d.is_dir() and (d / "theme.css").exists()
+    )
 
 
-def _shared_css_urls(vite_url: str | None, theme: str) -> list[str]:
-    """URLs for the base and theme stylesheets.
+def _banner_design_names() -> list[str]:
+    """Available banner designs: theme folders with banner.css or banner.svg."""
+    return sorted(
+        d.name
+        for d in THEMES.iterdir()
+        if d.is_dir() and ((d / "banner.css").exists() or (d / "banner.svg").exists())
+    )
 
-    In dev the JS entries import these files, so Vite injects them; the
-    backend does not link them, avoiding the HMR-wrapped module output.
-    Themes added after the last frontend build are missing from the
-    manifest — fall back to the base stylesheet rather than failing.
-    """
+
+def _valid_name(name: str) -> bool:
+    """Guard against path traversal in theme/design names."""
+    return bool(name) and "/" not in name and not name.startswith(".")
+
+
+def _base_css_url(vite_url: str | None) -> str | None:
+    """URL for the base stylesheet (None in dev: Vite injects it from JS,
+    avoiding the HMR-wrapped module output)."""
     if vite_url:
-        return []
+        return None
     manifest = _manifest()
-    return [f"/{manifest[key]['file']}" for key in _css_keys(theme) if key in manifest]
+    if _BASE_CSS_KEY in manifest:
+        return f"/{manifest[_BASE_CSS_KEY]['file']}"
+    return None
 
 
-def _editor_css_url(vite_url: str | None, theme: str) -> str | None:
+def _theme_css_url(theme: str) -> str | None:
+    """URL for the theme stylesheet, served by the backend (dev and prod)."""
+    if theme and _valid_name(theme) and (THEMES / theme / "theme.css").exists():
+        return f"/_themes/{theme}/theme.css"
+    return None
+
+
+def _banner_css_url(design: str) -> str | None:
+    """URL for a banner design's stylesheet, served by the backend."""
+    if design and _valid_name(design) and (THEMES / design / "banner.css").exists():
+        return f"/_themes/{design}/banner.css"
+    return None
+
+
+def _editor_css_url(vite_url: str | None) -> str | None:
     """URL for the editor-specific stylesheet (Vue component styles).
 
     This is linked by the public-page edit pen so the editor styles are
@@ -74,32 +100,33 @@ def _editor_css_url(vite_url: str | None, theme: str) -> str | None:
         return None
     manifest = _manifest()
     entry = manifest["src/main.js"]
-    shared_files = {manifest[key]["file"] for key in _css_keys(theme)}
+    base = manifest.get(_BASE_CSS_KEY, {}).get("file")
     for css in entry.get("css", []):
-        if css not in shared_files:
+        if css != base:
             return f"/{css}"
     return None
 
 
 def _layout(
-    urls: list[str],
     modules: list[str] = (),
     custom_css: str = "",
     theme: str = "",
+    banner_design: str = "",
     favicon: str = "",
 ) -> Template:
     """Page layout template with standard asset URLs and ES-module scripts.
 
     Stylesheets use ``blocking="render"`` so the browser waits for them before
-    showing the page, avoiding a flash of unstyled content.
+    showing the page, avoiding a flash of unstyled content. Order matters and
+    is fixed: base (Vite build, absent in dev where Vite injects it from JS),
+    theme and banner design (backend-served from pagerite/themes/), then the
+    user's custom CSS last so it always wins.
 
-    The active theme is named in a meta tag so that in dev (where the
-    backend links no stylesheets and Vite injects them from JS) the
-    frontend entries know which theme CSS module to import.
+    In dev, pagerite.js re-appends the backend-rendered theme/design links
+    (and the custom CSS) after the Vite-injected base styles, keeping this
+    order intact.
     """
     doc = Document(E.Title, lang="en")
-    if theme:
-        doc.meta(name="pagerite:theme", content=theme)
     # A custom favicon (from the site editor) is linked explicitly; without
     # one, browsers fall back to the build's /favicon.ico by convention.
     if favicon:
@@ -107,19 +134,21 @@ def _layout(
     # Editor asset URLs for pagerite.js, which injects the 🖊️ edit pens
     # itself once it has validated the session (pages render identically
     # for everyone; editing is gated by the auth proxy in front of /_api).
-    script, editor_css = _editor_assets(theme)
+    script, editor_css = _editor_assets()
     doc.meta(name="pagerite:editor-src", content=script[-1])
     if editor_css:
         doc.meta(name="pagerite:editor-css", content=editor_css)
     # Stylesheet links carry stable ids so the site editor's hot swap can
     # keep each sheet at its rendered position (see swapRegions).
-    for i, url in enumerate(urls):
-        doc.link(
-            rel="stylesheet",
-            href=url,
-            blocking="render",
-            id="pagerite-base" if i == 0 else "pagerite-theme",
-        )
+    vite_url = os.environ.get("PAGERITE_VITE_URL")
+    sheets = [
+        ("pagerite-base", _base_css_url(vite_url)),
+        ("pagerite-theme", _theme_css_url(theme)),
+        ("pagerite-banner", _banner_css_url(banner_design)),
+    ]
+    for id_, url in sheets:
+        if url:
+            doc.link(rel="stylesheet", href=url, blocking="render", id=id_)
     for src in modules:
         doc.script(src=src, type="module")
     if custom_css.strip():
@@ -233,42 +262,90 @@ def _first_leaf(node: Node, path: str) -> str | None:
 
 
 def banner_html(menu: dict[str, Node], path: str, theme: str = "") -> HTML:
-    """Resolve the banner for a path: the nearest node on the ancestor
-    chain (the node itself first), then the front page, then the theme
-    artwork. The front page is a top-level *sibling* of the other
-    main-level nodes, not their parent, so it never appears in the chain
-    and is consulted explicitly, last. The snippet is raw trusted HTML,
-    so a banner can be anything — an img, a styled div, canvas + script.
+    """Resolve the banner for a path: the effective banner design's inline
+    SVG artwork first, then the user's own banner HTML — always last, so
+    author code (e.g. <style> overrides) wins over the design's own styles.
 
-    With no user banner anywhere in the chain, the active theme's inline
-    SVG artwork is inlined instead: as markup it can be recolored from the
-    theme stylesheet (``var(--accent)`` etc.) and animated, and it is not
-    rendered at all when the user supplies their own banner.
+    The design comes from banner_design(); the user banner from the nearest
+    node on the ancestor chain (the node itself first), then the front page.
+    The front page is a top-level *sibling* of the other main-level nodes,
+    not their parent, so it never appears in the chain and is consulted
+    explicitly, last. The snippet is raw trusted HTML, so a banner can be
+    anything — an img, a styled div, canvas + script.
     """
+    parts = []
+    design = banner_design(menu, path, theme)
+    if design:
+        parts.append(_design_banner(design))
     source = banner_source(menu, path)
     if source is not None:
-        return HTML(resolve(menu, source)[-1].banner)
-    return _theme_banner(theme)
+        parts.append(HTML(resolve(menu, source)[-1].banner))
+    return HTML("".join(str(p) for p in parts))
 
 
-_banner_cache: dict[str, HTML] = {}
+def _design_banner(design: str) -> HTML:
+    """The design's inline banner SVG (empty for none/unknown designs).
 
-
-def _theme_banner(theme: str) -> HTML:
-    """The theme's inline banner SVG (empty for none/unknown themes)."""
-    if not theme or "/" in theme:
+    Read from disk on every request: design files are never built/cached,
+    so editing them on disk shows on the next page load, even in prod."""
+    if not _valid_name(design):
         return HTML("")
-    if theme not in _banner_cache:
-        path = Path(__file__).parent / "themes" / theme / "banner.svg"
-        _banner_cache[theme] = HTML(path.read_text()) if path.exists() else HTML("")
-    return _banner_cache[theme]
+    path = THEMES / design / "banner.svg"
+    if not path.exists():
+        return HTML("")
+    # data-design marks the artwork as the design's (not author code), so
+    # the site editor's live banner preview keeps it in place.
+    return HTML(path.read_text().replace("<svg", "<svg data-design", 1))
+
+
+def banner_design(menu: dict[str, Node], path: str, theme: str = "") -> str:
+    """The effective banner design name at ``path`` ("" = no design).
+
+    Nodes set ``banner_design`` to a design name, "" (explicitly none) or
+    None (inherit). Resolution walks the ancestor chain from the node
+    upwards, then the front page, then falls back to the active theme's own
+    design (a theme folder doubles as a banner design when it ships
+    banner.css or banner.svg).
+    """
+    chain = resolve(menu, path) or []
+    for node in reversed(chain):
+        if node.banner_design is not None:
+            return node.banner_design
+    front = menu.get("")
+    if front and front.banner_design is not None:
+        return front.banner_design
+    if (
+        _valid_name(theme)
+        and ((THEMES / theme / "banner.css").exists()
+             or (THEMES / theme / "banner.svg").exists())
+    ):
+        return theme
+    return ""
+
+
+def banner_design_source(
+    menu: dict[str, Node], path: str, theme: str = ""
+) -> str | None:
+    """Which node's banner-design setting applies at ``path`` (like
+    banner_source), or None when the active theme's default applies.
+    Used by the site editor for the design selector's inherit label."""
+    chain = resolve(menu, path) or []
+    segs = path.split("/")
+    for i in range(len(chain) - 1, -1, -1):
+        if chain[i].banner_design is not None:
+            return "/".join(segs[: i + 1])
+    front = menu.get("")
+    if front and front.banner_design is not None:
+        return ""
+    return None
 
 
 def banner_source(menu: dict[str, Node], path: str) -> str | None:
-    """Which node's banner applies at ``path``: the nearest ancestor with
-    one set (the front page, a top-level sibling of the chain, last).
-    None = the default artwork. Whitespace-only banners count as empty:
-    clearing the editor can leave a stray newline behind."""
+    """Which node's banner HTML applies at ``path``: the nearest ancestor with
+    one set (the front page, a top-level sibling of the chain, last). None =
+    no user banner anywhere (only the design artwork renders, if any).
+    Whitespace-only banners count as empty: clearing the editor can leave a
+    stray newline behind."""
     chain = resolve(menu, path) or []
     segs = path.split("/")
     for i in range(len(chain) - 1, -1, -1):
@@ -304,9 +381,8 @@ def render_page(
     """Render a full HTML page for the slug path."""
     node = resolve(menu, path)[-1]
     title = _title(path.rpartition("/")[2], node)
-    scripts, styles = _page_assets(theme)
     return str(
-        _layout(styles, scripts, custom_css, theme, favicon)(
+        _layout(_page_assets(), custom_css, theme, banner_design(menu, path, theme), favicon)(
             Title=f"{title} – {brand}" if brand else title,
             Brand=_brand_link(brand),
             Nav=nav_html(menu, path),
@@ -341,9 +417,8 @@ def render_category(
             doc.p("Pages in this section are listed in the menu on the left.")
         else:
             doc.p("This section has no page of its own yet.")
-    scripts, styles = _page_assets(theme)
     return str(
-        _layout(styles, scripts, custom_css, theme, favicon)(
+        _layout(_page_assets(), custom_css, theme, banner_design(menu, path, theme), favicon)(
             Title=f"{title} – {brand}" if brand else title,
             Brand=_brand_link(brand),
             Nav=nav_html(menu, path),
@@ -367,9 +442,8 @@ def render_not_found(
     with doc:
         doc.h1("Not Found")
         doc.p(f"No article at /{path}. If there was before, it may have been deleted.")
-    scripts, styles = _page_assets(theme)
     return str(
-        _layout(styles, scripts, custom_css, theme, favicon)(
+        _layout(_page_assets(), custom_css, theme, banner_design(menu, path, theme), favicon)(
             Title=f"Not Found – {brand}" if brand else "Not Found",
             Brand=_brand_link(brand),
             Nav=nav_html(menu, path),
@@ -380,27 +454,23 @@ def render_not_found(
     )
 
 
-def _page_assets(theme: str) -> tuple[list[str], list[str]]:
-    """Script and CSS URLs for public pages (pagerite entry).
+def _page_assets() -> list[str]:
+    """Script URLs for public pages (pagerite entry).
 
     Dev mode loads the entry from the Vite dev server; production uses
     the Vite build manifest to resolve the hashed asset names.
     """
     vite_url = os.environ.get("PAGERITE_VITE_URL")
     if vite_url:
-        return [f"{vite_url}/src/pagerite.js"], _shared_css_urls(vite_url, theme)
-    key = f"page:{theme}"
-    if key not in _asset_cache:
+        return [f"{vite_url}/src/pagerite.js"]
+    if "page" not in _asset_cache:
         manifest = _manifest()
         entry = manifest["src/pagerite.js"]
-        _asset_cache[key] = (
-            [f"/{entry['file']}"],
-            _shared_css_urls(None, theme),
-        )
-    return _asset_cache[key]
+        _asset_cache["page"] = [f"/{entry['file']}"]
+    return _asset_cache["page"]
 
 
-def _editor_assets(theme: str) -> tuple[list[str], str | None]:
+def _editor_assets() -> tuple[list[str], str | None]:
     """Script URL and editor-specific CSS URL for the public-page edit pen.
 
     The shared CSS is already linked on the page, so the pen only needs the
@@ -409,9 +479,8 @@ def _editor_assets(theme: str) -> tuple[list[str], str | None]:
     vite_url = os.environ.get("PAGERITE_VITE_URL")
     if vite_url:
         return [f"{vite_url}/@vite/client", f"{vite_url}/src/main.js"], None
-    key = f"editor:{theme}"
-    if key not in _asset_cache:
+    if "editor" not in _asset_cache:
         manifest = _manifest()
         entry = manifest["src/main.js"]
-        _asset_cache[key] = [f"/{entry['file']}"], _editor_css_url(None, theme)
-    return _asset_cache[key]
+        _asset_cache["editor"] = [f"/{entry['file']}"], _editor_css_url(None)
+    return _asset_cache["editor"]

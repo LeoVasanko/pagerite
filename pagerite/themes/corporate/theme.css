@@ -1,9 +1,9 @@
 /* Corporate theme: bright and bold professional. Saturated royal-blue
    gradients on white, geometric Montserrat display type over Inter body,
    and a genuinely large brand with a soft blue overlap shadow. Automatic
-   dark mode keeps the same saturated blue identity on deep navy; the
-   banner artwork (inlined by the backend) is recolored from here via the
-   cb-* classes, so one SVG serves both modes. */
+   dark mode keeps the same saturated blue identity on deep navy. The
+   companion banner design (banner.css, artwork inlined by the backend)
+   recolors its SVG from the active palette via the cb-* classes. */
 
 :root {
   color-scheme: light dark;
@@ -18,40 +18,6 @@
   --font-heading: var(--font-montserrat);
 }
 
-/* Banner artwork colors, light mode */
-.cb-bg0 {
-  stop-color: #ffffff;
-}
-
-.cb-bg1 {
-  stop-color: #e6eefe;
-}
-
-.cb-r0 {
-  stop-color: var(--accent);
-}
-
-.cb-r1 {
-  stop-color: #00b3ff;
-}
-
-.cb-g0,
-.cb-g1 {
-  stop-color: var(--accent);
-}
-
-.cb-dot {
-  fill: var(--accent);
-}
-
-.cb-orbit {
-  stroke: var(--accent);
-}
-
-.cb-spark {
-  fill: var(--accent);
-}
-
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #0b1428;
@@ -63,40 +29,6 @@
     --line: #ffffff17;
     /* Code wells stay navy in dark mode (light mode uses --surface). */
     --code-bg: #0d1b3e;
-  }
-
-  /* Banner artwork colors, dark mode */
-  .cb-bg0 {
-    stop-color: #0d1830;
-  }
-
-  .cb-bg1 {
-    stop-color: #0a1122;
-  }
-
-  .cb-r0 {
-    stop-color: #2f7bff;
-  }
-
-  .cb-r1 {
-    stop-color: #00d0ff;
-  }
-
-  .cb-g0,
-  .cb-g1 {
-    stop-color: #2f7bff;
-  }
-
-  .cb-dot {
-    fill: #4d8dff;
-  }
-
-  .cb-orbit {
-    stroke: #4d8dff;
-  }
-
-  .cb-spark {
-    fill: #6ea8ff;
   }
 }
 
@@ -122,11 +54,6 @@
     color: #eaf1ff;
     filter: drop-shadow(0 0.4rem 1.4rem rgb(0 0 0 / 0.6));
   }
-}
-
-#banner {
-  min-height: 15rem;
-  border-bottom: none;
 }
 
 #nav {

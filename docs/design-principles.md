@@ -86,15 +86,19 @@ evolves.
   `Sidebar`, `Main`) filled per request. The dynamic regions carry stable
   ids (`#page-banner`, `#nav`, `#sidebar`, `#main`).
 - The page top is a **full-width banner header** with the site name and the
-  navigation bar overlaid on it — no separate chrome header. The banner is
-  **per-page configurable**: `Node.banner` holds an arbitrary trusted HTML
+  navigation bar overlaid on it — no separate chrome header. The banner
+  combines two layers, stacked in `#page-banner` (a grid, so they overlay):
+  first the **banner design** — a named design living in a theme folder
+  (`pagerite/themes/{name}/banner.css` + `banner.svg`), chosen per page via
+  `Node.banner_design` (a design name, "" for none, None to inherit from
+  the nearest ancestor, then the front page, then the active theme's own
+  design). The artwork is an **inline SVG** (marked `svg[data-design]`): as
+  markup it can be recolored from the theme stylesheet (corporate's single
+  SVG serves both light and dark mode via `var()`-driven stops). Second,
+  **per-page author code**: `Node.banner` holds an arbitrary trusted HTML
   snippet (an image, a styled div, canvas + script — anything), resolved by
-  walking up the node's ancestors to the front page; when nothing in the
-  chain sets one, the active theme's banner artwork shows. That artwork is
-  an **inline SVG** (`pagerite/themes/{name}/banner.svg`) the backend
-  inlines into `#page-banner`: as markup it can be recolored from the theme
-  stylesheet (corporate's single SVG serves both light and dark mode via
-  `var()`-driven stops) and it is never rendered underneath a user banner.
+  walking up the node's ancestors to the front page and rendered **after**
+  the design artwork, so author styles always win over the design's own.
   The base stylesheet falls back to a plain gradient. There is deliberately
   no scrim fading the banner into the page background — any such fade would
   ruin user-supplied designs; themes that want one bake it into their SVG
@@ -154,20 +158,24 @@ evolves.
 
 - The base stylesheet `frontend/src/assets/pagerite.css` provides the layout,
   typography and interaction rules with conservative CSS variables. A theme layer
-  (`frontend/src/assets/themes/{name}/theme.css` — currently `purple`, `corporate`
-  and `nitro`) overrides those variables and
+  (`pagerite/themes/{name}/theme.css` — currently `purple`, `corporate`
+  and `nitro`, served by the backend at `/_themes/{name}/theme.css` straight
+  from disk, never built) overrides those variables and
   adds the visual styling; `Data.theme` selects the active theme (empty = none/base
-  only) and the site editor can switch it. Vue may add per-component styles on top
+  only) and the site editor can switch it, choosing from the theme folders
+  found on disk. Vue may add per-component styles on top
   where needed. The corporate and nitro themes switch palettes automatically via
   `prefers-color-scheme` (corporate is light-first with a matching dark palette;
   nitro a warm light-grey page or, in dark mode, a deep violet one — its dark
   banner and orange accents carry over unchanged); purple (dusk) uses one
   fixed palette for everyone. Themes may restyle structural details the base
   leaves plain — heading colors and underlines, list markers, nav treatment,
-  brand sizing. The banner artwork has scroll parallax: pagerite.js sets the
+  brand sizing. A theme folder may also ship a **banner design**
+  (`banner.css` + `banner.svg`), selectable per page independently of the
+  active theme. The banner artwork has scroll parallax: pagerite.js sets the
   `--pry` scroll parameter on `<html>` (event-driven, so it is still when the
   page is idle), the banner contents drift within their window (with scale
-  overscan so no edge shows), and themes may key their own effects off the
+  overscan so no edge shows), and designs may key their own effects off the
   same parameter — purple's sun rises as you scroll.
 - Fonts, the shared stylesheet and pygments styles
   live under `frontend/src/assets/` and are emitted as hashed assets under
@@ -193,7 +201,9 @@ evolves.
     stored as plain `:root` rows inside the custom CSS, referencing the base
     stylesheet's per-family font variables), a **site-wide custom CSS** field (injected
     into `<style id="pagerite-user">` in the live page head and swapped during
-    fetch-navigation), the page's **banner HTML** field (previewed into the
+    fetch-navigation), the page's **banner design** selector (inherit /
+    none / any design found on disk, inherited by children), the page's
+    **banner HTML** field (supplementing the design, previewed into the
     real banner region, so you see exactly which banner you're editing) and
     the **structure tree**. Everything saves immediately as you edit — no
     save button, no edit mode.

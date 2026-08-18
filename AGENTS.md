@@ -53,18 +53,27 @@ not for the public pages. See `docs/design-principles.md` for the design.
     caching; pages reference files by absolute `/_f/` URLs so hierarchy
     moves never break them. `Node.banner` is a raw trusted HTML snippet
     for the header banner (img, styled div, canvas+script...); empty
-    inherits from the node's ancestors (front page last), then the active
-    theme's banner artwork: an inline SVG from
-    `pagerite/themes/{theme}/banner.svg`, inlined into `#page-banner` by
-    the backend only when no user banner applies (so it is recolorable
-    from the theme CSS via `var(...)` and never fights user designs; the
-    base stylesheet falls back to a plain gradient).
+    inherits from the node's ancestors (front page last). It is rendered
+    AFTER the banner design's artwork, so author code (e.g. a `<style>`
+    override) always wins over the design's own styles.
+    `Node.banner_design` picks a banner design: a theme folder name whose
+    `banner.css`/`banner.svg` supply the design's styles and inline SVG
+    artwork (marked `svg[data-design]`); "" = explicitly no design, None =
+    inherit (nearest ancestor, front page last, then the active theme's
+    own design if it ships banner.css/banner.svg). The design's banner.css
+    is linked in `<head>` (id `pagerite-banner`) between the theme and the
+    custom CSS.
     `Data.version` is bumped on every write
     and embedded in page ETags so nav-affecting changes invalidate caches.
     `Data.brand` is the site name (header link + `<title>` suffix), editable
     in the site editor via `/_api/settings`; empty = no header link and
     no `<title>` suffix. `Data.theme` is the active theme name (empty =
-    none/base only); themes live in `frontend/src/assets/themes/{theme}`.
+    none/base only); themes are folders in `pagerite/themes/{name}`
+    containing `theme.css` and/or `banner.css` (+ `banner.svg` artwork),
+    served by the backend at `/_themes/{name}/...` — read from disk per
+    request (etag by mtime), never built, so on-disk edits show on the
+    next page load even in prod. The theme selector and banner-design
+    selector enumerate these folders via `GET /_api/settings`.
     `Data.custom_css` is raw trusted CSS injected inline in every page
     `<head>` (id `pagerite-user`) and swapped during fetch-navigation;
     editable in the site editor. Font picks (heading/body/brand) in the
@@ -117,23 +126,26 @@ not for the public pages. See `docs/design-principles.md` for the design.
       from the `pagerite:editor-src`/`-css` meta tags). If no Paskia SSO is
       detected (dev/no proxy), editing is left open. Pages themselves render
       identically for everyone; the real gate is the auth proxy in front of
-      all of `/_api`. The backend links the shared CSS as two separate
-      stylesheets (base and theme) so they can be swapped or augmented.
+      all of `/_api`. The backend links the stylesheets in a fixed order —
+      base (Vite build), theme, banner design, custom CSS last — each with
+      a stable id so the site editor can swap them in place.
     - `assets/` — shared styles and data files built by Vite and served hashed
-      under `/_assets/`: `pagerite.css` (base layout + conservative variables),
-      `themes/{purple,corporate,nitro}/theme.css` (theme overrides and font
-      picks: `purple` = dark dusk palette with Fraunces/Literata and a tilted
+      under `/_assets/`: `pagerite.css` (base layout + conservative
+      variables), `pygments.css`,
+      and `fonts/` (self-hosted Source
+      Sans 3/Source Serif 4/Fraunces/Literata/Cormorant/Playfair
+      Display/Inter/Montserrat/Fira Code/Cause/Exo 2/New Rocker
+      variable woff2). The `::view-transition*` block at the end of `pagerite.css` (from
+      termotohtori.fi) is fragile — do not tweak. Themes are NOT built:
+      `pagerite/themes/{name}/theme.css` (theme overrides and font picks:
+      `purple` = dark dusk palette with Fraunces/Literata and a tilted
       oversized gradient brand; `corporate` = light-first with automatic
       `prefers-color-scheme` dark mode, Montserrat/Inter and a huge solid
       brand; `nitro` = racing/HUD style following `prefers-color-scheme`
       (warm light-grey page, deep violet in dark), Montserrat/Literata,
       black as an accent only, a straight orange blade under the banner, and
-      an orange racing-tab nav clipped with a bezier `shape()`), `pygments.css`,
-      and `fonts/` (self-hosted Source
-      Sans 3/Source Serif 4/Fraunces/Literata/Cormorant/Playfair
-      Display/Inter/Montserrat/Fira Code/Cause/Exo 2/New Rocker
-      variable woff2). The `::view-transition*` block at the end of `pagerite.css` (from
-      termotohtori.fi) is fragile — do not tweak.
+      an orange racing-tab nav clipped with a bezier `shape()`) and the
+      companion `banner.css` banner designs are served by the backend.
     - Vite builds ES-module `.js` outputs; the backend renders `<script
       type="module">` for them (module scripts defer by default).
   - The database file is `pagerite.kantadb` in the cwd (`PAGERITE_DB`
@@ -146,8 +158,9 @@ not for the public pages. See `docs/design-principles.md` for the design.
   previewing into the visible article; editor scroll drives document
   scroll) opened by the article pen — it edits content and title only,
   never the path — and `SiteEditor.vue` (site brand + theme selector +
-  favicon upload/remove + site-wide custom CSS + banner HTML edited in
-  small CodeMirror windows;
+  favicon upload/remove + site-wide custom CSS + per-page banner design
+  selector (inherit/none/named design, inherited by children) + banner
+  HTML edited in small CodeMirror windows;
   banner previewed into `#page-banner`, CSS injected into
   `<head id="pagerite-user">`) + vue-draggable structure tree with
   always-editable title/slug inputs per row, opened by the banner pen —
@@ -183,19 +196,20 @@ not for the public pages. See `docs/design-principles.md` for the design.
   `assetsDir: '_/assets'` (so the build mirrors the URL space;
   `frontend/public/favicon.ico` lands at the build root and is served at
   `/favicon.ico`). JS inputs are `src/main.js` and `src/pagerite.js`, plus
-  `src/assets/pagerite.css` and every `src/assets/themes/*/theme.css` as
-  separate stylesheet entries (enumerated from the themes directory, so new
-  themes need no config change); there
+  `src/assets/pagerite.css` as a separate stylesheet entry; theme and
+  banner-design CSS are NOT built — they live in `pagerite/themes/{name}/`
+  and are served by the backend. There
   is no `index.html` source (it would shadow `/` and turn missing dev paths
   into an empty Vue shell). All outputs are ES modules. The build sets
   `preserveEntrySignatures: 'exports-only'` because main.js is consumed
   via dynamic `import()` for its `openEditor`/`closeEditor` exports — Vite
   app builds otherwise strip unused entry exports, leaving dead edit pens.
-  In dev the backend links no stylesheets (Vite injects them from JS); the
-  active theme reaches the page as `<meta name="pagerite:theme">` and
-  pagerite.js imports that theme's CSS, while a theme switch in the site
-  editor swaps the Vite-injected `<style data-vite-dev-id>` tags (the
-  `<link>` sync used in prod is a no-op in dev).
+  In dev the backend links theme/banner-design stylesheets like in prod
+  (`/_themes/...`); only the base CSS is Vite-injected from JS, and
+  pagerite.js then re-appends the `#pagerite-theme`/`#pagerite-banner`/
+  `#pagerite-user` elements to restore the canonical order (base < theme <
+  design < custom CSS). Theme switches in the site editor simply swap the
+  `#pagerite-theme` link href, identically in dev and prod.
   vite-plugin-fastapi.js has an
   auto-upgrade marker — edit `vite.config.js`, not the plugin.
 - `docs/` — design documentation.

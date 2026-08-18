@@ -31,9 +31,15 @@ class Node(msgspec.Struct, omit_defaults=True):
     #: Markdown source of the node's page; None = pure category label
     #: (its URL renders a placeholder page).
     content: str | None = None
-    #: Raw HTML for the header banner (img, styled div, canvas+script...).
+    #: Raw HTML for the header banner (img, styled div, canvas+script...),
+    #: rendered after the banner design's artwork so author code always
+    #: wins over the design's own styles.
     #: Empty inherits the nearest ancestor's banner, front page last.
     banner: str = ""
+    #: Banner design: a theme folder name (its banner.css/banner.svg),
+    #: "" = explicitly no design, None = inherit (nearest ancestor, front
+    #: page last, then the active theme's own design).
+    banner_design: str | None = None
     published: bool = True
     children: dict[str, "Node"] = {}
     created: datetime = msgspec.field(
