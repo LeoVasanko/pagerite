@@ -2,9 +2,11 @@
 
 Raw HTML (including inline scripts) is passed through unfiltered: the
 single author is trusted. Extensions: tables and strikethrough (from the
-"default" preset), footnotes, definition lists, task lists and
+"default" preset), footnotes, definition lists, task lists,
 brace-attributes (`{.class width=300}` on any element, images in
-particular).
+particular) and admonitions (``!!! note Title`` with an indented body —
+note/tip/warning/etc., the title optional). Bare URLs autolink (GFM), and
+``H~2~O`` / ``x^2^`` give sub/superscripts.
 
 markdown-it's typographer is enabled, so body text gets SmartyPants-style
 replacements: straight quotes become curly, ``--`` / ``---`` become en / em
@@ -27,9 +29,13 @@ from datetime import datetime, timedelta
 from markdown_it import MarkdownIt
 from markdown_it.common.utils import escapeHtml
 from markdown_it.renderer import RendererHTML
+from mdit_py_plugins.admon import admon_plugin
 from mdit_py_plugins.attrs import attrs_plugin
 from mdit_py_plugins.deflist import deflist_plugin
 from mdit_py_plugins.footnote import footnote_plugin
+from mdit_py_plugins.gfm_autolink import gfm_autolink_plugin
+from mdit_py_plugins.subscript import sub_plugin
+from mdit_py_plugins.superscript import superscript_plugin
 from mdit_py_plugins.tasklists import tasklists_plugin
 from pygments import highlight
 from pygments.formatters import HtmlFormatter
@@ -135,9 +141,13 @@ md = (
         },
     )
     .use(attrs_plugin)
+    .use(admon_plugin)
     .use(footnote_plugin)
     .use(deflist_plugin)
     .use(tasklists_plugin, enabled=True)
+    .use(gfm_autolink_plugin)
+    .use(sub_plugin)
+    .use(superscript_plugin)
 )
 md.add_render_rule("image", _image_rule)
 md.core.ruler.push("unwrap_lone_figures", _unwrap_lone_figures)

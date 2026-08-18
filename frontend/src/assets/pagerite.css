@@ -541,6 +541,42 @@ blockquote p {
   margin: 0;
 }
 
+/* Admonitions (markdown !!! note/warning/...): a lightweight callout in
+   the blockquote idiom — accent bar and a faint wash, recolored per type.
+   Bottom-only margins like everything else in articles; inner paragraphs
+   carry no margins of their own. */
+.admonition {
+  margin: 0 0 1rem;
+  padding: 0.4rem 0.9rem;
+  border-left: 0.25rem solid var(--admonition-color, var(--accent));
+  border-radius: 0 0.3rem 0.3rem 0;
+  background: color-mix(in srgb, var(--admonition-color, var(--accent)) 7%, transparent);
+}
+
+.admonition > :last-child {
+  margin-bottom: 0;
+}
+
+.admonition-title {
+  margin: 0 0 0.2rem;
+  font-weight: 600;
+  color: var(--admonition-color, var(--accent));
+}
+
+.admonition.tip,
+.admonition.important,
+.admonition.hint,
+.admonition.success {
+  --admonition-color: var(--accent2);
+}
+
+.admonition.warning,
+.admonition.caution,
+.admonition.danger,
+.admonition.failure {
+  --admonition-color: var(--accent3);
+}
+
 pre {
   overflow-x: auto;
   padding: 0.5rem 0.8rem;

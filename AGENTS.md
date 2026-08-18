@@ -91,7 +91,8 @@ not for the public pages. See `docs/design-principles.md` for the design.
     on every page, otherwise browsers fall back to the build's
     `/favicon.ico` by convention.
   - `markdown.py` — markdown-it-py renderer (html passthrough + attrs,
-    footnote, deflist, tasklists plugins; typographer + breaks on). Custom
+    footnote, deflist, tasklists, admon, gfm_autolink, sub/superscript
+    plugins; typographer + breaks on). Custom
     image rule: relative srcs resolve against the page path; an image
     standing alone in its paragraph becomes a figure (captioned when
     titled), while inline-with-text images and raw <img> HTML stay plain.

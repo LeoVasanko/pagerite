@@ -199,6 +199,12 @@ blockquote {
   padding-bottom: 0.25rem;
 }
 
+/* Admonitions join the rounded, softly shaded landscape elements. */
+.admonition {
+  border-radius: 0.6rem;
+  box-shadow: 0 0.2rem 0.7rem #4f913b1a;
+}
+
 /* Code rests on a shaded leaf panel, keeping the base light syntax
    palette. */
 pre {
