@@ -69,11 +69,13 @@ evolves.
   are stored by content hash — blake3, first 6 bytes hex + original
   extension — and served immutable from `/_f/{hash}.ext`. Absolute URLs
   that survive page renames and dedupe identical content; pages no longer
-  own files. An image with a title becomes a `<figure>` with
-  `<figcaption>`. Positioning is by attribute classes:
+  own files. An image standing alone in its paragraph becomes a block
+  `<figure>` — with `<figcaption>` when it has a title; images inline
+  with text and raw `<img>` HTML stay plain inline images. Positioning
+  is by attribute classes:
   `![alt](/_f/….avif "Caption"){.right}` — `{.right}`, `{.left}` float at
   30% of the text column (the caption wraps within it; an explicit
-  `width=300` overrides on uncaptioned images),
+  `width=300` makes the figure shrink-wrap the image instead),
   `{.wide}` goes full bleed (viewport edge to edge, or up to the docked
   editor; the sidebar stacks on top of it); plain attributes like `width=300`
   work too. Headings (h1/h2) clear floats, so images never overflow into the

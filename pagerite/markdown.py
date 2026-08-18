@@ -14,8 +14,10 @@ spans/blocks and raw HTML are left untouched.
 
 Images get special treatment: a relative `src` is resolved against the
 page's own path (so `![alt](photo.avif)` in `/docs/design` is served from
-`/docs/design/photo.avif`), and an image with a title becomes a
-`<figure>` with `<figcaption>`. Positioning is done with attribute
+`/docs/design/photo.avif`), and an image standing alone in its paragraph
+becomes a block `<figure>` — with `<figcaption>` when it has a title.
+Images inline with other content stay plain inline `<img>`, as does raw
+`<img>` HTML written by the author. Positioning is done with attribute
 classes, e.g. `![alt](photo.avif "Caption"){.right}`.
 """
 
@@ -70,16 +72,22 @@ def _image_rule(
         token.attrs["src"] = f"/{page}/{src}" if page else f"/{src}"
     token.attrs["alt"] = self.renderInlineAsText(token.children, options, env)
     img = self.renderToken(tokens, idx, options, env)
-    if title := token.attrs.get("title"):
-        return f"<figure>{img}<figcaption>{escapeHtml(title)}</figcaption></figure>"
+    if len(tokens) == 1:
+        # The only inline content of its paragraph: render as a block
+        # figure, captioned when titled. (The <p> wrapper is dropped by
+        # _unwrap_lone_figures below.)
+        title = token.attrs.get("title")
+        caption = f"<figcaption>{escapeHtml(title)}</figcaption>" if title else ""
+        return f"<figure>{img}{caption}</figure>"
+    # Inline with other content: a plain inline image.
     return img
 
 
 def _unwrap_lone_figures(state) -> None:
-    """Drop the <p> wrapper around a lone titled image.
+    """Drop the <p> wrapper around a lone image.
 
     markdown-it wraps inline content in a paragraph, but our image rule
-    turns titled images into <figure> — a block element that is invalid
+    turns lone images into <figure> — a block element that is invalid
     inside <p>. Browsers hoist it out, leaving an empty paragraph whose
     margins disturb the layout.
     """
@@ -88,7 +96,7 @@ def _unwrap_lone_figures(state) -> None:
         if token.type != "inline" or not token.children:
             continue
         [child] = token.children if len(token.children) == 1 else [None]
-        if child and child.type == "image" and child.attrs.get("title"):
+        if child and child.type == "image":
             if (tokens[i - 1].type == "paragraph_open"
                     and tokens[i + 1].type == "paragraph_close"):
                 tokens[i - 1].hidden = True
