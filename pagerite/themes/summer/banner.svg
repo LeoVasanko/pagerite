@@ -1,0 +1,369 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 1600 320"
+     preserveAspectRatio="xMidYMid slice">
+
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8ed0ff"/>
+      <stop offset=".64" stop-color="#d9f1ff"/>
+      <stop offset="1" stop-color="#eef9ff"/>
+    </linearGradient>
+
+    <linearGradient id="farHill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b8dca7"/>
+      <stop offset="1" stop-color="#a4cf90"/>
+    </linearGradient>
+
+    <linearGradient id="nearHill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#91c97c"/>
+      <stop offset="1" stop-color="#74b65e"/>
+    </linearGradient>
+
+    <linearGradient id="grass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#69ae4b"/>
+      <stop offset="1" stop-color="#4f913b"/>
+    </linearGradient>
+
+    <!-- Soft fade into the page background (stop-color from banner.css) -->
+    <linearGradient id="meadowFade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" class="summer-fade" stop-color="#e6f4cf" stop-opacity="0"/>
+      <stop offset="1" class="summer-fade" stop-color="#e6f4cf"/>
+    </linearGradient>
+
+    <filter id="soft">
+      <feGaussianBlur stdDeviation="16"/>
+    </filter>
+
+    <filter id="cloudShadow" x="-20%" y="-40%" width="140%" height="180%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4"
+                    flood-color="#4f8fb0" flood-opacity=".12"/>
+    </filter>
+  </defs>
+
+  <!-- Sky -->
+  <rect width="1600" height="320" fill="url(#sky)"/>
+
+  <!-- Sun (rises on scroll, glow pulses) -->
+  <circle class="sun-glow" cx="1330" cy="72" r="82"
+          fill="#fff0a2"
+          opacity=".28"
+          filter="url(#soft)"/>
+  <circle class="sun" cx="1330" cy="72" r="42"
+          fill="#fff0a2"
+          opacity=".82"/>
+
+  <!-- Clouds (drift on scroll, lazily float sideways) -->
+  <g class="clouds" fill="#fff" opacity=".82" filter="url(#cloudShadow)">
+    <g class="cloud cloud-a">
+      <g transform="translate(160 72)">
+        <ellipse cx="0" cy="12" rx="54" ry="20"/>
+        <circle cx="-27" cy="4" r="26"/>
+        <circle cx="7" cy="-6" r="34"/>
+        <circle cx="40" cy="7" r="25"/>
+      </g>
+    </g>
+
+    <g class="cloud cloud-b" opacity=".72">
+      <g transform="translate(650 52)">
+        <ellipse cx="0" cy="10" rx="45" ry="16"/>
+        <circle cx="-21" cy="4" r="21"/>
+        <circle cx="7" cy="-5" r="27"/>
+        <circle cx="32" cy="6" r="20"/>
+      </g>
+    </g>
+
+    <g class="cloud cloud-c" opacity=".58">
+      <g transform="translate(1070 110)">
+        <ellipse cx="0" cy="8" rx="38" ry="14"/>
+        <circle cx="-18" cy="3" r="18"/>
+        <circle cx="6" cy="-4" r="23"/>
+        <circle cx="28" cy="5" r="17"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- Far rolling hills (slow parallax); drawn past the bottom edge so the
+       drift never exposes sky underneath -->
+  <path class="hills-far" d="
+    M0 211
+    C145 170 263 173 390 211
+    C516 249 616 237 730 194
+    C846 151 945 168 1065 208
+    C1195 251 1334 214 1600 171
+    L1600 340
+    L0 340
+    Z"
+    fill="url(#farHill)"/>
+
+  <!-- Near rolling hills -->
+  <path class="hills-near" d="
+    M0 248
+    C120 217 228 217 342 247
+    C454 278 566 269 674 228
+    C789 184 901 202 1024 243
+    C1143 282 1278 271 1391 229
+    C1473 199 1538 196 1600 207
+    L1600 340
+    L0 340
+    Z"
+    fill="url(#nearHill)"/>
+
+  <!-- Proper leafy bushes (ride with the near hills) -->
+  <g class="hills-near">
+    <g transform="translate(130 236)">
+      <path d="
+        M-58 28
+        C-61 7 -46 -5 -28 0
+        C-28 -20 -4 -31 11 -16
+        C22 -36 54 -27 53 -5
+        C73 -10 90 6 85 27
+        Z"
+        fill="#5e9c4b"/>
+      <path d="
+        M-47 27
+        C-48 10 -37 1 -23 5
+        C-20 -10 -4 -17 8 -7
+        C19 -21 40 -17 43 -1
+        C60 -4 70 8 68 26
+        Z"
+        fill="#70ad58"/>
+    </g>
+
+    <g transform="translate(1240 225) scale(.9)">
+      <path d="
+        M-58 28
+        C-61 7 -46 -5 -28 0
+        C-28 -20 -4 -31 11 -16
+        C22 -36 54 -27 53 -5
+        C73 -10 90 6 85 27
+        Z"
+        fill="#5e9c4b"/>
+      <path d="
+        M-47 27
+        C-48 10 -37 1 -23 5
+        C-20 -10 -4 -17 8 -7
+        C19 -21 40 -17 43 -1
+        C60 -4 70 8 68 26
+        Z"
+        fill="#70ad58"/>
+    </g>
+
+    <g transform="translate(460 250) scale(.58)">
+      <path d="
+        M-58 28
+        C-61 7 -46 -5 -28 0
+        C-28 -20 -4 -31 11 -16
+        C22 -36 54 -27 53 -5
+        C73 -10 90 6 85 27
+        Z"
+        fill="#5a9748"/>
+    </g>
+
+    <g transform="translate(940 245) scale(.55)">
+      <path d="
+        M-58 28
+        C-61 7 -46 -5 -28 0
+        C-28 -20 -4 -31 11 -16
+        C22 -36 54 -27 53 -5
+        C73 -10 90 6 85 27
+        Z"
+        fill="#5a9748"/>
+    </g>
+  </g>
+
+  <!-- Foreground meadow (near-static parallax) -->
+  <path class="meadow" d="
+    M0 270
+    C95 260 175 267 260 273
+    C347 279 431 265 521 262
+    C620 258 705 275 808 272
+    C914 269 1004 251 1115 258
+    C1229 265 1324 279 1424 270
+    C1491 264 1547 258 1600 262
+    L1600 340
+    L0 340
+    Z"
+    fill="url(#grass)"/>
+
+  <!-- Dense grass blades -->
+  <g class="meadow" fill="none"
+     stroke="#4b8937"
+     stroke-width="2.5"
+     stroke-linecap="round">
+
+    <path d="M20 276 q-2 -19 4 -31 M28 276 q8 -18 11 -29"/>
+    <path d="M65 272 q-5 -18 1 -28 M74 272 q8 -16 11 -25"/>
+    <path d="M110 271 q-2 -23 5 -36 M121 272 q9 -18 12 -30"/>
+    <path d="M165 273 q-6 -16 -1 -28 M175 273 q7 -18 11 -27"/>
+    <path d="M225 274 q-3 -24 4 -37 M236 274 q8 -17 12 -29"/>
+    <path d="M286 273 q-6 -19 -1 -31 M296 274 q9 -18 12 -28"/>
+    <path d="M345 270 q-3 -18 3 -31 M355 270 q8 -17 12 -28"/>
+    <path d="M405 266 q-4 -22 2 -35 M416 266 q9 -17 13 -28"/>
+    <path d="M472 263 q-3 -18 3 -30 M482 263 q8 -19 13 -29"/>
+    <path d="M535 263 q-6 -19 -1 -31 M546 264 q9 -19 13 -30"/>
+    <path d="M598 266 q-3 -24 4 -37 M609 267 q8 -19 12 -31"/>
+    <path d="M665 271 q-6 -17 -1 -29 M676 271 q9 -17 13 -28"/>
+    <path d="M735 273 q-4 -22 3 -34 M746 273 q8 -18 12 -29"/>
+    <path d="M805 272 q-6 -18 -1 -30 M816 271 q9 -17 13 -27"/>
+    <path d="M875 265 q-3 -23 4 -35 M886 265 q8 -18 12 -28"/>
+    <path d="M945 258 q-5 -18 1 -30 M955 258 q9 -17 12 -28"/>
+    <path d="M1018 256 q-3 -22 4 -34 M1029 256 q8 -18 12 -28"/>
+    <path d="M1090 259 q-5 -20 1 -31 M1101 259 q8 -18 12 -29"/>
+    <path d="M1162 264 q-3 -24 4 -36 M1173 264 q8 -18 12 -30"/>
+    <path d="M1234 269 q-5 -19 1 -31 M1245 269 q8 -17 12 -28"/>
+    <path d="M1304 273 q-3 -23 4 -35 M1315 273 q8 -18 12 -29"/>
+    <path d="M1374 272 q-5 -18 1 -29 M1385 272 q8 -18 12 -28"/>
+    <path d="M1445 268 q-3 -22 4 -34 M1456 268 q8 -17 12 -28"/>
+    <path d="M1515 264 q-5 -20 1 -31 M1526 264 q8 -18 12 -29"/>
+    <path d="M1570 263 q-3 -21 4 -33 M1581 263 q8 -17 12 -28"/>
+  </g>
+
+  <!-- Extra foreground tufts -->
+  <g class="meadow" fill="#579a40">
+    <path d="M80 320 l15 -45 3 45 14 -57 0 57 20 -38 -7 38z"/>
+    <path d="M365 320 l10 -37 5 37 15 -49 -2 49 20 -34 -7 34z"/>
+    <path d="M710 320 l13 -42 3 42 15 -54 -1 54 20 -38 -8 38z"/>
+    <path d="M1040 320 l10 -35 5 35 14 -49 0 49 18 -32 -6 32z"/>
+    <path d="M1360 320 l13 -43 3 43 16 -55 -2 55 20 -37 -7 37z"/>
+  </g>
+
+  <!-- Flowers (sway gently; each wrapped in a classed group so the CSS
+       transform doesn't clobber the placement transform) -->
+  <g class="meadow">
+    <g class="flower">
+      <g transform="translate(190 270)">
+        <path d="M0 8 Q-2 25 -4 42" stroke="#42833a" stroke-width="2" fill="none"/>
+        <g fill="#ff8aa7">
+          <circle cx="-5" cy="0" r="5"/>
+          <circle cx="5" cy="0" r="5"/>
+          <circle cx="0" cy="-5" r="5"/>
+          <circle cx="0" cy="5" r="5"/>
+        </g>
+        <circle r="3" fill="#ffe071"/>
+      </g>
+    </g>
+
+    <g class="flower">
+      <g transform="translate(310 280) scale(.8)">
+        <path d="M0 8 Q2 23 1 37" stroke="#42833a" stroke-width="2" fill="none"/>
+        <g fill="#fff0a0">
+          <circle cx="-5" cy="0" r="5"/>
+          <circle cx="5" cy="0" r="5"/>
+          <circle cx="0" cy="-5" r="5"/>
+          <circle cx="0" cy="5" r="5"/>
+        </g>
+        <circle r="3" fill="#ef7191"/>
+      </g>
+    </g>
+
+    <g class="flower">
+      <g transform="translate(540 265)">
+        <path d="M0 8 Q-2 25 -2 42" stroke="#42833a" stroke-width="2" fill="none"/>
+        <g fill="#ff8aa7">
+          <circle cx="-5" cy="0" r="5"/>
+          <circle cx="5" cy="0" r="5"/>
+          <circle cx="0" cy="-5" r="5"/>
+          <circle cx="0" cy="5" r="5"/>
+        </g>
+        <circle r="3" fill="#ffe071"/>
+      </g>
+    </g>
+
+    <g class="flower">
+      <g transform="translate(670 279) scale(.7)">
+        <g fill="#fff0a0">
+          <circle cx="-5" cy="0" r="5"/>
+          <circle cx="5" cy="0" r="5"/>
+          <circle cx="0" cy="-5" r="5"/>
+          <circle cx="0" cy="5" r="5"/>
+        </g>
+        <circle r="3" fill="#ef7191"/>
+      </g>
+    </g>
+
+    <g class="flower">
+      <g transform="translate(845 272)">
+        <path d="M0 8 Q2 25 0 42" stroke="#42833a" stroke-width="2" fill="none"/>
+        <g fill="#ff8aa7">
+          <circle cx="-5" cy="0" r="5"/>
+          <circle cx="5" cy="0" r="5"/>
+          <circle cx="0" cy="-5" r="5"/>
+          <circle cx="0" cy="5" r="5"/>
+        </g>
+        <circle r="3" fill="#ffe071"/>
+      </g>
+    </g>
+
+    <g class="flower">
+      <g transform="translate(1010 265) scale(.85)">
+        <path d="M0 8 Q-2 24 -1 38" stroke="#42833a" stroke-width="2" fill="none"/>
+        <g fill="#fff0a0">
+          <circle cx="-5" cy="0" r="5"/>
+          <circle cx="5" cy="0" r="5"/>
+          <circle cx="0" cy="-5" r="5"/>
+          <circle cx="0" cy="5" r="5"/>
+        </g>
+        <circle r="3" fill="#ef7191"/>
+      </g>
+    </g>
+
+    <g class="flower">
+      <g transform="translate(1190 275)">
+        <g fill="#ff8aa7">
+          <circle cx="-5" cy="0" r="5"/>
+          <circle cx="5" cy="0" r="5"/>
+          <circle cx="0" cy="-5" r="5"/>
+          <circle cx="0" cy="5" r="5"/>
+        </g>
+        <circle r="3" fill="#ffe071"/>
+      </g>
+    </g>
+
+    <g class="flower">
+      <g transform="translate(1410 269)">
+        <path d="M0 8 Q2 26 0 42" stroke="#42833a" stroke-width="2" fill="none"/>
+        <g fill="#fff0a0">
+          <circle cx="-5" cy="0" r="5"/>
+          <circle cx="5" cy="0" r="5"/>
+          <circle cx="0" cy="-5" r="5"/>
+          <circle cx="0" cy="5" r="5"/>
+        </g>
+        <circle r="3" fill="#ef7191"/>
+      </g>
+    </g>
+
+    <g class="flower">
+      <g transform="translate(1510 282) scale(.72)">
+        <g fill="#ff8aa7">
+          <circle cx="-5" cy="0" r="5"/>
+          <circle cx="5" cy="0" r="5"/>
+          <circle cx="0" cy="-5" r="5"/>
+          <circle cx="0" cy="5" r="5"/>
+        </g>
+        <circle r="3" fill="#ffe071"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- Small scattered meadow dots -->
+  <g class="meadow" fill="#ffe071" opacity=".9">
+    <circle cx="250" cy="287" r="2.5"/>
+    <circle cx="445" cy="281" r="2.5"/>
+    <circle cx="615" cy="289" r="2.5"/>
+    <circle cx="760" cy="283" r="2.5"/>
+    <circle cx="930" cy="279" r="2.5"/>
+    <circle cx="1125" cy="287" r="2.5"/>
+    <circle cx="1290" cy="281" r="2.5"/>
+  </g>
+
+  <g class="meadow" fill="#ff8aa7" opacity=".8">
+    <circle cx="120" cy="291" r="2.5"/>
+    <circle cx="395" cy="291" r="2.5"/>
+    <circle cx="730" cy="294" r="2.5"/>
+    <circle cx="1080" cy="294" r="2.5"/>
+    <circle cx="1460" cy="291" r="2.5"/>
+  </g>
+
+  <!-- Soft fade into the page background -->
+  <rect y="252" width="1600" height="68" fill="url(#meadowFade)"/>
+</svg>

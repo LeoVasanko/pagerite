@@ -70,7 +70,8 @@ not for the public pages. See `docs/design-principles.md` for the design.
     in the site editor via `/_api/settings`; empty = no header link and
     no `<title>` suffix. `Data.theme` is the active theme name (empty =
     none/base only); themes are folders in `pagerite/themes/{name}`
-    containing `theme.css` and/or `banner.css` (+ `banner.svg` artwork),
+    containing `theme.css` and/or `banner.css` (+ `banner.svg` artwork and
+    any extra assets the CSS references, like summer's `grass.svg`),
     served by the backend at `/_themes/{name}/...` — read from disk per
     request (etag by mtime), never built, so on-disk edits show on the
     next page load even in prod. The theme selector and banner-design
@@ -154,7 +155,13 @@ not for the public pages. See `docs/design-principles.md` for the design.
       brand; `nitro` = racing/HUD style following `prefers-color-scheme`
       (warm light-grey page, deep violet in dark), Montserrat/Literata,
       black as an accent only, a straight orange blade under the banner, and
-      an orange racing-tab nav clipped with a bezier `shape()`) and the
+      an orange racing-tab nav clipped with a bezier `shape()`; `summer` =
+      light playful meadow, one palette sampled from its illustrated
+      `banner.svg` (sky/grass/sun/flower pink), Fraunces/Literata, a tilted
+      gradient brand, flower bullets, and a layered-parallax banner (sun
+      rises, clouds drift, nearer hills move less) with idle animations
+      (swaying flowers, floating clouds, breathing sun glow) wrapped in
+      `prefers-reduced-motion: no-preference`) and the
       companion `banner.css` banner designs are served by the backend.
     - Vite builds ES-module `.js` outputs; the backend renders `<script
       type="module">` for them (module scripts defer by default).

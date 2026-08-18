@@ -1,0 +1,262 @@
+/* Summer theme: the banner's illustrated meadow carried through the whole
+   page — one palette (sky blue, grass green, sun yellow, flower pink),
+   soft daylight surfaces, and playful touches like a tilted brand and
+   flower bullets. */
+
+:root {
+  color-scheme: light;
+
+  /* Every color is sampled (or text-darkened) from banner.svg. */
+  --bg: #e6f4cf;
+  /* pale meadow — the banner fades into this */
+  --surface: #f8fbf0;
+  --text: #2c4a2f;
+  /* deep leaf */
+  --muted: #5c7a5e;
+
+  --accent: #2598d6;
+  /* sky, darkened for text contrast */
+  --accent2: #4f913b;
+  /* grass */
+  --accent3: #e95f83;
+  /* flower pink, darkened for text contrast */
+  --sun: #ffe071;
+  --line: #4f913b29;
+
+  --link: color-mix(in oklab, var(--text) 38%, var(--accent));
+
+  --font-body: var(--font-cause);
+  --font-heading: var(--font-new-rocker);
+  --font-brand: var(--font-cause);
+}
+
+/* The page is the same landscape the banner paints: hazy sky light up top
+   (with an echo of the banner's sun in the top-right corner) settling into
+   a pale meadow below. Fixed, so the banner parallax reads against a
+   still backdrop. */
+body {
+  background:
+    radial-gradient(ellipse 36rem 24rem at 85% -6rem,
+      #fff0a299 0,
+      #fff0a63d 45%,
+      transparent 70%),
+    radial-gradient(ellipse 42rem 26rem at 6% 2rem,
+      #8ed0ff4d 0,
+      transparent 70%),
+    radial-gradient(ellipse 30rem 22rem at 96% 62%,
+      #ff8aa726 0,
+      transparent 70%),
+    linear-gradient(180deg,
+      var(--bg) 0,
+      #d9eebd 24rem,
+      #c6e5a8 55rem,
+      #b8dd9c 100%);
+  background-attachment: fixed;
+
+  color: var(--text);
+}
+
+::selection {
+  background: var(--sun);
+  color: #3d5223;
+}
+
+/* The banner frame ties into the meadow beneath it. */
+#banner {
+  border-bottom-color: #4f913b30;
+  box-shadow: 0 0.3rem 1rem #4f913b22;
+}
+
+/* Cheerful oversized tilted brand in a sky→grass→flower gradient. */
+#brand {
+  font-size: clamp(3.2rem, 9vw, 7.5rem);
+  line-height: 1;
+  padding-bottom: 0.3em;
+  margin-bottom: -0.3em;
+
+  transform: rotate(-2deg);
+  transform-origin: left bottom;
+
+  background: linear-gradient(100deg,
+      var(--accent) 0 30%,
+      var(--accent2) 55%,
+      var(--accent3) 95%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: none;
+
+  filter:
+    drop-shadow(0 1px 0 #fff) drop-shadow(0 0.15rem 0.15rem #ffffff99) drop-shadow(0 0.3rem 0.4rem #4f913b33);
+}
+
+/* Navigation floats over the artwork: dark leaf text with a daylight halo. */
+#nav {
+  color: #24452d;
+  text-shadow:
+    0 1px #ffffff,
+    0 0 0.2em #ffffff,
+    0 0 0.5em #d9f1ff;
+}
+
+#nav a {
+  color: #2c4a2f;
+}
+
+#nav ul ul a,
+#nav span {
+  color: #527048;
+}
+
+#nav a:hover,
+#nav .current {
+  color: var(--accent);
+}
+
+/* Content sits in a soft wash of sunlit meadow rather than on a white
+   card. */
+main {
+  background: linear-gradient(90deg,
+      transparent,
+      #f0f8dc80 15%,
+      #f0f8dc8c 50%,
+      #f0f8dc80 85%,
+      transparent);
+}
+
+/* The sidebar is a piece of the same meadow: glassy green with a light
+   top edge and a grassy shadow. */
+#sidebar {
+  background: linear-gradient(160deg, #f4faddd9, #d9eec5cf);
+  border-right: 1px solid #ffffff80;
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 0.3rem 1rem #4f913b1f;
+}
+
+#sidebar a {
+  color: #527048;
+}
+
+#sidebar a:hover,
+#sidebar .current {
+  color: var(--accent);
+}
+
+/* One accent per heading level: sky h1 growing a dense low strip of grass
+   right against its baseline (grass.svg, ~140 varied blades per tile,
+   served by the backend next to this stylesheet), grass h2, flower h3 in
+   a quieter weight. */
+article h1 {
+  color: var(--accent);
+  width: fit-content;
+  padding-bottom: 0.12em;
+  text-shadow: 0 1px #ffffffaa;
+  background: url("grass.svg") bottom left / auto 0.35em repeat-x;
+}
+
+article h2 {
+  color: var(--accent2);
+  text-shadow: 0 1px #ffffff88;
+}
+
+article h3 {
+  color: var(--accent3);
+  font-weight: 550;
+}
+
+article a {
+  color: var(--link);
+}
+
+article a:hover {
+  color: var(--accent);
+}
+
+/* Flower bullets, one accent per nesting level. */
+article ul li::before {
+  content: "❀";
+  color: var(--accent3);
+  font-size: 0.8em;
+  vertical-align: 0.1em;
+}
+
+article ul ul li::before {
+  content: "✿";
+  color: var(--accent);
+}
+
+article ul ul ul li::before {
+  content: "❁";
+  color: var(--accent2);
+}
+
+/* Quotes get a grassy edge and a wash of sunlight. */
+blockquote {
+  color: #4d6849;
+  border-left-color: var(--accent2);
+  background: linear-gradient(90deg, #fff0a238, transparent 70%);
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+}
+
+/* Code rests on a shaded leaf panel, keeping the base light syntax
+   palette. */
+pre {
+  --code-bg: #e7f1d6;
+
+  background: linear-gradient(160deg, #f0f7e2, #ddebc9);
+  border: 1px solid var(--line);
+  box-shadow:
+    inset 0 1px #ffffff99,
+    0 0.2rem 0.6rem #4f913b1a;
+}
+
+.copy {
+  background: linear-gradient(180deg, #f6faec, #e2efcf);
+  border-color: var(--line);
+}
+
+/* Tables: a rounded piece of the landscape. The base's header-gradient
+   hooks get sky→grass colors and the cell wash tints green; soft corners
+   and a grassy shadow replace the old hard grid. */
+table {
+  --table-head-a: #fdfccd88;
+  --table-head-b: #ece9ba88;
+  --table-tint: var(--accent2);
+
+  border-collapse: separate;
+  border-spacing: 0;
+  border-radius: 0.7rem;
+  overflow: clip;
+  box-shadow: 0 0.1rem 0.5rem #4f913b88;
+}
+
+th {
+  color: #2c4a2f;
+}
+
+/* A sun-kissed sheen on hover, fading in over the cell wash. */
+tbody td {
+  transition: background-color 0.2s;
+}
+
+tbody tr:hover td {
+  background-color: #fff0a238;
+}
+
+figcaption,
+.dateline,
+.footnote {
+  color: var(--muted);
+}
+
+/* Editor chrome inherits the meadow rather than the base white. */
+.editor-root.overlay {
+  background: linear-gradient(160deg, #eef7dd, #d9eec5);
+}
+
+/* The page transition exposes summer color around the rotating
+   snapshots. */
+::view-transition {
+  background: var(--bg);
+}

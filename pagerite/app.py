@@ -412,14 +412,16 @@ async def delete_file(name: str) -> None:
 
 @app.get("/_themes/{name}/{filename}")
 async def theme_file(name: str, filename: str, request: Request) -> Response:
-    """Serve a theme/banner-design stylesheet from pagerite/themes/{name}/.
+    """Serve a theme/banner-design file from pagerite/themes/{name}/.
 
-    Read from disk on every request (etag by mtime+size): theme files are
-    never built or content-hashed, so edits on disk show on the next page
-    load, in prod as well as dev.
+    Stylesheets plus any extra assets the CSS references (like summer's
+    grass.svg). Read from disk on every request (etag by mtime+size):
+    theme files are never built or content-hashed, so edits on disk show
+    on the next page load, in prod as well as dev.
     """
     if (
-        filename not in {"theme.css", "banner.css"}
+        "/" in filename
+        or filename.startswith(".")
         or "/" in name
         or name.startswith(".")
     ):
@@ -429,12 +431,15 @@ async def theme_file(name: str, filename: str, request: Request) -> Response:
         stat = path.stat()
     except FileNotFoundError:
         raise HTTPException(404) from None
+    if not path.is_file():
+        raise HTTPException(404)
     etag = f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304)
+    mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
     return Response(
         path.read_bytes(),
-        media_type="text/css",
+        media_type=mime,
         headers={"etag": etag, "cache-control": "no-cache"},
     )
 
