@@ -561,7 +561,7 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <section class="block" @paste="onBrandPaste">
+    <section class="block grow" @paste="onBrandPaste">
       <div class="block-head">
         <span class="field-label">brand code (replaces the brand link)</span>
         <button
@@ -581,7 +581,7 @@ onUnmounted(() => {
       <div ref="brandEl" class="brand-cm" />
     </section>
 
-    <section class="block">
+    <section class="block grow">
       <div class="block-head">
         <span class="field-label">custom CSS (applies to every page, on top of the theme)</span>
       </div>
@@ -595,6 +595,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+  background: var(--surface);
 }
 
 .block {
@@ -604,6 +605,13 @@ onUnmounted(() => {
   padding: 0.5rem 1rem;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
+}
+
+/* Editor blocks (brand HTML, custom CSS) share the leftover panel height
+   equally; their CodeMirror windows fill the block and scroll internally. */
+.block.grow {
+  flex: 1;
+  min-height: 7rem;
 }
 
 .block-head {
@@ -775,42 +783,29 @@ onUnmounted(() => {
   border-color: var(--accent);
 }
 
-/* Small CodeMirror window for the custom brand HTML; scrolls internally. */
-.brand-cm {
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.brand-cm :deep(.cm-editor) {
-  max-height: 7rem;
-  font-size: 0.85rem;
-}
-
-.brand-cm :deep(.cm-scroller) {
-  overflow: auto;
-}
-
-.brand-cm :deep(.cm-gutters) {
-  display: none;
-}
-
-/* CodeMirror window for site-wide custom CSS. */
+/* CodeMirror windows for the brand HTML and custom CSS: fill the growing
+   block, scroll internally. */
+.brand-cm,
 .css-cm {
+  flex: 1;
+  min-height: 0;
   border: 1px solid var(--line);
   border-radius: 4px;
   overflow: hidden;
 }
 
+.brand-cm :deep(.cm-editor),
 .css-cm :deep(.cm-editor) {
-  max-height: 12rem;
+  height: 100%;
   font-size: 0.85rem;
 }
 
+.brand-cm :deep(.cm-scroller),
 .css-cm :deep(.cm-scroller) {
   overflow: auto;
 }
 
+.brand-cm :deep(.cm-gutters),
 .css-cm :deep(.cm-gutters) {
   display: none;
 }
