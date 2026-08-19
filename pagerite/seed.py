@@ -44,6 +44,8 @@ Images and files uploaded anywhere land in a content-addressed store served from
 """
 
 MD_BASICS = """\
+# Markdown Basics
+
 Every feature below is shown twice: first the Markdown source, then how it renders.
 
 ## Headings and text
@@ -122,6 +124,8 @@ def greet(name: str) -> str:
 """
 
 MD_EXTENSIONS = """\
+# Markdown Extensions
+
 Markdown extensions enabled on this site, source first, then rendered.
 
 ## Footnotes
@@ -351,14 +355,14 @@ PAGES: dict[str, tuple[str, str, dict[str, bytes], str, float, str | None]] = {
     "about": ("About", ABOUT, {}, "", 3, None),
     "docs/editing": ("Editing This Site", EDITING, {}, "", 1, None),
     "docs/markdown/basics": (
-        "Markdown Basics",
+        "Basics",
         MD_BASICS,
         {},
         "",
         1,
         None,
     ),
-    "docs/markdown/extensions": ("Markdown Extensions", MD_EXTENSIONS, {}, "", 2, None),
+    "docs/markdown/extensions": ("Extensions", MD_EXTENSIONS, {}, "", 2, None),
     "docs/markdown/images-and-layout": (
         "Images and Layout",
         MD_LAYOUT,
