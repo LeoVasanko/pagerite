@@ -354,6 +354,22 @@ body.editing #main {
   line-height: 1.0;
 }
 
+/* Third level (and deeper): nested like the first level of article lists —
+   slight indent, emoji marker — while the sidebar's own top level (the
+   section's direct children) stays plain, without indicators or indent. */
+#sidebar ul ul {
+  gap: 0.5em;
+  margin-top: 0.5em;
+  padding-inline-start: 1em;
+}
+
+#sidebar ul ul li::before {
+  content: "🔹";
+  display: inline-block;
+  margin-left: -1.3em;
+  width: 1.3em;
+}
+
 #sidebar a {
   text-decoration: none;
   color: var(--muted);
