@@ -4,7 +4,6 @@
 //
 // Also: scroll-reveal effects and code copy buttons. These need no
 // support from the article itself and are re-applied after each swap.
-import { showAuthIframe } from 'paskia'
 import { OverlayScrollbars } from "overlayscrollbars";
 import "overlayscrollbars/overlayscrollbars.css";
 
@@ -47,14 +46,13 @@ import "overlayscrollbars/overlayscrollbars.css";
   // /_api/settings endpoint: the same reverse proxy that gates /_api returns
   // 401/403 here, and a 200 means the permission is present.
   //
-  // When Paskia SSO is in use, 401/403 responses carry `auth.iframe`, which
-  // we use to open the login/profile dialogs inline instead of navigating
-  // away. A separate probe to /auth/api/settings tells us whether Paskia is
-  // available at all; if it isn't, we treat the site as dev/no-proxy and
-  // leave editing open.
+  // When Paskia SSO is in use (probed via /auth/api/settings), the banner
+  // corner gets a plain link to /auth/ — 🔑 log in for anonymous visitors,
+  // 🔐 profile when logged in. Normal navigation: Paskia does not support
+  // being iframed, and history.back() returns to the page as-is (the
+  // pageshow handler below re-probes auth to refresh the pens).
   let ssoAvailable = false;
   let isAdmin = false;
-  let loginIframeUrl = null;
   let editorMeta = null;
 
   function makePen(mode) {
@@ -86,34 +84,13 @@ import "overlayscrollbars/overlayscrollbars.css";
     }
   }
 
-  function makeLoginButton(url) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "login-link";
-    btn.title = "log in";
-    btn.textContent = "🔑";
-    btn.addEventListener("click", async () => {
-      try {
-        await showAuthIframe(url);
-        // Successful login: refresh the auth UI (may now show edit pens).
-        setupAuth();
-      } catch {
-        // Cancelled or error: leave the button in place.
-      }
-    });
-    return btn;
-  }
-
-  function makeProfileButton() {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "profile-link";
-    btn.title = "profile";
-    btn.textContent = "🔐";
-    btn.addEventListener("click", () => {
-      showAuthIframe("/auth/").catch(() => {});
-    });
-    return btn;
+  function makeAuthLink(admin) {
+    const a = document.createElement("a");
+    a.className = admin ? "profile-link" : "login-link";
+    a.href = "/auth/";
+    a.title = admin ? "profile" : "log in";
+    a.textContent = admin ? "\u{1F510}" : "\u{1F511}";
+    return a;
   }
 
   function renderAuthUi() {
@@ -130,13 +107,7 @@ import "overlayscrollbars/overlayscrollbars.css";
         pens.append(makePen("banner"));
         pens.append(makePen("site"));
       }
-      if (isAdmin && ssoAvailable) {
-        pens.append(makeProfileButton());
-      } else if (!isAdmin && ssoAvailable && loginIframeUrl) {
-        pens.append(makeLoginButton(loginIframeUrl));
-      } else if (!isAdmin && ssoAvailable) {
-        pens.append(makeProfileButton());
-      }
+      if (ssoAvailable) pens.append(makeAuthLink(isAdmin));
       banner.after(pens);
     }
     if (canEdit) injectPagePen();
@@ -160,22 +131,20 @@ import "overlayscrollbars/overlayscrollbars.css";
 
     // Check whether the current session has pagerite:admin.
     isAdmin = false;
-    loginIframeUrl = null;
-    let status = 0;
     try {
-      const res = await fetch("/_api/settings");
-      status = res.status;
-      if (status === 401) {
-        const data = await res.json().catch(() => ({}));
-        loginIframeUrl = data.auth?.iframe || null;
-      }
+      isAdmin = (await fetch("/_api/settings")).status === 200;
     } catch {
       // No auth proxy / dev.
     }
-    if (status === 200) isAdmin = true;
 
     renderAuthUi();
   }
+
+  // Returning to the page via history back/forward may restore a cached
+  // copy whose auth UI predates a login/logout — re-probe and re-render.
+  addEventListener("pageshow", (ev) => {
+    if (ev.persisted) setupAuth();
+  });
 
   function runScripts(root) {
     // Scripts inserted via DOM swapping do not execute; re-create them.

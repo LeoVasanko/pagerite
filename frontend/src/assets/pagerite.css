@@ -316,13 +316,15 @@ body.editing #main {
   gap: 0.6rem;
 }
 
-.editor-pens button {
+.editor-pens button,
+.editor-pens a {
   position: static;
   font: inherit;
   border: none;
   cursor: pointer;
   background: none;
   padding: 0;
+  text-decoration: none;
 }
 
 #sidebar {
@@ -488,17 +490,17 @@ article h1 .edit-link {
   opacity: 1;
 }
 
-/* Login/profile buttons injected by pagerite.js when Paskia SSO is in use.
+/* Login/profile links injected by pagerite.js when Paskia SSO is in use.
    They live inside the .editor-pens flex container in the banner's top-right
    corner and inherit its reset; keep only their opacity/text-shadow tweaks. */
-button.login-link,
-button.profile-link {
+.editor-pens a.login-link,
+.editor-pens a.profile-link {
   opacity: 0.7;
   text-shadow: 0 0 0.1em black;
 }
 
-button.login-link:hover,
-button.profile-link:hover {
+.editor-pens a.login-link:hover,
+.editor-pens a.profile-link:hover {
   opacity: 1;
 }
 
