@@ -5,7 +5,9 @@ single author is trusted. Extensions: tables and strikethrough (from the
 "default" preset), footnotes, definition lists, task lists,
 brace-attributes (`{.class width=300}` on any element, images in
 particular) and admonitions (``!!! note Title`` with an indented body —
-note/tip/warning/etc., the title optional). Bare URLs autolink (GFM), and
+note/tip/warning/etc., the title optional). Bare URLs autolink (GFM), with
+the ``https://`` scheme hidden in the link text (``http://`` and other
+schemes stay visible; manually labelled links are untouched), and
 ``H~2~O`` / ``x^2^`` give sub/superscripts.
 
 markdown-it's typographer is enabled, so body text gets SmartyPants-style
@@ -130,6 +132,23 @@ def _tag_task_checkboxes(state) -> None:
                 index += 1
 
 
+def _shorten_autolinks(state) -> None:
+    """Hide the https:// scheme in the text of bare autolinked URLs.
+
+    GFM linkify sets the link text to the URL itself; only those links
+    (markup "autolink") are shortened. http:// and other schemes stay
+    visible, and manually labelled links keep whatever label was written.
+    """
+    for token in state.tokens:
+        if token.type != "inline" or not token.children:
+            continue
+        for i, child in enumerate(token.children):
+            if child.type == "link_open" and child.markup == "autolink":
+                text = token.children[i + 1]
+                if text.type == "text" and text.content.startswith("https://"):
+                    text.content = text.content.removeprefix("https://")
+
+
 md = (
     MarkdownIt(
         "default",
@@ -152,6 +171,7 @@ md = (
 md.add_render_rule("image", _image_rule)
 md.core.ruler.push("unwrap_lone_figures", _unwrap_lone_figures)
 md.core.ruler.push("tag_task_checkboxes", _tag_task_checkboxes)
+md.core.ruler.push("shorten_autolinks", _shorten_autolinks)
 
 
 def render(
