@@ -108,7 +108,14 @@ not for the public pages. See `docs/design-principles.md` for the design.
     rendering straight from the `Data.menu` tree (siblings sorted by
     `Node.order`; nav links to content-less labels point at their first
     child via `first_leaf`, the first published descendant with content),
-    and page/404 rendering. If the markdown contains its own h1, the page title
+    and page/404 rendering. Content pages get SEO/social meta (description,
+    canonical link, Open Graph + twitter card) from heuristics over the
+    rendered article: the description is the first paragraph's text, the
+    share image prefers a `{.hero}`-classed image, then the first raster
+    `<img>`, then the first SVG; the first `<video>` yields `og:video`;
+    URLs are made absolute with the request base URL;
+    `article:published/modified_time` come from `Node.created`/`modified`.
+    If the markdown contains its own h1, the page title
     is NOT rendered as an additional h1 (it still supplies <title> and nav
     labels). The navbar holds
     top-level items only; the current section's subitems go to a left

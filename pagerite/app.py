@@ -700,7 +700,7 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
         if request.headers.get("if-none-match") == etag:
             return Response(status_code=304)
         return HTMLResponse(
-            views.render_page(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html),
+            views.render_page(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html, str(request.base_url).rstrip("/")),
             headers={
                 "etag": etag,
                 "last-modified": _http_date(node.modified),

@@ -15,8 +15,10 @@ own URL renders a placeholder page (render_category).
 """
 
 from pathlib import Path
+from html import unescape
 import json
 import os
+import re
 
 from html5tagger import HTML, Document, E, Template
 
@@ -114,6 +116,7 @@ def _layout(
     theme: str = "",
     banner_design: str = "",
     favicon: str = "",
+    social: dict[str, str] | None = None,
 ) -> Template:
     """Page layout template with standard asset URLs and ES-module scripts.
 
@@ -126,11 +129,22 @@ def _layout(
     In dev, pagerite.js re-appends the backend-rendered theme/design links
     (and the custom CSS) after the Vite-injected base styles, keeping this
     order intact.
+
+    ``social`` maps meta keys to contents: ``og:*``/``article:*`` go out as
+    property attributes, everything else (description, twitter:*) as name.
     """
     doc = Document(E.Title, lang="en")
     # Responsive layout (see the 48rem breakpoint in pagerite.css) needs
     # the real device width, not the default 980px layout viewport.
     doc.meta(name="viewport", content="width=device-width, initial-scale=1")
+    for key, value in (social or {}).items():
+        if value:
+            if key.startswith(("og:", "article:")):
+                doc.meta(property=key, content=value)
+            elif key == "canonical":
+                doc.link(rel="canonical", href=value)
+            else:
+                doc.meta(name=key, content=value)
     # A custom favicon (from the site editor) is linked explicitly; without
     # one, browsers fall back to the build's /favicon.ico by convention.
     if favicon:
@@ -426,6 +440,87 @@ def page_content(menu: dict[str, Node], path: str) -> HTML:
     return HTML(str(doc))
 
 
+_FIRST_P = re.compile(r"<p[^>]*>(.*?)</p>", re.S)
+_TAG = re.compile(r"<[^>]+>")
+_IMG_TAG = re.compile(r"<img\b[^>]*>")
+_VIDEO_TAG = re.compile(r"<video\b[^>]*>")
+_ATTR_SRC = re.compile(r'src="([^"]+)"')
+_ATTR_CLASS = re.compile(r'class="([^"]*)"')
+
+
+def _share_media(html: str, base_url: str) -> tuple[str, str]:
+    """(image, video) share URLs from the rendered article.
+
+    Image preference: an image with class "hero" (author override, may
+    appear anywhere in the article), then the first raster image (SVGs
+    rasterize poorly or not at all on many social scrapers), then the
+    first SVG. Video: the first <video> — og:video is in the OGP spec and
+    honored mainly by Facebook; X/Twitter ignores it. Absolute URLs are
+    built from the request base, scrapers cannot use relative ones.
+    """
+    if not base_url:
+        return "", ""
+
+    def absolute(src: str) -> str:
+        src = unescape(src)
+        return src if src.startswith(("http://", "https://")) else f"{base_url}{src}"
+
+    hero = raster = svg = video = ""
+    for tag in _IMG_TAG.findall(html):
+        if not (src := _ATTR_SRC.search(tag)):
+            continue
+        src = src.group(1)
+        cls = _ATTR_CLASS.search(tag)
+        if cls and "hero" in cls.group(1).split():
+            hero = src
+            break
+        if src.lower().split("?")[0].endswith(".svg"):
+            svg = svg or src
+        else:
+            raster = raster or src
+            # Keep scanning: a later hero still wins.
+    for tag in _VIDEO_TAG.findall(html):
+        if m := _ATTR_SRC.search(tag):
+            video = m.group(1)
+            break
+    image = hero or raster or svg
+    return (absolute(image) if image else "", absolute(video) if video else "")
+
+
+def _social_meta(
+    node: Node, path: str, title: str, html: str, brand: str, base_url: str,
+) -> dict[str, str]:
+    """Open Graph/Twitter/SEO meta tags for a content page.
+
+    Heuristics over the rendered article: the description is the first
+    paragraph's text (truncated at ~200 chars on a word boundary), the
+    share image the article's first <img> — authors lead with their most
+    representative figure. Absolute URLs are built from the request's base
+    (social scrapers cannot use relative ones).
+    """
+    url = f"{base_url}/{path}" if base_url else ""
+    m = _FIRST_P.search(html)
+    text = unescape(_TAG.sub("", m.group(1) if m else ""))
+    text = " ".join(text.split())
+    if len(text) > 200:
+        text = text[:200].rsplit(" ", 1)[0] + "…"
+    image, video = _share_media(html, base_url)
+    return {
+        "description": text,
+        "canonical": url,
+        "og:type": "article",
+        "og:title": title,
+        "og:description": text,
+        "og:url": url,
+        "og:site_name": brand,
+        "og:image": image,
+        "og:video": video,
+        "article:published_time": node.created.isoformat(),
+        "article:modified_time": node.modified.isoformat(),
+        "twitter:card": "summary_large_image" if image else "summary",
+    }
+
+
 def render_page(
     menu: dict[str, Node],
     path: str,
@@ -434,18 +529,24 @@ def render_page(
     theme: str = "",
     favicon: str = "",
     brand_html: str = "",
+    base_url: str = "",
 ) -> str:
     """Render a full HTML page for the slug path."""
     node = resolve(menu, path)[-1]
     title = _title(path.rpartition("/")[2], node)
+    main = page_content(menu, path)
+    social = _social_meta(node, path, title, str(main), brand, base_url)
     return str(
-        _layout(_page_assets(), custom_css, theme, banner_design(menu, path, theme), favicon)(
+        _layout(
+            _page_assets(), custom_css, theme, banner_design(menu, path, theme),
+            favicon, social,
+        )(
             Title=f"{title} – {brand}" if brand else title,
             Brand=_brand_link(brand, brand_html),
             Nav=nav_html(menu, path),
             Sidebar=sidebar_html(menu, path),
             Banner=banner_html(menu, path, theme),
-            Main=page_content(menu, path),
+            Main=main,
         ),
     )
 
