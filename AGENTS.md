@@ -125,8 +125,8 @@ not for the public pages. See `docs/design-principles.md` for the design.
     and their nav links point at their first child page. Dynamic regions have stable ids
     (`#page-banner`, `#nav`, `#sidebar`, `#main`) for fetch-navigation swaps
     (`#sidebar` may be absent on either side of a swap).
-  - `seed.py` — demo content written on startup for paths missing from the
-    database (never overwrites existing pages).
+  - `seed.py` — demo content written only when the database is first
+    created, via a `@kanta.bootstrap` handler in `app.py`.
   - `frontend/src/` — the Vue editor and public-page entries.
     - `main.js` — Vue editor app entry, mounts the tabbed EditorShell.
     - `pagerite.js` — public page entry; runs fetch-navigation, scroll-reveal,
@@ -141,9 +141,11 @@ not for the public pages. See `docs/design-principles.md` for the design.
       learn the current session's admin status. The same reverse proxy that
       gates `/_api` returns 401 for anonymous users, 403 for users without
       the admin permission, and 200 for admins. When Paskia is detected, a
-      🔑 login button (anonymous) or 🔐 profile button (logged in) is shown in
-      the banner corner; both open Paskia's iframe dialog via `showAuthIframe`
-      instead of navigating away. Admins also get the 🖊️ page/banner edit pens
+      🔑 login link (anonymous) or 🔐 profile link (logged in) is shown in
+      the banner corner; both are plain `<a href="/auth/">` links (Paskia
+      does not support being iframed, so we navigate normally), and a
+      `pageshow` handler re-probes auth when history navigation restores a
+      cached page. Admins also get the 🖊️ page/banner edit pens
       and a ⚙️ site-settings pen (asset URLs from the
       `pagerite:editor-src`/`-css` meta tags). If no Paskia SSO is
       detected (dev/no proxy), editing is left open. Pages themselves render

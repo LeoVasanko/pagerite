@@ -121,24 +121,26 @@ def _migrate_legacy() -> None:
         data.version += 1
 
 
+@kanta.bootstrap
+def _seed(data: Data) -> None:
+    """Write the demo pages on database creation (never on existing dbs)."""
+    for path in seed.PAGES:
+        title, markdown, files, banner, order, design = seed.PAGES[path]
+        for orig, body in files.items():
+            markdown, banner = _store_seed_file(markdown, banner, orig, body)
+        node = _ensure(data.menu, path)
+        node.title = title
+        node.content = markdown
+        node.banner = banner
+        node.banner_design = design
+        node.order = order
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Open the database, migrate/seed content, load assets."""
+    """Open the database, migrate legacy content, load assets."""
     await kanta.open()
     _migrate_legacy()
-    missing = [p for p in seed.PAGES if resolve(data.menu, p) is None]
-    if missing:
-        with kanta.transaction("seed missing pages"):
-            for path in missing:
-                title, markdown, files, banner, order, design = seed.PAGES[path]
-                for orig, body in files.items():
-                    markdown, banner = _store_seed_file(markdown, banner, orig, body)
-                node = _ensure(data.menu, path)
-                node.title = title
-                node.content = markdown
-                node.banner = banner
-                node.banner_design = design
-                node.order = order
     await frontend.load()
     yield
     await kanta.close()
