@@ -14,7 +14,22 @@ export const cmTheme = EditorView.theme({
     color: "var(--text)",
   },
   ".cm-scroller": { fontFamily: '"Fira Code", monospace' },
-  ".cm-content": { caretColor: "var(--text)" },
+  // Fira Code in CodeMirror: set the font on .cm-content (not only the
+  // scroller) and force every span inside to inherit it, so highlighting
+  // spans can't drift to a different font/metrics. Ligatures are disabled
+  // entirely — CodeMirror measures per character, and ligature glyphs
+  // render wider than the measured sum of their parts.
+  ".cm-content": {
+    caretColor: "var(--text)",
+    fontFamily: '"Fira Code", monospace',
+    fontVariantLigatures: "none",
+    fontFeatureSettings: '"calt" 0',
+    letterSpacing: "normal",
+  },
+  ".cm-content *": {
+    fontFamily: "inherit",
+    letterSpacing: "inherit",
+  },
   ".cm-cursor": { borderLeftColor: "var(--text)" },
   // basicSetup's active-line highlight assumes a dark theme.
   ".cm-activeLine": { backgroundColor: "transparent" },
