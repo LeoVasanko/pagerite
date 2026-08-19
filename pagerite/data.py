@@ -91,8 +91,8 @@ class Data(msgspec.Struct):
     #: banner artwork, next to the nav. Empty = the plain brand link.
     brand_html: str = ""
     #: Active theme name (empty = none/base only). Themes live in
-    #: frontend/src/assets/themes/{theme}/theme.css, with their banner
-    #: artwork at pagerite/themes/{theme}/banner.svg (inlined server-side).
+    #: pagerite/themes/{theme}/ (theme.css and/or banner.css/banner.svg/
+    #: banner.html), served by the backend from disk.
     theme: str = "purple"
     #: Raw site-wide custom CSS, injected inline in every page <head>.
     #: Trusted author content; not sanitized.

@@ -130,7 +130,11 @@ def _seed(data: Data) -> None:
             markdown, banner = _store_seed_file(markdown, banner, orig, body)
         node = _ensure(data.menu, path)
         node.title = title
-        node.content = markdown
+        # Empty markdown means a pure category label (e.g. "showcase",
+        # seeded only to carry a banner design): leave content as None so
+        # the node renders the placeholder and nav points at its children.
+        if markdown:
+            node.content = markdown
         node.banner = banner
         node.banner_design = design
         node.order = order
