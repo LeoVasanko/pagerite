@@ -1,74 +1,37 @@
 <script setup>
-// Site editor: site-wide brand, banner HTML for the current page
-// (previewed into the real #page-banner region, so you see exactly which
-// banner you're editing) and the draggable site structure tree. Opened
-// from the pen on the banner. Everything saves immediately as you edit —
-// no save button, no edit mode. Focusing a page's row navigates to it in
-// place (no transitions).
-//
-// The tree comes from the server nested (GET /_api/pages); every node is
-// real — a label with a title and slug, with content (landing page) or
-// without (category whose URL renders a placeholder page). The front page
-// is a top-level row with an empty slug, not the parent of the others.
-import { computed, onMounted, onUnmounted, provide, ref, watch } from 'vue'
-import StructureTree from './StructureTree.vue'
+// Site settings tab: site-wide brand, custom brand HTML, theme, favicon,
+// custom CSS and fonts. The site structure tree lives in StructureEditor.
+// Everything saves immediately as you edit — no save button, no edit mode.
+import { computed, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { EditorView, basicSetup } from 'codemirror'
-import { EditorState, Compartment } from '@codemirror/state'
-import { placeholder } from '@codemirror/view'
+import { EditorState } from '@codemirror/state'
 import { css } from '@codemirror/lang-css'
 import { html } from '@codemirror/lang-html'
 import { cmHighlight, cmTheme } from './cmtheme'
-import { slugify } from './slugify'
+import { loadPlain, runScripts } from './swapdoc'
 
 const props = defineProps({
   pagePath: { type: String, default: '' },
 })
-const emit = defineEmits(['close'])
+// close/path-change are wired by EditorShell; this tab never emits them.
+defineEmits(['close', 'pathChange'])
 
 const path = ref('')
-const banner = ref('')
 const saveError = ref('')
-const tree = ref([])
-const fileInput = ref(null)
-const bannerEl = ref(null)
-
-let ws = null
-let pendingSave = null
-let reconnectTimer = null
-let reconnectDelay = 2000
-const MAX_RECONNECT_DELAY = 16000
-let everConnected = false
-let view = null      // CodeMirror for the banner HTML
-let syncing = false  // set while replacing the document programmatically
-const bannerPh = new Compartment()  // placeholder shows the inherited source
+const brandInput = ref(null)
+const brandEl = ref(null)
+const cssEl = ref(null)
 
 let cssView = null      // CodeMirror for the site-wide custom CSS
 let cssSyncing = false  // set while replacing the CSS document programmatically
 const customCss = ref('')
-const cssEl = ref(null)
 
 let brandView = null      // CodeMirror for the custom brand HTML
 let brandSyncing = false  // set while replacing the document programmatically
 const brandHtml = ref('')
-const brandEl = ref(null)
-const brandInput = ref(null)
 
 function normPath(p) {
   return p.trim().replace(/^\/+|\/+$/g, '')
-}
-
-function send(msg) {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(msg))
-  } else {
-    ensureConnected()
-  }
-}
-
-function ensureConnected() {
-  if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
-    connect()
-  }
 }
 
 // Debounce per key: text edits save while typing, without a request per
@@ -79,236 +42,21 @@ function debounce(key, fn, ms = 600) {
   timers[key] = setTimeout(fn, ms)
 }
 
-// Banner saves are fire-and-forget, with the pending save resent if the
-// socket reconnects mid-edit.
-function save() {
-  const msg = { type: 'save', path: normPath(path.value), banner: banner.value }
-  pendingSave = msg
-  send(msg)
-}
-
-function close() {
-  emit('close')
-}
-
-function openPath(p) {
-  path.value = p
-  send({ type: 'open', path: p })
-}
-
-// --- In-place navigation (no transitions, replaceState) ------------------
-function swapRegions(doc) {
-  for (const id of ['page-banner', 'nav', 'main']) {
-    const fresh = doc.getElementById(id)
-    const el = document.getElementById(id)
-    if (fresh && el) el.replaceWith(document.importNode(fresh, true))
-  }
-  // #sidebar is omitted entirely when the section has no sub-navigation,
-  // so it may be absent on either side: replace, insert, or remove.
-  const freshSidebar = doc.getElementById('sidebar')
-  const curSidebar = document.getElementById('sidebar')
-  if (freshSidebar && curSidebar) {
-    curSidebar.replaceWith(document.importNode(freshSidebar, true))
-  } else if (freshSidebar) {
-    document.getElementById('main')?.before(document.importNode(freshSidebar, true))
-  } else if (curSidebar) {
-    curSidebar.remove()
-  }
-  // The brand lives in the header, outside the swappable regions, and is
-  // absent entirely when neither a brand nor custom brand HTML is set. A
-  // plain link keeps its element (text swap only, preserving the shrink-
-  // to-fit observers); anything else (custom HTML wrapper) is replaced.
-  const freshBrand = doc.getElementById('brand')
-  const curBrand = document.getElementById('brand')
-  if (freshBrand && curBrand && freshBrand.tagName === 'A' && curBrand.tagName === 'A') {
-    curBrand.textContent = freshBrand.textContent
-  } else if (freshBrand && curBrand) {
-    curBrand.replaceWith(document.importNode(freshBrand, true))
-    runScripts(document.getElementById('brand'))
-  } else if (curBrand) {
-    curBrand.remove()
-  } else if (freshBrand) {
-    document.getElementById('nav')?.before(document.importNode(freshBrand, true))
-    runScripts(document.getElementById('brand'))
-  }
-  // Site-wide custom CSS is in <head> and must be swapped too.
-  const freshUserStyle = doc.getElementById('pagerite-user')
-  const curUserStyle = document.getElementById('pagerite-user')
-  if (freshUserStyle && curUserStyle) {
-    curUserStyle.textContent = freshUserStyle.textContent
-  } else if (freshUserStyle) {
-    document.head.appendChild(document.importNode(freshUserStyle, true))
-  } else if (curUserStyle) {
-    curUserStyle.remove()
-  }
-  // Theme and other public stylesheets live in <head>, rendered with stable
-  // ids by the backend; sync them positionally so the custom CSS (rendered
-  // last) always keeps winning by order. Diff-based: unchanged sheets keep
-  // their elements, so their @keyframes are never torn down (re-creating
-  // keyframes would replay the editor's slide-in animation).
-  const freshLinks = [...doc.head.querySelectorAll('link[rel="stylesheet"]')]
-  const freshIds = new Set(freshLinks.map((l) => l.id))
-  for (const link of [...document.head.querySelectorAll('link[rel="stylesheet"]')]) {
-    if (!link.dataset.pagerite && !freshIds.has(link.id)) link.remove()
-  }
-  // Insert missing sheets in the fresh document's order, each right after
-  // its predecessor's element. The first sheet rendered is always the base
-  // CSS, so its link doubles as the fallback anchor when nothing matched yet
-  // (e.g. no theme was selected before and the position is otherwise lost).
-  let anchor = null
-  for (const link of freshLinks) {
-    const cur = link.id && document.getElementById(link.id)
-    if (cur && cur.href === link.href) {
-      anchor = cur
-      continue
-    }
-    const el = document.importNode(link, true)
-    // Same id, new URL (theme switch): replace in place, keeping position.
-    if (cur) cur.replaceWith(el)
-    else if (anchor) anchor.after(el)
-    else document.getElementById('pagerite-base')?.after(el) ?? document.head.append(el)
-    anchor = el
-  }
-  // The editor keeps its own title while open; only inherit the server title
-  // when navigating outside the editor (e.g. fetch-navigation swaps).
-  if (!document.body.classList.contains('editing')) {
-    document.title = doc.title
-  }
-}
-
-async function loadPlain(p) {
-  let doc
-  let finalUrl = `/${p}`
-  try {
-    const res = await fetch(finalUrl)
-    const type = res.headers.get('content-type') || ''
-    if (!type.includes('text/html')) return
-    // Category and missing URLs render a placeholder 404 page — fine to
-    // swap in (new pages are created by editing them).
-    if (res.redirected) finalUrl = res.url
-    doc = new DOMParser().parseFromString(await res.text(), 'text/html')
-  } catch { return }
-  if (!doc.getElementById('main')) return
-  swapRegions(doc)
-  history.replaceState(null, '', finalUrl)
-  runScripts(document.getElementById('page-banner'))
-  runScripts(document.getElementById('main'))
-  dispatchEvent(new CustomEvent('pagerite:preview')) // re-inject + re-tuck the edit pens
-  // The swap brought in the server-rendered (inherited) banner; overlay
-  // the page's own banner if one is being edited.
-  if (banner.value.trim()) previewBanner()
-}
-
-// Tree row focus: switch the edited page and show it, skipping transitions.
-async function navigate(p) {
-  openPath(p)
-  await loadPlain(p)
-}
-
-// If the currently edited page moved (rename/move of itself or an
-// ancestor), follow it to the new path.
-function followMove(oldPath, newPath) {
-  if (path.value === oldPath) navigate(newPath)
-  else if (oldPath && path.value.startsWith(`${oldPath}/`)) {
-    navigate(newPath + path.value.slice(oldPath.length))
-  }
-}
-
-// --- New page flow -------------------------------------------------------
-// The ➕ row at the end of any list adds a *pending* row there: a
-// local-only item that can be dragged into place before anything is
-// filled in. It is persisted only on commit (✓/Enter), at wherever it
-// currently sits.
-const pending = ref(null)
-
-function newPage(list) {
-  if (pending.value) return // one at a time
-  pending.value = {
-    slug: '',
-    path: '',
-    title: '',
-    order: 0,
-    published: true,
-    has_content: true,
-    children: [],
-    pending: true,
-  }
-  list.push(pending.value)
-}
-
-// Where does the pending row currently sit? -> {parentPath, list, index}.
-function locatePending(nodes, parentPath) {
-  const i = nodes.indexOf(pending.value)
-  if (i >= 0) return { parentPath, list: nodes, i }
-  for (const n of nodes) {
-    const found = locatePending(n.children, n.path)
-    if (found) return found
-  }
-  return null
-}
-
-function discardPending() {
-  const loc = locatePending(tree.value, '')
-  if (loc) loc.list.splice(loc.i, 1)
-  pending.value = null
-}
-
-async function commitPending() {
-  const node = pending.value
-  if (!node) return
-  // Empty slug: derive one from the title (transliterated to ASCII).
-  const slug = slugify(node.slug.trim()) || slugify(node.title)
-  if (!slug) {
-    return
-  }
-  const loc = locatePending(tree.value, '')
-  const parentPath = loc?.parentPath ?? ''
-  const newPath = parentPath ? `${parentPath}/${slug}` : slug
-  const res = await fetch(`/_api/pages/${newPath}`, {
-    method: 'PUT',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      title: node.title.trim() || slug,
-      markdown: '', // empty markdown creates an empty page (never deletes)
-      published: true,
-    }),
-  })
-  if (!res.ok) {
-    // Show the server's reason (e.g. a reserved file name); the pending
-    // row stays so it can be edited and committed again.
-    saveError.value = `⚠️ ${await errorDetail(res)}`
-    return
-  }
-  // Place it exactly where the row was dropped: a fresh order key halfway
-  // between its new siblings (the PUT appended it at the end).
-  if (loc) {
-    const prev = loc.list[loc.i - 1]
-    const next = loc.list[loc.i + 1]
-    const order = prev && next ? (prev.order + next.order) / 2
-      : prev ? prev.order + 1
-      : next ? next.order - 1
-      : 1
-    await postStructure({ path: newPath, order })
-  } else {
-    saveError.value = ''
-  }
-  pending.value = null
-  await refreshPages()
-  await navigate(newPath)
-  // Hand over to the page editor for the actual writing: click the fresh
-  // page's pen (pagerite.js swaps the panel; CodeMirror focuses on mount).
-  document.querySelector('#main article button.edit-link')?.click()
+// Human-readable reason from a failed API call (FastAPI errors carry a
+// JSON {detail}), falling back to a generic message.
+async function errorDetail(res) {
+  const body = await res.json().catch(() => null)
+  return body?.detail || 'changes could not be saved'
 }
 
 // --- Site-wide brand (header link + <title> suffix) ----------------------
 // Edits apply to the live page immediately and save while typing. An
 // empty brand removes the header link and the title suffix entirely.
 const brand = ref('')
-const theme = ref('purple')
-// Theme and banner-design options come from the backend (theme folders on
-// disk, see GET /_api/settings), so added themes need no frontend changes.
+const theme = ref('')
+// Theme options come from the backend (theme folders on disk, see GET
+// /_api/settings), so added themes need no frontend changes.
 const themeOptions = ref([{ value: '', label: 'none' }])
-const bannerDesigns = ref([])
 
 async function loadSettings() {
   try {
@@ -324,14 +72,14 @@ async function loadSettings() {
       { value: '', label: 'none' },
       ...(s.themes || []).map((t) => ({ value: t, label: t })),
     ]
-    bannerDesigns.value = s.banner_designs || []
   } catch { /* keep default */ }
 }
 
 // --- Favicon ---------------------------------------------------------------
-// Uploaded into the content-addressed file store (PUT /_api/settings/favicon)
-// and linked on every page as <link rel="icon">; empty falls back to the
-// build's /favicon.ico. Applies to the live page immediately.
+// Clicking the preview tile uploads a new one into the content-addressed
+// file store (PUT /_api/settings/favicon), linked on every page as
+// <link rel="icon">; empty falls back to the build's /favicon.ico. Applies
+// to the live page immediately.
 const favicon = ref('')
 const faviconInput = ref(null)
 
@@ -367,18 +115,7 @@ async function uploadFavicon(file) {
   }
 }
 
-async function removeFavicon() {
-  const res = await fetch('/_api/settings/favicon', { method: 'DELETE' })
-  if (res.ok) {
-    saveError.value = ''
-    favicon.value = ''
-    applyFavicon('')
-  } else {
-    saveError.value = `⚠️ ${await errorDetail(res)}`
-  }
-}
-
-// The site editor’s window title shows the site brand (or a generic label)
+// The site settings' window title shows the site brand (or a generic label)
 // plus the edit pen; the current article title is irrelevant here.
 function updateEditorTitle() {
   document.title = `${brand.value.trim() || 'Pagerite'} 🖊️`
@@ -443,10 +180,18 @@ async function uploadBrandMedia(file) {
   const tag = file.type.startsWith('video/')
     ? `<video src="${stored}" autoplay muted loop playsinline></video>`
     : `<img src="${stored}" alt="">`
-  const rest = stripBannerMedia(brandHtml.value)
+  const rest = stripBrandMedia(brandHtml.value)
   setBrandDocument(rest ? `${tag}\n${rest}` : tag)
   previewBrand()
   saveSettings()
+}
+
+function stripBrandMedia(html) {
+  // The brand has one piece of media: uploading replaces earlier img/video
+  // tags instead of stacking them. (Other HTML, e.g. canvas+script, stays.)
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  for (const el of doc.querySelectorAll('img, video')) el.remove()
+  return doc.body.innerHTML.trim()
 }
 
 function onBrandPaste(ev) {
@@ -462,10 +207,18 @@ function onBrandInput() {
   // Custom brand HTML wins over the plain text brand in the header.
   if (!brandHtml.value.trim()) applyBrand(brand.value)
   else updateEditorTitle()
-  debounce('brand', saveBrand)
+  debounce('brand', saveSettings)
 }
 
 watch(brand, updateEditorTitle, { immediate: true })
+watch(() => props.pagePath, (p) => { path.value = normPath(p) })
+onActivated(updateEditorTitle)
+
+// The shell stays mounted while hidden: when it is re-shown with this tab
+// active, restore the window title.
+function onEditorShown() {
+  if (document.body.dataset.editorMode === 'site') updateEditorTitle()
+}
 
 async function saveSettings(opts = {}) {
   const res = await fetch('/_api/settings', {
@@ -484,10 +237,6 @@ async function saveSettings(opts = {}) {
   } else {
     saveError.value = '⚠️ changes could not be saved'
   }
-}
-
-function saveBrand() {
-  saveSettings()
 }
 
 async function onThemeChange() {
@@ -544,11 +293,7 @@ function onCustomCssInput() {
   // Keep the font picker selection in sync with manual edits to the CSS.
   parseFonts(customCss.value)
   applyCustomCss(customCss.value)
-  debounce('custom-css', saveCustomCss, 400)
-}
-
-function saveCustomCss() {
-  saveSettings()
+  debounce('custom-css', saveSettings, 400)
 }
 
 function setCssDocument(text) {
@@ -663,332 +408,8 @@ function parseFonts(css) {
   fontBrand.value = get('brand')
 }
 
-// Two-step delete (no dialogs): the first click arms the row's button for
-// a few seconds, the second actually deletes.
-const arming = ref(null)
-let armTimer = null
-
-function armRemove(node) {
-  if (arming.value === node.path) {
-    clearTimeout(armTimer)
-    arming.value = null
-    removePage(node)
-  } else {
-    arming.value = node.path
-    clearTimeout(armTimer)
-    armTimer = setTimeout(() => { arming.value = null }, 3000)
-  }
-}
-
-async function removePage(node) {
-  const res = await fetch(`/_api/pages/${node.path}`, { method: 'DELETE' })
-  if (res.ok) {
-    saveError.value = ''
-    refreshPages()
-    const p = node.path
-    if (p === path.value || (p && path.value.startsWith(`${p}/`))) {
-      // The current page was deleted — or reduced to a category, which now
-      // renders a placeholder page. Either way, re-render from the server.
-      if (node.children.length) loadPlain(path.value)
-      else navigate('')
-    } else {
-      loadPlain(path.value) // refresh menus
-    }
-  } else {
-    saveError.value = '⚠️ changes could not be saved'
-  }
-}
-
-// --- Site structure tree (drag-and-drop ordering/moving) ----------------
-async function refreshPages() {
-  try {
-    tree.value = await (await fetch('/_api/pages')).json()
-  } catch { /* list stays stale; not fatal */ }
-}
-
-// Human-readable reason from a failed API call (FastAPI errors carry a
-// JSON {detail}), falling back to a generic message.
-async function errorDetail(res) {
-  const body = await res.json().catch(() => null)
-  return body?.detail || 'changes could not be saved'
-}
-
-async function postStructure(op) {
-  const res = await fetch('/_api/structure', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(op),
-  })
-  if (res.ok) {
-    saveError.value = ''
-    loadPlain(path.value) // refresh menus and content from the server
-  } else {
-    saveError.value = `⚠️ ${await errorDetail(res)}`
-  }
-  await refreshPages()
-  return res.ok
-}
-
-async function onReorder(parentPath, list, evt) {
-  // vuedraggable already mutated `list`; persist the moved item only: a
-  // fresh order key halfway between its new siblings (all other items
-  // keep theirs), plus the new path when the parent changed. The pending
-  // new-page row is local-only — its position is read at commit time.
-  const change = evt.moved || evt.added
-  if (!change) return
-  const el = change.element
-  if (el.pending) return
-  const i = change.newIndex
-  let prev, next
-  for (let j = i - 1; j >= 0 && !prev; j--) if (!list[j].pending) prev = list[j]
-  for (let j = i + 1; j < list.length && !next; j++) if (!list[j].pending) next = list[j]
-  const order = prev && next ? (prev.order + next.order) / 2
-    : prev ? prev.order + 1
-    : next ? next.order - 1
-    : 1
-  const newPath = parentPath ? `${parentPath}/${el.slug}` : el.slug
-  const op = { path: el.path, order }
-  if (newPath !== el.path) op.move_to = newPath
-  if (await postStructure(op) && op.move_to) followMove(el.path, op.move_to)
-}
-
-// Inline title/slug editing: rows are always editable. Title saves while
-// typing (debounced); the slug commits on blur/Enter, since it renames
-// the path (moving the whole subtree with it).
-function onTitleInput(node, ev) {
-  const title = ev.target.value.trim()
-  if (!title || title === node.title) return
-  debounce(`title:${node.path}`, async () => {
-    await postStructure({ path: node.path, title })
-  })
-}
-
-// The slug inputs are filtered as you type (StructureTree onSlugInput,
-// see slugify.js); the server re-validates and its reason is shown.
-async function commitSlug(node, ev) {
-  const slug = ev.target.value.trim()
-  if (slug === node.slug) return
-  const parent = node.path.split('/').slice(0, -1).join('/')
-  // Empty slug at top level = the front page (path "").
-  const moveTo = parent ? (slug ? `${parent}/${slug}` : parent) : slug
-  if (await postStructure({ path: node.path, move_to: moveTo })) {
-    followMove(node.path, moveTo)
-  } else {
-    ev.target.value = node.slug // rename failed: put the old slug back
-  }
-}
-
-provide('structureHandlers', {
-  current: () => path.value,
-  open: navigate,
-  arming: () => arming.value,
-  armRemove,
-  reorder: onReorder,
-  titleInput: onTitleInput,
-  commitSlug,
-  commitPending,
-  discardPending,
-  newPage,
-})
-
-// --- Banner design ---------------------------------------------------------
-// The page's banner design: null = inherit (nearest ancestor's setting,
-// then the theme's default), '' = explicitly none, otherwise a design
-// name. bannerDesignFrom tells where an inherited setting comes from
-// (null = the theme default), shown in the selector's inherit option.
-const bannerDesign = ref(null)
-const bannerDesignFrom = ref(null)
-// One-shot callback run on the next save ack (set by onBannerDesignChange,
-// whose re-render must not race the save it triggers).
-let refreshOnSave = null
-
-const inheritLabel = computed(() => {
-  if (bannerDesignFrom.value === null) {
-    return `inherit (theme: ${theme.value || 'none'})`
-  }
-  return `inherit (/${bannerDesignFrom.value})`
-})
-
-function onBannerDesignChange() {
-  // Saves immediately; the preview needs a server re-render (the design's
-  // inline SVG and its stylesheet link both change), and the re-fetch must
-  // wait for the save ack or it races ahead and renders the old design.
-  const msg = {
-    type: 'save',
-    path: normPath(path.value),
-    banner_design: bannerDesign.value,
-  }
-  pendingSave = msg
-  send(msg)
-  refreshOnSave = () => loadPlain(path.value)
-}
-
-// --- Banner editing ------------------------------------------------------
-// The banner HTML is edited in a small CodeMirror window (HTML syntax),
-// previewed into the real #page-banner region on every keystroke.
-function setDocument(text) {
-  syncing = true
-  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } })
-  syncing = false
-  banner.value = text
-}
-
-function runScripts(root) {
-  // Scripts injected via innerHTML do not execute; re-create them.
-  for (const old of root.querySelectorAll('script')) {
-    const s = document.createElement('script')
-    for (const a of old.attributes) s.setAttribute(a.name, a.value)
-    s.textContent = old.textContent
-    old.replaceWith(s)
-  }
-}
-
-function previewBanner() {
-  const el = document.getElementById('page-banner')
-  if (!el) return
-  if (banner.value.trim()) {
-    // Own banner code supplements the design: the inlined design artwork
-    // (marked with [data-design]) is detached while the author code is
-    // swapped in (so runScripts never re-runs the design's own scripts),
-    // then put back first — author code stays last so its styles win.
-    const artwork = [...el.querySelectorAll('[data-design]')]
-    for (const a of artwork) a.remove()
-    el.innerHTML = banner.value
-    runScripts(el)
-    el.prepend(...artwork)
-  } else {
-    // No banner code of its own: the region must show the inherited/design
-    // banner — re-render from the server (an empty write here would wipe it).
-    loadPlain(path.value)
-  }
-}
-
-function onBannerInput() {
-  previewBanner()
-  debounce('banner-html', save, 400)
-}
-
-function stripBannerMedia(html) {
-  // A banner has one piece of media: uploading replaces earlier img/video
-  // tags instead of stacking them. (Other HTML, e.g. canvas+script, stays.)
-  const doc = new DOMParser().parseFromString(html, 'text/html')
-  for (const el of doc.querySelectorAll('img, video')) el.remove()
-  return doc.body.innerHTML.trim()
-}
-
-async function uploadBannerMedia(file) {
-  // Banner media goes to the shared content store, like article images.
-  if (!file || !/^(image|video)\//.test(file.type)) return
-  const name = file.name.replace(/[^\w.-]/g, '-')
-  const res = await fetch(`/_api/files/${encodeURIComponent(name)}`, { method: 'PUT', body: file })
-  if (!res.ok) {
-    return
-  }
-  const { path: stored } = await res.json()
-  const tag = file.type.startsWith('video/')
-    ? `<video src="${stored}" autoplay muted loop playsinline></video>`
-    : `<img src="${stored}" alt="">`
-  const rest = stripBannerMedia(banner.value)
-  setDocument(rest ? `${tag}\n${rest}` : tag)
-  previewBanner()
-  save()
-}
-
-function onBannerPaste(ev) {
-  const file = [...(ev.clipboardData?.files || [])]
-    .find((f) => /^(image|video)\//.test(f.type))
-  if (file) {
-    ev.preventDefault()
-    uploadBannerMedia(file)
-  }
-}
-
-function onMessage(ev) {
-  const msg = JSON.parse(ev.data)
-  if (msg.type === 'doc' && msg.path === path.value) {
-    setDocument(msg.banner ?? '')
-    bannerDesign.value = msg.banner_design ?? null
-    bannerDesignFrom.value = msg.banner_design_from ?? null
-    // Placeholder tells where an empty banner code field falls back to;
-    // the design artwork renders regardless (this code supplements it).
-    view.dispatch({
-      effects: bannerPh.reconfigure(placeholder(
-        msg.banner_from == null
-          ? 'own banner code (added after the design)'
-          : `code inherited from /${msg.banner_from}`,
-      )),
-    })
-    // Overlay this page's own banner on the swapped region. Empty means
-    // inherited: the server-rendered region already shows the right one.
-    if (banner.value.trim()) previewBanner()
-  } else if (msg.type === 'saved') {
-    saveError.value = ''
-    pendingSave = null
-    refreshPages()
-    // A one-shot re-render requested by a save that must be visible first
-    // (banner design change). Only the most recent one matters.
-    refreshOnSave?.()
-    refreshOnSave = null
-  } else if (msg.type === 'error') {
-    saveError.value = '⚠️ changes could not be saved'
-  }
-}
-
-function onKeydown(ev) {
-  if ((ev.ctrlKey || ev.metaKey) && ev.key === 's') {
-    ev.preventDefault()
-    save()
-  }
-  if (ev.key === 'Escape') close()
-}
-
-function connect() {
-  ws = new WebSocket(
-    `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/_api/ws/editor`,
-  )
-  ws.onmessage = onMessage
-  ws.onopen = () => {
-    reconnectDelay = 2000
-    if (everConnected) {
-      // Reconnected: resend any save attempted while offline.
-      if (pendingSave) send(pendingSave)
-    } else {
-      openPath(normPath(props.pagePath))
-    }
-    everConnected = true
-  }
-  ws.onclose = () => {
-    clearTimeout(reconnectTimer)
-    reconnectTimer = setTimeout(() => {
-      connect()
-      reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY)
-    }, reconnectDelay)
-  }
-}
-
 onMounted(async () => {
-  refreshPages()
-  connect()
-  view = new EditorView({
-    state: EditorState.create({
-      doc: '',
-      extensions: [
-        basicSetup,
-        html(),
-        cmTheme,
-        cmHighlight,
-        EditorView.lineWrapping,
-        bannerPh.of(placeholder('')),
-        EditorView.updateListener.of((u) => {
-          if (u.docChanged && !syncing) {
-            banner.value = view.state.doc.toString()
-            onBannerInput()
-          }
-        }),
-      ],
-    }),
-    parent: bannerEl.value,
-  })
+  path.value = normPath(props.pagePath)
   cssView = new EditorView({
     state: EditorState.create({
       doc: '',
@@ -998,7 +419,6 @@ onMounted(async () => {
         cmTheme,
         cmHighlight,
         EditorView.lineWrapping,
-        placeholder('Site styling CSS'),
         EditorView.updateListener.of((u) => {
           if (u.docChanged && !cssSyncing) {
             customCss.value = cssView.state.doc.toString()
@@ -1018,7 +438,6 @@ onMounted(async () => {
         cmTheme,
         cmHighlight,
         EditorView.lineWrapping,
-        placeholder('custom brand HTML (replaces the brand link; empty = plain link)'),
         EditorView.updateListener.of((u) => {
           if (u.docChanged && !brandSyncing) {
             brandHtml.value = brandView.state.doc.toString()
@@ -1029,45 +448,37 @@ onMounted(async () => {
     }),
     parent: brandEl.value,
   })
-  addEventListener('keydown', onKeydown)
   await loadSettings()
   parseFonts(customCss.value)
   setCssDocument(customCss.value)
   applyCustomCss(customCss.value)
+  addEventListener('pagerite:editor-shown', onEditorShown)
 })
 
 onUnmounted(() => {
-  clearTimeout(reconnectTimer)
-  clearTimeout(armTimer)
   for (const t of Object.values(timers)) clearTimeout(t)
-  if (ws) {
-    ws.onclose = null // intentional close, no reconnect
-    ws.close()
-  }
-  view?.destroy()
   cssView?.destroy()
   brandView?.destroy()
-  removeEventListener('keydown', onKeydown)
+  removeEventListener('pagerite:editor-shown', onEditorShown)
 })
 </script>
 
 <template>
-  <div class="editor-root overlay">
-    <header class="toolbar">
-      <span class="mode-label">site editor</span>
-      <button type="button" class="close" title="close" @click="close">✕</button>
-    </header>
+  <div class="site-editor">
     <div v-if="saveError">{{ saveError }}</div>
 
     <section class="block">
       <label class="field">
-        <span class="field-label">site</span>
+        <span class="field-label">site name</span>
         <input
           v-model="brand"
           class="text-input"
-          placeholder="Site name (header link and window title)"
+          title="Site name (header link and window title)"
           @input="onBrandInput"
         />
+      </label>
+      <div class="field">
+        <span class="field-label">theme</span>
         <select
           v-model="theme"
           class="text-input theme-select"
@@ -1087,39 +498,59 @@ onUnmounted(() => {
         >
           A
         </button>
-      </label>
-      <div class="brand-code" @paste="onBrandPaste">
-        <div class="block-head">
-          <span class="field-label">brand code (replaces the brand link)</span>
-          <button
-            type="button"
-            title="upload brand image/video (replaces existing media) — pasting works too"
-            @click="brandInput.click()"
-          >add image/video</button>
-          <input
-            ref="brandInput"
-            type="file"
-            accept="image/*,video/*"
-            hidden
-            @change="(ev) => { uploadBrandMedia(ev.target.files[0]); ev.target.value = '' }"
-          />
-        </div>
-        <div ref="brandEl" class="banner-cm" />
       </div>
-      <div class="favicon-row">
-        <img v-if="favicon" :src="favicon" class="favicon-preview" alt="" />
-        <span v-else class="favicon-preview favicon-empty">?</span>
+      <div v-if="fontPicker" class="font-picker">
+        <div class="font-tabs">
+          <button
+            v-for="name in ['body', 'heading', 'brand']"
+            :key="name"
+            type="button"
+            :class="{ active: fontPicker === name }"
+            @click="fontPicker = name"
+          >
+            {{ name }}
+          </button>
+        </div>
+        <div class="font-cols">
+          <div class="font-col">
+            <button
+              v-for="opt in serifFonts"
+              :key="opt.label"
+              type="button"
+              class="font-opt"
+              :class="{ current: fontRefFor(fontPicker).value === opt.value }"
+              :style="{ fontFamily: opt.value, ...fontStyleFor(fontPicker) }"
+              @click="pickFont(opt.value)"
+            >
+              {{ opt.label }}
+            </button>
+          </div>
+          <div class="font-col">
+            <button
+              v-for="opt in sansFonts"
+              :key="opt.label"
+              type="button"
+              class="font-opt"
+              :class="{ current: fontRefFor(fontPicker).value === opt.value }"
+              :style="{ fontFamily: opt.value, ...fontStyleFor(fontPicker) }"
+              @click="pickFont(opt.value)"
+            >
+              {{ opt.label }}
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="field">
+        <span class="field-label">favicon</span>
         <button
           type="button"
+          class="favicon-tile"
           title="upload favicon (ico, png, svg...)"
           @click="faviconInput.click()"
-        >{{ favicon ? 'replace favicon' : 'upload favicon' }}</button>
-        <button
-          v-if="favicon"
-          type="button"
-          title="remove favicon (back to the default)"
-          @click="removeFavicon"
-        >remove</button>
+        >
+          <img v-if="favicon" :src="favicon" alt="current favicon" />
+          <span v-else>?</span>
+        </button>
         <input
           ref="faviconInput"
           type="file"
@@ -1128,123 +559,42 @@ onUnmounted(() => {
           @change="(ev) => { uploadFavicon(ev.target.files[0]); ev.target.value = '' }"
         />
       </div>
-      <div v-if="fontPicker" class="font-picker">
-          <div class="font-tabs">
-            <button
-              v-for="name in ['body', 'heading', 'brand']"
-              :key="name"
-              type="button"
-              :class="{ active: fontPicker === name }"
-              @click="fontPicker = name"
-            >
-              {{ name }}
-            </button>
-          </div>
-          <div class="font-cols">
-            <div class="font-col">
-              <button
-                v-for="opt in serifFonts"
-                :key="opt.label"
-                type="button"
-                class="font-opt"
-                :class="{ current: fontRefFor(fontPicker).value === opt.value }"
-                :style="{ fontFamily: opt.value, ...fontStyleFor(fontPicker) }"
-                @click="pickFont(opt.value)"
-              >
-                {{ opt.label }}
-              </button>
-            </div>
-            <div class="font-col">
-              <button
-                v-for="opt in sansFonts"
-                :key="opt.label"
-                type="button"
-                class="font-opt"
-                :class="{ current: fontRefFor(fontPicker).value === opt.value }"
-                :style="{ fontFamily: opt.value, ...fontStyleFor(fontPicker) }"
-                @click="pickFont(opt.value)"
-              >
-                {{ opt.label }}
-              </button>
-            </div>
-          </div>
-        </div>
-      <div ref="cssEl" class="css-cm" />
     </section>
 
-    <section class="block" @paste="onBannerPaste">
+    <section class="block" @paste="onBrandPaste">
       <div class="block-head">
-        <span class="field-label">Banner on /{{ path }}</span>
-        <select
-          v-model="bannerDesign"
-          class="text-input design-select"
-          title="Banner design (artwork + its own styles)"
-          @change="onBannerDesignChange"
-        >
-          <option :value="null">{{ inheritLabel }}</option>
-          <option value="">none</option>
-          <option v-for="d in bannerDesigns" :key="d" :value="d">{{ d }}</option>
-        </select>
+        <span class="field-label">brand code (replaces the brand link)</span>
         <button
           type="button"
-          title="upload banner image/video (replaces existing media) — pasting works too"
-          @click="fileInput.click()"
-        >add image/video</button>
+          class="icon-btn"
+          title="upload brand image/video (replaces existing media) — pasting works too"
+          @click="brandInput.click()"
+        >🖼️</button>
         <input
-          ref="fileInput"
+          ref="brandInput"
           type="file"
           accept="image/*,video/*"
           hidden
-          @change="(ev) => { uploadBannerMedia(ev.target.files[0]); ev.target.value = '' }"
+          @change="(ev) => { uploadBrandMedia(ev.target.files[0]); ev.target.value = '' }"
         />
       </div>
-      <div ref="bannerEl" class="banner-cm" />
+      <div ref="brandEl" class="brand-cm" />
     </section>
 
-    <section class="block structure">
-      <StructureTree :nodes="tree" />
+    <section class="block">
+      <div class="block-head">
+        <span class="field-label">custom CSS (applies to every page, on top of the theme)</span>
+      </div>
+      <div ref="cssEl" class="css-cm" />
     </section>
   </div>
 </template>
 
 <style scoped>
-.editor-root {
+.site-editor {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-}
-
-/* Docked-overlay positioning lives in the global pagerite.css (.editor-host /
-   .editor-root.overlay) since the host element is created by main.js. */
-
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 0.8rem;
-  padding: 0.5rem 1rem;
-  border-bottom: 1px solid var(--line);
-  background: var(--surface);
-}
-
-.mode-label {
-  color: var(--muted);
-  font-size: 0.85rem;
-  white-space: nowrap;
-}
-
-/* Window-style close button, top right corner. */
-.toolbar .close {
-  margin-left: auto;
-  padding: 0 0.3rem;
-  background: none;
-  border: none;
-  color: var(--muted);
-  font-size: 1.05rem;
-  cursor: pointer;
-}
-
-.toolbar .close:hover {
-  color: var(--text);
+  overflow-y: auto;
 }
 
 .block {
@@ -1268,6 +618,11 @@ onUnmounted(() => {
   gap: 0.5rem;
 }
 
+/* Fixed-width labels keep the settings rows aligned. */
+.field > .field-label {
+  min-width: 5rem;
+}
+
 .field-label {
   color: var(--muted);
   font-size: 0.85rem;
@@ -1276,61 +631,44 @@ onUnmounted(() => {
   text-overflow: ellipsis;
 }
 
-/* Favicon row: tiny preview (or placeholder tile) + upload/remove buttons. */
-.favicon-row {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-}
-
-.favicon-preview {
-  width: 1.4rem;
-  height: 1.4rem;
-  object-fit: contain;
-  border-radius: 3px;
-  background: var(--bg);
-  border: 1px solid var(--line);
-}
-
-.favicon-empty {
+/* Favicon: the preview tile itself is the upload button — click to pick a
+   new image. */
+.favicon-tile {
+  width: 1.8rem;
+  height: 1.8rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  padding: 0;
+  background: var(--bg);
   color: var(--muted);
-  font-size: 0.85rem;
-}
-
-.favicon-row button {
-  font: inherit;
-  font-size: 0.85rem;
-  padding: 0.15rem 0.6rem;
-  background: var(--accent2);
-  color: white;
-  border: none;
+  border: 1px solid var(--line);
   border-radius: 4px;
   cursor: pointer;
-  white-space: nowrap;
 }
 
-.block-head button {
+.favicon-tile:hover {
+  border-color: var(--accent);
+}
+
+.favicon-tile img {
+  width: 1.4rem;
+  height: 1.4rem;
+  object-fit: contain;
+}
+
+.block-head .icon-btn {
   margin-left: auto;
-  font: inherit;
-  font-size: 0.85rem;
-  padding: 0.15rem 0.6rem;
-  background: var(--accent2);
-  color: white;
+  padding: 0 0.2rem;
+  font-size: 1rem;
+  background: none;
   border: none;
-  border-radius: 4px;
   cursor: pointer;
-  white-space: nowrap;
+  opacity: 0.7;
 }
 
-/* The banner design selector sits between the label and the upload button
-   (which stays pushed right by its auto margin). */
-.design-select {
-  flex: 0 1 auto;
-  width: auto;
-  font-size: 0.85rem;
+.block-head .icon-btn:hover {
+  opacity: 1;
 }
 
 .text-input {
@@ -1437,24 +775,23 @@ onUnmounted(() => {
   border-color: var(--accent);
 }
 
-/* Small CodeMirror window for the banner HTML; scrolls internally. */
-.banner-cm {
+/* Small CodeMirror window for the custom brand HTML; scrolls internally. */
+.brand-cm {
   border: 1px solid var(--line);
   border-radius: 4px;
   overflow: hidden;
 }
 
-.banner-cm :deep(.cm-editor) {
+.brand-cm :deep(.cm-editor) {
   max-height: 7rem;
   font-size: 0.85rem;
 }
 
-.banner-cm :deep(.cm-scroller) {
+.brand-cm :deep(.cm-scroller) {
   overflow: auto;
 }
 
-/* No line numbers / gutter chrome. */
-.banner-cm :deep(.cm-gutters) {
+.brand-cm :deep(.cm-gutters) {
   display: none;
 }
 
@@ -1476,11 +813,5 @@ onUnmounted(() => {
 
 .css-cm :deep(.cm-gutters) {
   display: none;
-}
-
-.structure {
-  flex: 1;
-  overflow-y: auto;
-  min-height: 0;
 }
 </style>

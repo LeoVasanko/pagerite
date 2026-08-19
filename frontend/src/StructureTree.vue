@@ -1,6 +1,6 @@
 <script setup>
 // Recursive site-structure tree with drag-and-drop ordering (vue-draggable).
-// Nodes come from the server (GET /_api/pages via SiteEditor.vue) as
+// Nodes come from the server (GET /_api/pages via StructureEditor.vue) as
 // {slug, path, title, order, published, has_content, children}.
 // Every node is real: a label whose title and slug are always editable
 // inline — the title saves while typing (and focusing it opens the page),
@@ -19,8 +19,8 @@
 // The front page is the root row with an empty slug: renaming it away
 // leaves no front page, and giving another top-level row the empty slug
 // makes it the front page. Delete is a two-step inline button (no dialog).
-// Actions are injected from SiteEditor.vue to avoid per-level event
-// forwarding.
+// Actions are injected from the parent editor (StructureEditor.vue) to
+// avoid per-level event forwarding.
 import { inject } from 'vue'
 import draggable from 'vuedraggable'
 import { slugify } from './slugify'
@@ -104,7 +104,7 @@ function onEnd() {
               v-model="element.title"
               v-focus
               class="edit title-edit"
-              placeholder="Title"
+              title="Page title"
               @keyup.enter="handlers.commitPending()"
               @keyup.esc="handlers.discardPending()"
             />
@@ -126,7 +126,6 @@ function onEnd() {
             <input
               class="edit title-edit"
               :value="element.title"
-              placeholder="Title"
               title="Label in the navigation — saves while typing; click opens the page"
               @input="handlers.titleInput(element, $event)"
               @focus="handlers.open(element.path)"

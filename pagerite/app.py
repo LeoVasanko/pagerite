@@ -557,10 +557,18 @@ async def editor_ws(ws: WebSocket) -> None:
                         # null = default artwork); the site editor shows it
                         # as the banner field's placeholder.
                         "banner_from": views.banner_source(data.menu, path),
-                        # Which node's banner-design setting applies here
-                        # (null = the active theme's default design).
-                        "banner_design_from": views.banner_design_source(
-                            data.menu, path, data.theme
+                        # Which node's banner-design setting would apply on
+                        # inherit ("" = front page, null = the active
+                        # theme's default) and what design that resolves to.
+                        "banner_design_from": (
+                            src := views.banner_design_source(
+                                data.menu, path, data.theme
+                            )
+                        ),
+                        "banner_design_inherited": (
+                            views.banner_design(data.menu, src, data.theme)
+                            if src is not None
+                            else views.theme_banner_design(data.theme)
                         ),
                     })
                 case "render":

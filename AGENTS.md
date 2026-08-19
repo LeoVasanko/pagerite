@@ -123,7 +123,7 @@ not for the public pages. See `docs/design-principles.md` for the design.
   - `seed.py` — demo content written on startup for paths missing from the
     database (never overwrites existing pages).
   - `frontend/src/` — the Vue editor and public-page entries.
-    - `main.js` — Vue editor app entry, mounts PageEditor/SiteEditor.
+    - `main.js` — Vue editor app entry, mounts the tabbed EditorShell.
     - `pagerite.js` — public page entry; runs fetch-navigation, scroll-reveal,
       OverlayScrollbars on `document.body` (floating, auto-hiding scrollbars
       that never reserve layout space or shift the page when appearing;
@@ -136,10 +136,11 @@ not for the public pages. See `docs/design-principles.md` for the design.
       learn the current session's admin status. The same reverse proxy that
       gates `/_api` returns 401 for anonymous users, 403 for users without
       the admin permission, and 200 for admins. When Paskia is detected, a
-      🔑 login button (anonymous) or 👤 profile button (logged in) is shown in
+      🔑 login button (anonymous) or 🔐 profile button (logged in) is shown in
       the banner corner; both open Paskia's iframe dialog via `showAuthIframe`
-      instead of navigating away. Admins also get the 🖊️ edit pens (asset URLs
-      from the `pagerite:editor-src`/`-css` meta tags). If no Paskia SSO is
+      instead of navigating away. Admins also get the 🖊️ page/banner edit pens
+      and a ⚙️ site-settings pen (asset URLs from the
+      `pagerite:editor-src`/`-css` meta tags). If no Paskia SSO is
       detected (dev/no proxy), editing is left open. Pages themselves render
       identically for everyone; the real gate is the auth proxy in front of
       all of `/_api`. The backend links the stylesheets in a fixed order —
@@ -174,21 +175,42 @@ not for the public pages. See `docs/design-principles.md` for the design.
     overrides); gitignored. Do not delete it without asking.
 - `scripts/fastapi-vue/` — helper scripts from the fastapi-vue template
   (build hook etc.), do not edit.
-- `frontend/` — the Vue editor as **two separate apps** mounted in their
-  own host divs created inside the static document: `PageEditor.vue`
+- `frontend/` — the Vue editor as a single tabbed `EditorShell.vue` mounted
+  in a host div created inside the static document. The shell hosts four
+  kept-alive tabs (ordered site-wide first — site, structure — then, after a
+  visual break, the per-page tabs — article, banner): `PageEditor.vue`
   (CodeMirror + server-rendered preview over WebSocket `/_api/ws/editor`,
-  previewing into the visible article; editor scroll drives document
-  scroll) opened by the article pen — it edits content and title only,
-  never the path — and `SiteEditor.vue` (site brand + optional custom
-  brand HTML (with image/video upload, replaces the brand link) + theme
-  selector +
-  favicon upload/remove + site-wide custom CSS + per-page banner design
-  selector (inherit/none/named design, inherited by children) + banner
-  HTML edited in small CodeMirror windows;
-  banner previewed into `#page-banner`, CSS injected into
-  `<head id="pagerite-user">`) + vue-draggable structure tree with
-  always-editable title/slug inputs per row, opened by the banner pen —
-  everything saves immediately as you edit (brand/title/CSS debounced,
+  previewing into the visible article; editor scroll drives the article
+  scroll — while any editor is open the window scroll is locked
+  (`body.editing`), the panel exactly fills the available window height, and
+  only `#main` scrolls; a format bar offers Markdown helpers — bold/italic/code/link/
+  table/image upload, with Ctrl/Cmd-B/I/S bindings — for the
+  hard-to-remember syntax) — edits content and
+  title only, never the path — `BannerEditor.vue`
+  (per-page banner HTML + banner design selector, previewed into
+  `#page-banner`), `SiteEditor.vue` (site brand + optional custom brand
+  HTML with image/video upload + theme selector + font picker + favicon
+  upload — clicking the preview tile picks a new one — +
+  site-wide custom CSS, CSS injected into
+  `<head id="pagerite-user">`), and `StructureEditor.vue` (the
+  vue-draggable structure tree with
+  always-editable title/slug inputs per row). Media uploads everywhere use
+  🖼️ icon buttons (pasting into the editor works too). The article, banner and
+  site-settings pens are shorthands that open the shell on the matching tab;
+  once open, clicking a pen switches tabs (and retargets the editors to the
+  current page) instead of closing/remounting. The ✕ in the tab bar closes
+  the shell (Escape too); tabs have no close buttons of their own. Closing
+  only HIDES the shell — the Vue app stays mounted, so page-editor state
+  (unsaved text included) survives until a real page reload; saving there is
+  explicit (💾/Ctrl+S) and refreshes the page regions in place. Admin panels
+  never reload the page. In-place
+  page re-rendering shared by the banner/site/structure tabs lives in
+  `swapdoc.js` (`runScripts`/`loadPlain`: fetch a page, swap the dynamic
+  regions, replaceState). Placeholder texts are reserved for showing the
+  actual default in effect when a field is left empty (e.g. the pending
+  row's slug derived from its title); labels and help are real elements or
+  tooltips, never placeholders.
+  Everything saves immediately as you edit (brand/title/CSS debounced,
   slug on commit since it renames the path), theme change swaps the
   stylesheet in place, tree rows navigate in place without transitions when
   focused, and the front page is a root-only row whose empty slug is
@@ -200,19 +222,16 @@ not for the public pages. See `docs/design-principles.md` for the design.
   target. Committing a pending page PUTs it with empty markdown (creates
   an empty page that renders with its title — saving never deletes;
   deletion is the page editor's explicit choice: saving trimmed-empty
-  text issues a REST DELETE), then hands over to the page editor
-  (CodeMirror focuses on mount). Dropping ON the lower part of a row
-  moves the page under that
-  row (the child list's container invisibly overlaps its own row's bottom
-  via negative margin — Sortable inserts it as the first child natively),
-  while a row's exposed top edge inserts a sibling before it. Row
+  text issues a REST DELETE), then switches to the page editor tab for
+  the actual writing. Dropping ON the lower part of a row moves the page
+  under that row (the child list's container invisibly overlaps its own
+  row's bottom via negative margin — Sortable inserts it as the first child
+  natively), while a row's exposed top edge inserts a sibling before it. Row
   indentation is structural (each nested list margin-indents itself), so a
   dragged row previews its whole subtree at the target list's depth. The
-  two pens swap the docked
-  panel for the other editor; clicking the open editor's own pen closes it. Normally dynamic-imported onto the content page by
-  pagerite.js when a 🖊️ edit pen is clicked (the pens are injected by
-  pagerite.js after the session validates; they carry
-  `data-editor-src`/`data-editor-css`/`data-editor-mode`).
+  shell is dynamic-imported onto the content page by pagerite.js when an edit
+  pen is clicked (the pens are injected by pagerite.js after the session
+  validates; they carry `data-editor-src`/`data-editor-css`/`data-editor-mode`).
   In dev, modules load from the Vite dev server (`PAGERITE_VITE_URL`),
   in prod from the hashed build assets resolved via
   `frontend-build/.vite/manifest.json`. `vite.config.js` sets

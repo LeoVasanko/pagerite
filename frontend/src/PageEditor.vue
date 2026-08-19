@@ -4,18 +4,23 @@
 // (/_api/ws/editor). Docked left of the article on the page itself.
 // The socket connects when the editor is opened and reconnects with
 // exponential backoff after a failure; unsaved text and pending saves
-// survive a disconnect. Editor scroll drives the document scroll, keeping the
-// rendered article at the cursor's position.
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+// survive a disconnect. Editor scroll drives the article scroll (while
+// editing the window scroll is locked and only #main scrolls), keeping the
+// rendered article at the cursor's position. Saving (💾 / Ctrl+S) is explicit
+// and refreshes the page regions in place — never a reload — so the editor
+// state (unsaved text included) also survives closing the shell; it is lost
+// only on a real page reload.
+import { onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState } from '@codemirror/state'
 import { markdown } from '@codemirror/lang-markdown'
 import { cmHighlight, cmTheme } from './cmtheme'
+import { loadPlain } from './swapdoc'
 
 const props = defineProps({
   pagePath: { type: String, default: '' },
 })
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'pathChange'])
 
 const path = ref('')
 const title = ref('')
@@ -32,7 +37,7 @@ let reconnectTimer = null
 let reconnectDelay = 2000
 const MAX_RECONNECT_DELAY = 16000
 let everConnected = false
-let dirty = false
+const dirty = ref(false)  // unsaved text exists (drives the 💾 button)
 let syncingScroll = false
 
 function send(msg) {
@@ -65,16 +70,24 @@ function updateWindowTitle() {
 }
 
 watch([title, path], updateWindowTitle)
+watch(() => props.pagePath, (p) => { openPath(normPath(p)) })
+
+onActivated(() => {
+  updateWindowTitle()
+  // Re-shown with unsaved text: restore the working preview into the
+  // article (closing discarded it in favour of the server-rendered page).
+  if (dirty.value) requestRender()
+})
 
 function requestRender() {
   // No debounce: server-side rendering is fast enough per keystroke.
   if (!view) return
-  dirty = true
+  dirty.value = true
   send({ type: 'render', path: path.value, markdown: view.state.doc.toString() })
 }
 
 function save() {
-  // Path is not editable here (that's the site editor's job); saving
+  // Path is not editable here (that's the structure tab's job); saving
   // never moves the page.
   const markdown = view.state.doc.toString()
   if (markdown.trim() === '') {
@@ -96,20 +109,20 @@ function save() {
   return new Promise((resolve) => { savedResolve = resolve })
 }
 
-async function saveAndClose() {
+async function saveAndRefresh() {
   await save()
-  // Reload so nav/sidebar changes apply, then the editor is gone.
-  dirty = false
-  emit('close')
-  location.reload()
+  dirty.value = false
+  // Refresh the page regions from the server so nav/sidebar changes apply
+  // (never a reload: the editor keeps its state).
+  loadPlain(path.value)
 }
 
 function close() {
-  // Reload if the visible page is showing unsaved preview edits.
-  const stale = dirty
-  dirty = false
   emit('close')
-  if (stale) location.reload()
+  // Discard the unsaved preview by re-rendering the page from the server.
+  // The editor text itself is kept (the shell stays mounted while hidden)
+  // and can still be saved later.
+  if (dirty.value) loadPlain(path.value)
 }
 
 function insertAtCursor(text) {
@@ -126,6 +139,82 @@ async function uploadImage(file) {
     const alt = name.replace(/\.[^.]+$/, '')
     insertAtCursor(`![${alt}](${stored})`)
   }
+}
+
+// --- Format toolbar --------------------------------------------------------
+// Small Markdown helpers for the hard-to-remember syntax; each leaves the
+// relevant part selected so typing replaces it.
+function wrapInline(mark) {
+  // Toggle: wrapped selection (or wrapping marks around it) is unwrapped.
+  const { from, to } = view.state.selection.main
+  const doc = view.state.doc
+  if (doc.sliceString(Math.max(0, from - mark.length), from) === mark
+      && doc.sliceString(to, to + mark.length) === mark) {
+    view.dispatch({ changes: [
+      { from: to, to: to + mark.length },
+      { from: from - mark.length, to: from },
+    ] })
+  } else {
+    const text = doc.sliceString(from, to)
+    view.dispatch({
+      changes: { from, to, insert: mark + text + mark },
+      selection: { anchor: from + mark.length, head: to + mark.length },
+    })
+  }
+  view.focus()
+}
+
+function insertCode() {
+  // On an empty line with no selection: a fenced code block, cursor inside.
+  // Otherwise an inline code wrap (toggling).
+  const { from, to } = view.state.selection.main
+  const line = view.state.doc.lineAt(from)
+  if (from === to && !line.text.trim()) {
+    view.dispatch({
+      changes: { from: line.from, to: line.to, insert: '```\n\n```' },
+      selection: { anchor: line.from + 4 },
+    })
+    view.focus()
+    return
+  }
+  wrapInline('`')
+}
+
+function insertLink() {
+  // Selected text becomes the link label — or the URL if it looks like one.
+  const { from, to } = view.state.selection.main
+  const text = view.state.sliceDoc(from, to)
+  const isUrl = /^https?:\/\/\S+$/.test(text)
+  const insert = isUrl ? `[](${text})` : `[${text}]()`
+  const urlStart = from + insert.length - 1 // inside the parens
+  view.dispatch({
+    changes: { from, to, insert },
+    selection: isUrl ? { anchor: from + 1 } : { anchor: urlStart },
+  })
+  view.focus()
+}
+
+// Table size picker: a hover grid popup (cols × rows) under the toolbar.
+const tablePicker = ref(false)
+const tableSize = ref({ cols: 0, rows: 0 })
+const TABLE_MAX_COLS = 8
+const TABLE_MAX_ROWS = 6
+
+function insertTable(cols, rows) {
+  // A GFM table on its own blank-separated block, first header cell
+  // selected.
+  const { from, to } = view.state.selection.main
+  const before = from > 0 && view.state.doc.sliceString(from - 1, from) !== '\n' ? '\n\n' : ''
+  const row = (cells) => `| ${cells.join(' | ')} |`
+  const table = `${before}${row(Array(cols).fill('column'))}\n`
+    + `${row(Array(cols).fill('---'))}\n`
+    + `${Array(rows).fill(row(Array(cols).fill(''))).join('\n')}\n`
+  view.dispatch({
+    changes: { from, to, insert: table },
+    selection: { anchor: from + before.length + 2, head: from + before.length + 8 },
+  })
+  tablePicker.value = false
+  view.focus()
 }
 
 function openPath(p) {
@@ -177,12 +266,13 @@ function onMessage(ev) {
     published.value = msg.published
     setDocument(msg.markdown)
     requestRender()
-    dirty = false // just loaded from the server, nothing unsaved
+    dirty.value = false // just loaded from the server, nothing unsaved
   } else if (msg.type === 'html' && msg.path === path.value) {
     previewIntoArticle(msg.html, msg.has_h1)
   } else if (msg.type === 'saved') {
     saveError.value = ''
     pendingSave = null
+    dirty.value = false
     savedResolve?.()
     savedResolve = null
   } else if (msg.type === 'error') {
@@ -191,24 +281,45 @@ function onMessage(ev) {
 }
 
 function onKeydown(ev) {
-  if ((ev.ctrlKey || ev.metaKey) && ev.key === 's') {
+  if (!(ev.ctrlKey || ev.metaKey)) return
+  if (ev.key === 's') {
     ev.preventDefault()
     save()
+    return
   }
-  if (ev.key === 'Escape') close()
+  // Bold/italic only when typing in the CodeMirror editor itself.
+  if (!view?.hasFocus) return
+  if (ev.key === 'b') {
+    ev.preventDefault()
+    wrapInline('**')
+  } else if (ev.key === 'i') {
+    ev.preventDefault()
+    wrapInline('*')
+  }
+}
+
+// The shell stays mounted while hidden: when it is re-shown with this tab
+// active, restore the window title (and the working preview if unsaved
+// text exists — closing discarded it in favour of the server render).
+function onEditorShown() {
+  if (document.body.dataset.editorMode !== 'page') return
+  updateWindowTitle()
+  if (dirty.value) requestRender()
 }
 
 function syncScroll() {
-  // Editor scroll drives the document: keep the rendered article at the
-  // same proportional position as the cursor area in the editor.
+  // Editor scroll drives the article: keep the rendered page at the same
+  // proportional position as the cursor area in the editor. While editing
+  // the window scroll is locked and #main is the scrolling element.
   if (syncingScroll || !view) return
+  const main = document.getElementById('main')
+  if (!main) return
   syncingScroll = true
   requestAnimationFrame(() => {
     const scroller = view.scrollDOM
     const max = scroller.scrollHeight - scroller.clientHeight
     const pct = max > 0 ? scroller.scrollTop / max : 0
-    const doc = document.documentElement
-    window.scrollTo(0, pct * (doc.scrollHeight - innerHeight))
+    main.scrollTop = pct * (main.scrollHeight - main.clientHeight)
     syncingScroll = false
   })
 }
@@ -277,6 +388,7 @@ onMounted(() => {
     path: () => path.value,
   }
   addEventListener('keydown', onKeydown)
+  addEventListener('pagerite:editor-shown', onEditorShown)
 })
 
 onUnmounted(() => {
@@ -288,13 +400,17 @@ onUnmounted(() => {
   view?.destroy()
   delete window.__pageritePageEditor
   removeEventListener('keydown', onKeydown)
+  removeEventListener('pagerite:editor-shown', onEditorShown)
 })
 </script>
 
 <template>
-  <div class="editor-root overlay">
+  <div class="page-editor">
     <header class="toolbar">
-      <input v-model="title" placeholder="Title" class="title" @input="requestRender" />
+      <label class="title-field">
+        <span class="field-label">title</span>
+        <input v-model="title" class="title" @input="requestRender" />
+      </label>
       <label><input v-model="published" type="checkbox" /> published</label>
       <input
         ref="fileInput"
@@ -303,10 +419,41 @@ onUnmounted(() => {
         hidden
         @change="(ev) => { uploadImage(ev.target.files[0]); ev.target.value = '' }"
       />
-      <button type="button" @click="fileInput.click()">image</button>
-      <button type="button" @click="saveAndClose">save</button>
-      <button type="button" class="close" title="close" @click="close">✕</button>
+      <button
+        type="button"
+        class="save"
+        title="save (Ctrl+S)"
+        :disabled="!dirty"
+        @click="saveAndRefresh"
+      >💾</button>
     </header>
+    <div class="format-bar">
+      <button type="button" title="bold" @click="wrapInline('**')"><b>B</b></button>
+      <button type="button" title="italic" @click="wrapInline('*')"><i>I</i></button>
+      <button type="button" title="code (empty line: code block)" @click="insertCode"><code>&lt;/&gt;</code></button>
+      <button type="button" title="link" @click="insertLink">🔗</button>
+      <button
+        type="button"
+        title="table"
+        :class="{ active: tablePicker }"
+        @click="tablePicker = !tablePicker"
+      >▦</button>
+      <button type="button" title="insert image (upload) — pasting works too" @click="fileInput.click()">🖼️</button>
+      <div v-if="tablePicker" class="table-picker" @mouseleave="tableSize = { cols: 0, rows: 0 }">
+        <div class="tp-grid" :style="{ gridTemplateColumns: `repeat(${TABLE_MAX_COLS}, 1fr)` }">
+          <button
+            v-for="n in TABLE_MAX_COLS * TABLE_MAX_ROWS"
+            :key="n"
+            type="button"
+            class="tp-cell"
+            :class="{ on: tableSize.cols >= (n - 1) % TABLE_MAX_COLS + 1 && tableSize.rows >= Math.floor((n - 1) / TABLE_MAX_COLS) + 1 }"
+            @mouseenter="tableSize = { cols: (n - 1) % TABLE_MAX_COLS + 1, rows: Math.floor((n - 1) / TABLE_MAX_COLS) + 1 }"
+            @click="insertTable(tableSize.cols, tableSize.rows)"
+          />
+        </div>
+        <div class="tp-size">{{ tableSize.cols || '–' }} × {{ tableSize.rows || '–' }}</div>
+      </div>
+    </div>
     <div v-if="saveError">{{ saveError }}</div>
     <div class="panes">
       <div ref="editorEl" class="editor" />
@@ -315,14 +462,10 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.editor-root {
+.page-editor {
   display: flex;
   flex-direction: column;
-  height: 100vh;
 }
-
-/* Docked-overlay positioning lives in the global pagerite.css (.editor-host /
-   .editor-root.overlay) since the host element is created by main.js. */
 
 .toolbar {
   display: flex;
@@ -331,6 +474,19 @@ onUnmounted(() => {
   padding: 0.5rem 1rem;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
+}
+
+.toolbar .title-field {
+  flex: 1;
+  min-width: 4rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.toolbar .field-label {
+  color: var(--muted);
+  font-size: 0.85rem;
 }
 
 .toolbar .title {
@@ -350,28 +506,93 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-.toolbar button {
-  font: inherit;
-  padding: 0.25rem 0.8rem;
-  background: var(--accent2);
-  color: white;
+/* Borderless icon button; greyed out (desaturated) while there is nothing
+   to save. */
+.toolbar button.save {
+  padding: 0 0.3rem;
+  font-size: 1rem;
+  background: none;
   border: none;
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* Disabled = black & white only; an explicit color overrides the browser's
+   built-in dimmed disabled-button color. */
+.toolbar button.save:disabled {
+  color: var(--text);
+  filter: saturate(0);
+  cursor: default;
+}
+
+/* Markdown helpers: plain icon buttons under the toolbar. */
+.format-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.25rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.format-bar button {
+  min-width: 1.7rem;
+  padding: 0.15rem 0.3rem;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--muted);
+  background: none;
+  border: 1px solid transparent;
   border-radius: 4px;
   cursor: pointer;
-  white-space: nowrap;
 }
 
-/* Window-style close button, top right corner. */
-.toolbar .close {
-  margin-left: auto;
-  padding: 0 0.3rem;
-  background: none;
-  color: var(--muted);
-  font-size: 1.05rem;
-}
-
-.toolbar .close:hover {
+.format-bar button:hover,
+.format-bar button.active {
   color: var(--text);
+  border-color: var(--line);
+}
+
+/* Table size picker: hover grid popup below the format bar; the hovered
+   cell and everything up-left of it is the table to insert. */
+.table-picker {
+  position: absolute;
+  top: 100%;
+  left: 6.5rem;
+  z-index: 20;
+  padding: 0.5rem;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px #0004;
+}
+
+.tp-grid {
+  display: grid;
+  gap: 2px;
+}
+
+.tp-cell {
+  width: 1.05rem;
+  height: 1.05rem;
+  min-width: 0;
+  padding: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+}
+
+.tp-cell.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.tp-size {
+  margin-top: 0.35rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-align: center;
 }
 
 .panes {
@@ -385,7 +606,7 @@ onUnmounted(() => {
 
 /* CodeMirror sits inside a bordered box, like a dialog's input area, with
    a slight margin to the panel edges. Wheel scroll stays in the editor and
-   drives the document (syncScroll) instead of double-scrolling. */
+   drives the article (syncScroll) instead of double-scrolling. */
 .editor {
   flex: 1;
   min-width: 0;

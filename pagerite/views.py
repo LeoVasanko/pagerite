@@ -314,14 +314,25 @@ def _design_banner(design: str) -> HTML:
     return HTML(f'<div data-design="{design}">{body}</div>')
 
 
+def theme_banner_design(theme: str) -> str:
+    """The theme's own banner design (a theme folder doubles as a banner
+    design when it ships banner.css, banner.svg or banner.html), "" if it
+    has none."""
+    if _valid_name(theme) and any(
+        (THEMES / theme / f).exists()
+        for f in ("banner.css", "banner.svg", "banner.html")
+    ):
+        return theme
+    return ""
+
+
 def banner_design(menu: dict[str, Node], path: str, theme: str = "") -> str:
     """The effective banner design name at ``path`` ("" = no design).
 
     Nodes set ``banner_design`` to a design name, "" (explicitly none) or
     None (inherit). Resolution walks the ancestor chain from the node
     upwards, then the front page, then falls back to the active theme's own
-    design (a theme folder doubles as a banner design when it ships
-    banner.css or banner.svg).
+    design.
     """
     chain = resolve(menu, path) or []
     for node in reversed(chain):
@@ -330,30 +341,26 @@ def banner_design(menu: dict[str, Node], path: str, theme: str = "") -> str:
     front = menu.get("")
     if front and front.banner_design is not None:
         return front.banner_design
-    if (
-        _valid_name(theme)
-        and any(
-            (THEMES / theme / f).exists()
-            for f in ("banner.css", "banner.svg", "banner.html")
-        )
-    ):
-        return theme
-    return ""
+    return theme_banner_design(theme)
 
 
 def banner_design_source(
     menu: dict[str, Node], path: str, theme: str = ""
 ) -> str | None:
-    """Which node's banner-design setting applies at ``path`` (like
-    banner_source), or None when the active theme's default applies.
-    Used by the site editor for the design selector's inherit label."""
+    """Which node's banner-design setting *would* apply at ``path`` if the
+    node itself set nothing: the nearest ancestor's path ("" = the front
+    page), or None when the active theme's default applies. Used by the
+    banner editor for the design selector's inherit label."""
     chain = resolve(menu, path) or []
     segs = path.split("/")
-    for i in range(len(chain) - 1, -1, -1):
+    # Skip the node itself (chain[-1]): its own setting is not inheritance.
+    for i in range(len(chain) - 2, -1, -1):
         if chain[i].banner_design is not None:
             return "/".join(segs[: i + 1])
+    # The front page is a top-level sibling of the chain, not an ancestor;
+    # it does not inherit from itself.
     front = menu.get("")
-    if front and front.banner_design is not None:
+    if path and front and front.banner_design is not None:
         return ""
     return None
 

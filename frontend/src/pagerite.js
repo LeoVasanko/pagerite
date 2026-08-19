@@ -60,29 +60,33 @@ import "overlayscrollbars/overlayscrollbars.css";
   function makePen(mode) {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = mode === "page" ? "edit-link" : "edit-link banner-edit-link";
-    btn.title = "edit";
-    btn.textContent = "🖊️";
     btn.dataset.editorSrc = editorMeta.src;
     btn.dataset.editorCss = editorMeta.css || "";
     btn.dataset.editorMode = mode;
+    if (mode === "page") {
+      btn.className = "edit-link";
+      btn.title = "edit page";
+      btn.textContent = "🖊️";
+    } else if (mode === "banner") {
+      btn.className = "edit-link";
+      btn.title = "edit banner";
+      btn.textContent = "🖊️";
+    } else {
+      btn.className = "edit-link site-edit-link";
+      btn.title = "site settings";
+      btn.textContent = "⚙️";
+    }
     return btn;
   }
 
-  function injectPens() {
-    const banner = document.getElementById("page-banner");
-    if (banner && !banner.parentElement.querySelector(".banner-edit-link")) {
-      banner.after(makePen("site"));
-    }
+  function injectPagePen() {
     const article = document.querySelector("#main article");
     if (article && !article.querySelector("button.edit-link")) {
       article.prepend(makePen("page"));
     }
   }
 
-  function addLoginButton(url) {
-    const banner = document.getElementById("page-banner");
-    if (!banner || banner.parentElement.querySelector(".login-link")) return;
+  function makeLoginButton(url) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "login-link";
@@ -97,43 +101,45 @@ import "overlayscrollbars/overlayscrollbars.css";
         // Cancelled or error: leave the button in place.
       }
     });
-    banner.after(btn);
+    return btn;
   }
 
-  function injectProfileButton() {
-    const banner = document.getElementById("page-banner");
-    if (!banner || banner.parentElement.querySelector(".profile-link")) return;
+  function makeProfileButton() {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "profile-link";
     btn.title = "profile";
-    btn.textContent = "👤";
+    btn.textContent = "🔐";
     btn.addEventListener("click", () => {
       showAuthIframe("/auth/").catch(() => {});
     });
-    banner.after(btn);
+    return btn;
   }
 
   function renderAuthUi() {
+    // Editing is open for admins and, as a dev/no-proxy fallback, when no
+    // Paskia SSO is detected at all.
+    const canEdit = isAdmin || !ssoAvailable;
     const banner = document.getElementById("page-banner");
     if (banner) {
-      for (const el of banner.parentElement.querySelectorAll(
-        ".banner-edit-link, .login-link, .profile-link",
-      )) {
-        el.remove();
+      const old = banner.parentElement.querySelector(".editor-pens");
+      if (old) old.remove();
+      const pens = document.createElement("div");
+      pens.className = "editor-pens";
+      if (canEdit) {
+        pens.append(makePen("banner"));
+        pens.append(makePen("site"));
       }
+      if (isAdmin && ssoAvailable) {
+        pens.append(makeProfileButton());
+      } else if (!isAdmin && ssoAvailable && loginIframeUrl) {
+        pens.append(makeLoginButton(loginIframeUrl));
+      } else if (!isAdmin && ssoAvailable) {
+        pens.append(makeProfileButton());
+      }
+      banner.after(pens);
     }
-    if (isAdmin) {
-      injectPens();
-      if (ssoAvailable) injectProfileButton();
-    } else if (ssoAvailable && loginIframeUrl) {
-      addLoginButton(loginIframeUrl);
-    } else if (ssoAvailable) {
-      injectProfileButton();
-    } else {
-      // No Paskia SSO: dev/no-proxy fallback, leave editing open.
-      injectPens();
-    }
+    if (canEdit) injectPagePen();
   }
 
   async function setupAuth() {
@@ -433,10 +439,10 @@ import "overlayscrollbars/overlayscrollbars.css";
   addEventListener("click", (ev) => {
     if (ev.defaultPrevented || ev.button !== 0
         || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
-    // Edit buttons toggle the editor panel docked on this page: load the
-    // Vue app on demand (with any extra styles) and mount it in place.
-    // Clicking the pen of the already-open editor closes it; clicking the
-    // other pen swaps the panel for the other editor type.
+    // Edit buttons toggle the tabbed editor panel docked on this page: load
+    // the Vue app on demand (with any extra styles) and mount it in place.
+    // Clicking the pen of the already-open tab closes the shell; clicking
+    // another pen switches the shell to that tab.
     const editBtn = ev.target.closest("button.edit-link");
     if (editBtn && editBtn.dataset.editorSrc) {
       ev.preventDefault();

@@ -257,9 +257,28 @@ body.editing #sidebar {
   display: none;
 }
 
+/* While editing, the window itself does not scroll: the editor panel is
+   exactly the remaining window height, and only the article area (#main)
+   scrolls. Without the editor, normal full-page scroll applies. */
+body.editing {
+  height: 100vh;
+  overflow: hidden;
+}
+
+body.editing #content {
+  min-height: 0;
+  grid-template-rows: 100%;
+}
+
+body.editing #main {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 /* The editor host lives inside #content: it starts below the banner and
-   ends above the footer. The panel itself sticks to the viewport while
-   scrolling (but never taller than the content area). */
+   ends above the footer. With the page scroll locked while editing, the
+   panel exactly fills that space — the full available window height. */
 .editor-host {
   position: absolute;
   top: 0;
@@ -269,10 +288,7 @@ body.editing #sidebar {
 }
 
 .editor-root.overlay {
-  position: sticky;
-  top: 0;
-  height: 100vh;
-  max-height: 100%;
+  height: 100%;
   background: var(--bg);
   animation: editor-slide-in 0.25s ease;
 }
@@ -288,15 +304,20 @@ body.editing #sidebar {
   }
 }
 
-/* The banner's own pen: opens the site editor (banner + structure).
-   Qualified with `button` to beat the later .edit-link rule's left offset
-   (both classes apply to the same element). */
-button.banner-edit-link {
+/* Banner-area pens (banner editor, site editor) and auth buttons live in a
+   single flex container pinned to the banner's top-right corner. */
+.editor-pens {
   position: absolute;
   top: 0.6rem;
-  right: 1.25rem;
-  left: auto;
+  right: 0.5rem;
   z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.editor-pens button {
+  position: static;
   font: inherit;
   border: none;
   cursor: pointer;
@@ -452,19 +473,10 @@ article h1 .edit-link {
 }
 
 /* Login/profile buttons injected by pagerite.js when Paskia SSO is in use.
-   Both sit in the banner's top-right corner, to the right of the site pen,
-   and are styled like the edit pens. */
+   They live inside the .editor-pens flex container in the banner's top-right
+   corner and inherit its reset; keep only their opacity/text-shadow tweaks. */
 button.login-link,
 button.profile-link {
-  position: absolute;
-  top: 0.6rem;
-  right: 0.5rem;
-  z-index: 10;
-  font: inherit;
-  border: none;
-  cursor: pointer;
-  background: none;
-  padding: 0;
   opacity: 0.7;
   text-shadow: 0 0 0.1em black;
 }
