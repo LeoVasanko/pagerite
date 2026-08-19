@@ -112,6 +112,7 @@ def _editor_css_url(vite_url: str | None) -> str | None:
 
 def _layout(
     modules: list[str] = (),
+    stylesheets: list[str] = (),
     custom_css: str = "",
     theme: str = "",
     banner_design: str = "",
@@ -123,8 +124,9 @@ def _layout(
     Stylesheets use ``blocking="render"`` so the browser waits for them before
     showing the page, avoiding a flash of unstyled content. Order matters and
     is fixed: base (Vite build, absent in dev where Vite injects it from JS),
-    theme and banner design (backend-served from pagerite/themes/), then the
-    user's custom CSS last so it always wins.
+    theme and banner design (backend-served from pagerite/themes/), entry-
+    specific stylesheets (e.g. overlayscrollbars.css), then the user's custom
+    CSS last so it always wins.
 
     In dev, pagerite.js re-appends the backend-rendered theme/design links
     (and the custom CSS) after the Vite-injected base styles, keeping this
@@ -167,6 +169,8 @@ def _layout(
     for id_, url in sheets:
         if url:
             doc.link(rel="stylesheet", href=url, blocking="render", id=id_)
+    for url in stylesheets:
+        doc.link(rel="stylesheet", href=url, blocking="render")
     for src in modules:
         doc.script(src=src, type="module")
     if custom_css.strip():
@@ -538,7 +542,7 @@ def render_page(
     social = _social_meta(node, path, title, str(main), brand, base_url)
     return str(
         _layout(
-            _page_assets(), custom_css, theme, banner_design(menu, path, theme),
+            *_page_assets(), custom_css, theme, banner_design(menu, path, theme),
             favicon, social,
         )(
             Title=f"{title} – {brand}" if brand else title,
@@ -577,7 +581,7 @@ def render_category(
         else:
             doc.p("This section has no page of its own yet.")
     return str(
-        _layout(_page_assets(), custom_css, theme, banner_design(menu, path, theme), favicon)(
+        _layout(*_page_assets(), custom_css, theme, banner_design(menu, path, theme), favicon)(
             Title=f"{title} – {brand}" if brand else title,
             Brand=_brand_link(brand, brand_html),
             Nav=nav_html(menu, path),
@@ -603,7 +607,7 @@ def render_not_found(
         doc.h1("Not Found")
         doc.p(f"No article at /{path}. If there was before, it may have been deleted.")
     return str(
-        _layout(_page_assets(), custom_css, theme, banner_design(menu, path, theme), favicon)(
+        _layout(*_page_assets(), custom_css, theme, banner_design(menu, path, theme), favicon)(
             Title=f"Not Found – {brand}" if brand else "Not Found",
             Brand=_brand_link(brand, brand_html),
             Nav=nav_html(menu, path),
@@ -614,19 +618,23 @@ def render_not_found(
     )
 
 
-def _page_assets() -> list[str]:
-    """Script URLs for public pages (pagerite entry).
+def _page_assets() -> tuple[list[str], list[str]]:
+    """Script and stylesheet URLs for public pages (pagerite entry).
 
     Dev mode loads the entry from the Vite dev server; production uses
-    the Vite build manifest to resolve the hashed asset names.
+    the Vite build manifest to resolve the hashed asset names. CSS imported
+    by the entry (e.g. overlayscrollbars.css) is extracted by Vite and must
+    be linked separately.
     """
     vite_url = os.environ.get("PAGERITE_VITE_URL")
     if vite_url:
-        return [f"{vite_url}/src/pagerite.js"]
+        return [f"{vite_url}/src/pagerite.js"], []
     if "page" not in _asset_cache:
         manifest = _manifest()
         entry = manifest["src/pagerite.js"]
-        _asset_cache["page"] = [f"/{entry['file']}"]
+        scripts = [f"/{entry['file']}"]
+        stylesheets = [f"/{css}" for css in entry.get("css", [])]
+        _asset_cache["page"] = scripts, stylesheets
     return _asset_cache["page"]
 
 
