@@ -686,11 +686,12 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
     chain = resolve(data.menu, path)
     node = chain[-1] if chain else None
     if node is not None and node.published and node.content is not None:
-        # ETag on content + render version; clients revalidate cheaply,
-        # which keeps prefetched pages warm and current. no-cache forces
-        # that revalidation: with Last-Modified but no Cache-Control,
-        # browsers would otherwise cache heuristically and serve stale
-        # pages (e.g. after a theme change) without asking us at all.
+        # no-cache forbids serving a stored page without revalidation
+        # (browsers would otherwise cache heuristically and serve stale
+        # pages, e.g. after a theme change). In-session speed instead comes
+        # from pagerite.js's in-memory page cache (preload everything, never
+        # fetch on navigation); the ETag just makes those one-time preload
+        # fetches and any revalidation cheap.
         etag = f'"{path}@{node.modified.timestamp()}v{data.version}"'
         if request.headers.get("if-none-match") == etag:
             return Response(status_code=304)

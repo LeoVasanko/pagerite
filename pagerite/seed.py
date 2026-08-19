@@ -1,147 +1,275 @@
-"""Seed content written to the database on first run (when it is empty).
+"""Seed content written to the database on first creation only
+(``@kanta.bootstrap`` in ``app.py``).
 
-Demonstrates the formatting options: images attached to pages and served
-from the page path, figures with captions, attribute classes for
-positioning, footnotes, definition lists, task lists, tables and raw HTML.
+A "welcome to your new site" starter: a structured docs section (three
+menu levels deep) covering editing and the full Markdown feature set —
+each feature shown as its Markdown source in a code block followed by
+the rendered result — and a showcase section with image positioning,
+long-form layout and a simple custom banner.
 """
 
 WELCOME = """\
-Welcome to your new **Pagerite** site. Pages are written in Markdown — including raw HTML — and served from pretty URLs.
+Welcome to your new **Pagerite** site. Everything you see is a page written in Markdown, served from a pretty URL, and editable right here in the browser.
 
-Have a look around:
+Where to go next:
 
-- The [docs](/docs) section explains [how to write content](/docs/editing), including images and positioning.
-- [The Long Read](/blog/the-long-read) demonstrates a longer article with scroll effects.
-- The [about](/about) page shows off assorted formatting.
+- The [docs](/docs/editing) section explains how to edit this site and shows every supported Markdown feature, source and result side by side.
+- The [showcase](/showcase/gallery) section shows what finished pages can look like: image positioning, banners, a long read.
+- Click the 🖊️ pen on any page to open the editor, and the ⚙️ pen for site settings and the structure tree.
 
 ![Abstract waves](waves.svg "Generated SVG artwork, attached to this page")
+
+*Delete or rewrite any of these pages — they are only here to get you started.*
 """
 
-ABOUT = """\
-This site runs on **Pagerite**: FastAPI + html5tagger + kanta, with content written in Markdown.
+EDITING = """\
+Everything on the site is editable in place. Log in, and pens appear: 🖊️ on the page and banner, ⚙️ in the banner corner for site settings.
 
-Some formatting samples:
+## The editor
 
-- [x] Write content in Markdown
-- [x] Attach images to pages
-- [ ] Add editing UI
+The 🖊️ pens open a tabbed editor over the page you are viewing:
 
-Term
-: A definition list entry, rendered by the deflist plugin.
+- **Article** — the page's title and Markdown, with a live preview. The format bar inserts the harder-to-remember syntax (links, tables, images); Ctrl/Cmd-B, I and S do what you expect. Saving is explicit: 💾 or Ctrl+S.
+- **Banner** — per-page banner HTML and a banner design picker. Banners are raw HTML (an image, a styled div, a canvas with a script) and subpages inherit the nearest banner up their path.
+- **Site** — brand, theme, fonts, favicon and custom CSS, all applied immediately.
+- **Structure** — the page tree. Drag rows to reorder or nest, rename titles and slugs inline, ➕ adds a page, ✕ deletes one.
 
-And a table:
+## URLs and structure
+
+The URL is the structure: a page at `docs/markdown/basics` lives under `docs` and `markdown`, and the menus are derived from that. Slugs are lowercase ASCII (`a-z 0-9 - _`). A node without content is a category label — it renders a placeholder and its menu link points at its first child page.
+
+Images and files uploaded anywhere land in a content-addressed store served from `/_f/{hash}.ext`, so links survive page moves. The article editor's format bar and copy-paste both upload images for you.
+
+{dates}
+"""
+
+MD_BASICS = """\
+Every feature below is shown twice: first the Markdown source, then how it renders.
+
+## Headings and text
+
+```markdown
+## A section heading
+### A subsection
+
+*Emphasis*, **strong**, ~~strikethrough~~, `inline code`, and a
+[link to the front page](/). Plain URLs become links automatically:
+https://example.com — and a hard line break
+is just a newline.
+```
+
+## A section heading
+### A subsection
+
+*Emphasis*, **strong**, ~~strikethrough~~, `inline code`, and a [link to the front page](/). Plain URLs become links automatically: https://example.com — and a hard line break
+is just a newline.
+
+## Lists and quotes
+
+```markdown
+- One
+- Two
+  - Nested
+
+1. First
+2. Second
+
+> A blockquote. The URL space is the author's:
+> pretty slugs at the root, nesting only where
+> the content is genuinely structured.
+```
+
+- One
+- Two
+  - Nested
+
+1. First
+2. Second
+
+> A blockquote. The URL space is the author's:
+> pretty slugs at the root, nesting only where
+> the content is genuinely structured.
+
+## Code
+
+Fenced blocks get server-side syntax highlighting:
+
+````markdown
+```python
+def greet(name: str) -> str:
+    return f"Hello, {name}!"
+```
+````
+
+```python
+def greet(name: str) -> str:
+    return f"Hello, {name}!"
+```
+
+## Tables
+
+```markdown
+| Feature | Status |
+|---------|--------|
+| Pages   | done   |
+| Images  | done   |
+```
 
 | Feature | Status |
 |---------|--------|
 | Pages   | done   |
 | Images  | done   |
-| Comments| later  |
+"""
 
-Footnotes work too.[^1]
+MD_EXTENSIONS = """\
+Markdown extensions enabled on this site, source first, then rendered.
+
+## Footnotes
+
+```markdown
+Footnotes work inline.[^1]
 
 [^1]: Rendered at the bottom of the page, with a back-reference.
+```
+
+Footnotes work inline.[^1]
+
+[^1]: Rendered at the bottom of the page, with a back-reference.
+
+## Definition lists
+
+```markdown
+Term
+: A definition list entry.
+
+Another term
+: With its definition.
+```
+
+Term
+: A definition list entry.
+
+Another term
+: With its definition.
+
+## Task lists
+
+```markdown
+- [x] Write content in Markdown
+- [x] Attach images to pages
+- [x] Make tasks clickable on the rendered page
+```
+
+- [x] Write content in Markdown
+- [x] Attach images to pages
+- [x] Make tasks clickable on the rendered page
+
+## Admonitions
+
+```markdown
+!!! note
+    An admonition block for notes, warnings, tips...
+```
+
+!!! note
+    An admonition block for notes, warnings, tips...
+
+## Sub- and superscript
+
+```markdown
+H~2~O and x^2^ + y^2^ = z^2^.
+```
+
+H~2~O and x^2^ + y^2^ = z^2^.
+
+## Raw HTML
+
+HTML passes through untouched — useful for `<kbd>` keys, `<details>` sections, embedded media:
+
+```html
+<details><summary>Click to expand</summary>Hidden content.</details>
+```
+
+<details><summary>Click to expand</summary>Hidden content.</details>
+
+## Smart typography
+
+The typographer is on, so straight quotes become curly, `--` becomes -- and `...` becomes ...
 """
 
-EDITING = """\
-Pages are written in Markdown with extensions. Everything below is plain Markdown source — no special support from the article is needed for the site's layout or scroll effects.
+MD_LAYOUT = """\
+## Images and figures
 
-## Images
+An image standing alone in its paragraph becomes a `<figure>`; its title becomes the caption. Inline images within text stay plain.
 
-Upload a file (`PUT /_api/files/{filename}`) and it lands in the content-addressed store, served immutable from `/_f/{hash}.ext` — an absolute URL that survives page moves:
-
-```
-![Abstract shapes](/_f/....svg "A captioned figure"){.right width=280}
+```markdown
+![Abstract shapes](shapes.svg "A captioned figure")
 ```
 
-![Abstract shapes](shapes.svg "A captioned figure, floated right with an attribute class"){.right width=280}
+![Abstract shapes](shapes.svg "A captioned figure")
 
-The title becomes a `<figcaption>`, and brace attributes (the attrs plugin) control positioning: `{.right}`, `{.left}`, `{.wide}`, plus plain attributes like `width=280`. Absolute and external URLs pass through unchanged.
+## Positioning with attributes
 
-## Text
+Brace attributes (the attrs plugin) control placement: `{.right}` and `{.left}` float, `{.wide}` breaks out of the text column, and plain attributes like `width=280` pass through.
 
-*Emphasis*, **strong**, ~~strikethrough~~, `inline code`, and [links](/about) as usual. Blockquotes:
-
-> The URL space is the author's. Pretty slugs at the root, nesting only
-> where the content is genuinely structured.
-
-## Code
-
-```python
-def render(text: str, page_path: str) -> str:
-    return md.render(text, {"page_path": page_path})
+```markdown
+![Abstract shapes](shapes.svg "Floated right"){.right width=280}
 ```
-"""
 
-LONG_READ = """\
-*An essay long enough to scroll, to demonstrate the gentle reveal of headings, figures and code blocks as they enter the viewport.*
+![Abstract shapes](shapes.svg "Floated right — text wraps around it"){.right width=280}
+
+Floated images let the text wrap around them, like this paragraph does. Relative image paths resolve against the page's own path, so attached files travel with the page. Uploaded files get content-addressed `/_f/` URLs that never break, no matter where the page moves.
+
+{.wide} artwork spans the full content width:
+
+```markdown
+![Dunes](dunes.svg "Full-width artwork"){.wide}
+```
+
+![Dunes](dunes.svg "Full-width artwork between sections"){.wide}
+
+## Datelines
+
+A `{dates}` line on its own expands to the article's published/updated dateline:
+
+```markdown
+{dates}
+```
 
 {dates}
 
-![Layered dunes](dunes.svg "Full-width artwork between sections"){.wide}
+## The page title
 
-## Chapter one
-
-The distinction between a blog and a website is largely an accident of history. Early content management systems filed everything under "posts", stamped them with a date, and arranged them in reverse chronological order under a `/blog/` prefix. Anything else was a "page", which lived somewhere else entirely, often in a separate editing interface with separate rules.
-
-But readers do not think in these terms. A reader follows a link, reads what is there, and follows another link. The URL is a promise about where something lives, not about which database table it came from. Pagerite therefore treats every piece of content as a page: named, addressable, and rendered on the fly.
-
-## Chapter two
-
-Consider what happens to URLs when the tooling leads the design. You get addresses like `/cms/frontpage` or `/blog/post1` — the name of the machine leaking into the name of the thing. The slug should be chosen by the author, the way a book's title is chosen, and it should sit at the root of the site like the title sits on the cover.
-
-Nesting still has its place. Structured content — documentation, a series, a portfolio — benefits from paths that mirror the structure. The navigation on this very site is derived from the paths: open a section, and you see what it contains. No menu editor, no duplication of structure in two places.
-
-Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
-
-Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt.
-
-## Chapter three
-
-On the reading experience itself: motion on the web is usually either absent or obnoxious. The interesting middle ground is motion that acknowledges the reader's own movement — the scroll. Elements that fade in as they enter the viewport give the page a sense of depth, as if the content were arriving just in time.
-
-Crucially, none of this may depend on the article. The author writes Markdown; the effects come from the layout. And when the reader prefers reduced motion, everything must hold still.
-
-Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem. Ut enim ad minima veniam, quis nostrum exercitationem ullam corporis suscipit laboriosam, nisi ut aliquid ex ea commodi consequatur?
-
-```text
-Quis autem vel eum iure reprehenderit
-qui in ea voluptate velit esse quam nihil
-molestiae consequatur, vel illum qui
-dolorem eum fugiat quo voluptas nulla pariatur?
-```
-
-At vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum deleniti atque corrupti quos dolores et quas molestias excepturi sint occaecati cupiditate non provident, similique sunt in culpa qui officia deserunt mollitia animi, id est laborum et dolorum fuga. Et harum quidem rerum facilis est et expedita distinctio.
-
-## Chapter four
-
-Nam libero tempore, cum soluta nobis est eligendi optio cumque nihil impedit quo minus id quod maxime placeat facere possimus, omnis voluptas assumenda est, omnis dolor repellendus. Temporibus autem quibusdam et aut officiis debitis aut rerum necessitatibus saepe eveniet ut et voluptates repudiandae sint et molestiae non recusandae.
-
-Itaque earum rerum hic tenetur a sapiente delectus, ut aut reiciendis voluptatibus maiores alias consequatur aut perferendis doloribus asperiores repellat. And so we arrive back where we started: the blog and the website were one thing all along. [Return to the front page](/).
+If your Markdown contains its own `# heading`, the page title is not repeated as a second h1 — it still supplies the `<title>` and the menu labels.
 """
 
-NOTES_ON_URLS = """\
-A URL is part of the content. A few rules of thumb I keep coming back to:
+GALLERY = """\
+Pages can attach images and position them freely. All artwork here is generated SVG, stored content-addressed and served from `/_f/`.
 
-- Pick slugs like book titles, not like database keys.
-- Nest only when the structure is real.
-- Once published, a URL is a promise. Redirect if you must break it.
+![Shapes](shapes.svg "Floated left with {.left}"){.left width=240}
 
-> Cool URIs don't change; uncool ones at least apologise.
+This text wraps around a left-floated figure. The caption comes from the image title, the float from `{.left width=240}` — brace attributes on the image itself.
 
-That's all. Short posts are posts too.
+![Waves](waves.svg "Floated right with {.right}"){.right width=240}
+
+Mixing floats in one article is fine. Both images were uploaded to this page and referenced by relative path, so the whole page (images included) can be moved in the structure tree without breaking anything.
+
+![Dunes](dunes.svg "Full-bleed with {.wide}"){.wide}
+
+A wide image escapes the text column for emphasis between sections. No HTML needed — just Markdown and an attribute.
 """
 
-CANVAS_NIGHTS = """\
-This post's banner is not an image at all — it's a `<canvas>` animated by a few lines of JavaScript embedded in the page's banner HTML.
+NIGHT_SKY = """\
+This page's banner is not an image — it's a few lines of HTML stored with the page:
 
-Banners on this site are arbitrary markup: an image, a gradient div, or a small animated scene like the one above. Subpages inherit the nearest banner up their path, so a whole section can share one look.
-
-```js
-// the essence of the banner above
-stars.forEach(s => { s.x = (s.x + s.speed * dt) % 1 })
+```html
+<div style="background: linear-gradient(100deg, #14243d, #3d2b6b 45%,
+     #7c5cff 75%, #ff5c8a); height: 100%"></div>
 ```
 
-No build step, no framework — the snippet is stored with the page and dropped into the header as-is.
+Banners are arbitrary trusted markup: a styled div, an `<img>`, even a canvas with a script. Subpages inherit the nearest banner up their path, so a whole section can share one look — this one is set on a leaf page, so nothing else inherits it.
+
+For animated banners, pick a **banner design** in the banner editor instead of writing code: this site ships `stars` (a drifting starfield) and `eyes` (a critter in the grass), and themes can bring their own. Designs are folders in `pagerite/themes/{name}/` — a `banner.css` plus a `banner.html` or `banner.svg` — and are selectable on any page via the UI.
 """
 
 SMALL_RELEASES = """\
@@ -154,39 +282,20 @@ Software wants to be shipped. The longer a change sits unmerged, the more it rot
 A release is a conversation with reality. Small releases keep the conversation lively.
 """
 
-CANVAS_BANNER = """\
-<canvas id="stars"></canvas>
-<script>
-(() => {
-  const c = document.getElementById("stars");
-  const ctx = c.getContext("2d");
-  const fit = () => { c.width = c.clientWidth; c.height = c.clientHeight; };
-  fit();
-  addEventListener("resize", fit);
-  const stars = Array.from({ length: 110 }, () => ({
-    x: Math.random(), y: Math.random(),
-    r: Math.random() * 1.4 + 0.3, v: Math.random() * 0.05 + 0.01,
-  }));
-  let prev = performance.now();
-  (function frame(now) {
-    if (!c.isConnected) return;
-    const dt = Math.min(now - prev, 100); prev = now;
-    ctx.fillStyle = "#0b0e1d";
-    ctx.fillRect(0, 0, c.width, c.height);
-    ctx.fillStyle = "#cdd6ff";
-    for (const s of stars) {
-      s.x = (s.x + s.v * dt / 1000) % 1;
-      ctx.beginPath();
-      ctx.arc(s.x * c.width, s.y * c.height, s.r, 0, 7);
-      ctx.fill();
-    }
-    requestAnimationFrame(frame);
-  })(prev);
-})();
-</script>
+ABOUT = """\
+This site runs on **Pagerite**: FastAPI + html5tagger + kanta, with content written in Markdown and rendered on the fly.
+
+- [How to edit this site](/docs/editing)
+- [Markdown features](/docs/markdown/basics)
+- [The showcase](/showcase/gallery)
+
+*Replace this page with whatever your site is about.*
 """
 
-BLOG_BANNER = '<div style="background: linear-gradient(100deg, #14243d, #3d2b6b 45%, #7c5cff 75%, #ff5c8a)"></div>'
+BANNER_DIV = (
+    '<div style="background: linear-gradient(100deg, #14243d, #3d2b6b 45%,'
+    ' #7c5cff 75%, #ff5c8a); height: 100%"></div>'
+)
 
 WAVES_SVG = """\
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400">
@@ -231,33 +340,45 @@ DUNES_SVG = """\
 """
 
 #: path -> (title, markdown, {filename: bytes}, banner HTML, menu order,
-#: banner design). Banners are deliberately set only on select sub pages
-#: (not the front page), so the theme's default design shows elsewhere.
-#: Note there are deliberately no "docs" or "blog" landing pages: those
-#: labels are created without content, so they render a placeholder page
-#: and their nav links point at the first child (see views.first_leaf).
+#: banner design). Banners are deliberately set only on one leaf page
+#: (showcase/night-sky), so nothing else inherits a custom banner.
+#: Note there are deliberately no "docs" or "showcase" landing pages:
+#: those labels are created without content, so they render a placeholder
+#: page and their nav links point at the first child (see
+#: views.first_leaf).
 PAGES: dict[str, tuple[str, str, dict[str, bytes], str, float, str | None]] = {
     "": ("Welcome", WELCOME, {"waves.svg": WAVES_SVG.encode()}, "", 1, None),
-    "about": ("About", ABOUT, {}, "", 2, None),
-    "docs/editing": (
-        "Writing Content",
-        EDITING,
-        {"shapes.svg": SHAPES_SVG.encode()},
+    "about": ("About", ABOUT, {}, "", 3, None),
+    "docs/editing": ("Editing This Site", EDITING, {}, "", 1, None),
+    "docs/markdown/basics": (
+        "Markdown Basics",
+        MD_BASICS,
+        {},
         "",
         1,
         None,
     ),
-    "blog/the-long-read": (
-        "The Long Read",
-        LONG_READ,
-        {"dunes.svg": DUNES_SVG.encode()},
-        BLOG_BANNER,
+    "docs/markdown/extensions": ("Markdown Extensions", MD_EXTENSIONS, {}, "", 2, None),
+    "docs/markdown/images-and-layout": (
+        "Images and Layout",
+        MD_LAYOUT,
+        {"shapes.svg": SHAPES_SVG.encode(), "dunes.svg": DUNES_SVG.encode()},
+        "",
+        3,
+        None,
+    ),
+    "showcase/gallery": (
+        "Gallery",
+        GALLERY,
+        {
+            "shapes.svg": SHAPES_SVG.encode(),
+            "waves.svg": WAVES_SVG.encode(),
+            "dunes.svg": DUNES_SVG.encode(),
+        },
+        "",
         1,
         None,
     ),
-    # The eyes critter is a named banner design (pagerite/themes/eyes/),
-    # not code embedded in the page.
-    "blog/notes-on-urls": ("Notes on URLs", NOTES_ON_URLS, {}, "", 2, "eyes"),
-    "blog/canvas-nights": ("Canvas Nights", CANVAS_NIGHTS, {}, CANVAS_BANNER, 3, None),
-    "blog/small-releases": ("Small Releases", SMALL_RELEASES, {}, "", 4, None),
+    "showcase/night-sky": ("Night Sky", NIGHT_SKY, {}, BANNER_DIV, 2, None),
+    "showcase/small-releases": ("Small Releases", SMALL_RELEASES, {}, "", 3, None),
 }

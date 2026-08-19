@@ -100,18 +100,22 @@ function swapRegions(doc) {
 export async function loadPlain(p) {
   let doc
   let finalUrl = `/${p}`
+  let html
   try {
     const res = await fetch(finalUrl)
     const type = res.headers.get('content-type') || ''
     if (!type.includes('text/html')) return null
     if (res.redirected) finalUrl = res.url
-    doc = new DOMParser().parseFromString(await res.text(), 'text/html')
+    html = await res.text()
+    doc = new DOMParser().parseFromString(html, 'text/html')
   } catch { return null }
   if (!doc.getElementById('main')) return null
   swapRegions(doc)
   history.replaceState(null, '', finalUrl)
   runScripts(document.getElementById('page-banner'))
   runScripts(document.getElementById('main'))
+  // Keep pagerite.js's in-memory page cache in sync with the fresh copy.
+  dispatchEvent(new CustomEvent('pagerite:page-fetched', { detail: { url: finalUrl, html } }))
   dispatchEvent(new CustomEvent('pagerite:preview')) // re-inject + re-tuck the edit pens
   return finalUrl
 }

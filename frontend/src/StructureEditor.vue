@@ -228,23 +228,7 @@ async function commitSlug(node, ev) {
   }
 }
 
-// Two-step delete (no dialogs): the first click arms the row's button for
-// a few seconds, the second actually deletes.
-const arming = ref(null)
-let armTimer = null
-
-function armRemove(node) {
-  if (arming.value === node.path) {
-    clearTimeout(armTimer)
-    arming.value = null
-    removePage(node)
-  } else {
-    arming.value = node.path
-    clearTimeout(armTimer)
-    armTimer = setTimeout(() => { arming.value = null }, 3000)
-  }
-}
-
+// Deletion is immediate, no confirmation.
 async function removePage(node) {
   const res = await fetch(`/_api/pages/${node.path}`, { method: 'DELETE' })
   if (res.ok) {
@@ -267,8 +251,7 @@ async function removePage(node) {
 provide('structureHandlers', {
   current: () => path.value,
   open: navigate,
-  arming: () => arming.value,
-  armRemove,
+  removePage,
   reorder: onReorder,
   titleInput: onTitleInput,
   commitSlug,
@@ -284,7 +267,6 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  clearTimeout(armTimer)
   for (const t of Object.values(timers)) clearTimeout(t)
   removeEventListener('pagerite:editor-shown', onEditorShown)
 })

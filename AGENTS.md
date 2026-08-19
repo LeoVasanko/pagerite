@@ -129,7 +129,12 @@ not for the public pages. See `docs/design-principles.md` for the design.
     created, via a `@kanta.bootstrap` handler in `app.py`.
   - `frontend/src/` — the Vue editor and public-page entries.
     - `main.js` — Vue editor app entry, mounts the tabbed EditorShell.
-    - `pagerite.js` — public page entry; runs fetch-navigation, scroll-reveal,
+    - `pagerite.js` — public page entry; runs fetch-navigation (backed by an
+      in-memory page cache: every visible internal link — and the current
+      page — is fetched once at load, clicks are then served from JS with no
+      fetch, and the editors' `loadPlain` keeps the cache current via a
+      `pagerite:page-fetched` event; articles are `cache-control: no-cache`
+      on the wire), scroll-reveal,
       OverlayScrollbars on `document.body` (floating, auto-hiding scrollbars
       that never reserve layout space or shift the page when appearing;
       native scroll APIs like `window.scrollTo` keep working; themed via the
@@ -174,7 +179,9 @@ not for the public pages. See `docs/design-principles.md` for the design.
       gradient brand, flower bullets, and a layered-parallax banner (sun
       rises, clouds drift, nearer hills move less) with idle animations
       (swaying flowers, floating clouds, breathing sun glow) wrapped in
-      `prefers-reduced-motion: no-preference`) and the
+      `prefers-reduced-motion: no-preference`); standalone banner designs
+      (no theme.css) ship as `eyes` (a canvas critter in the grass) and
+      `stars` (a drifting starfield)) and the
       companion `banner.css` banner designs are served by the backend.
     - Vite builds ES-module `.js` outputs; the backend renders `<script
       type="module">` for them (module scripts defer by default).

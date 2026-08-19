@@ -268,29 +268,31 @@ import "overlayscrollbars/overlayscrollbars.css";
     }
   }
 
-  // --- Preloading ------------------------------------------------------
-  // Warm the HTTP cache with all linked pages and their resources, so
-  // navigation (and the cube transition) is instant. Pages carry ETags,
-  // so re-running this after each navigation revalidates cheaply (304)
-  // and picks up changed content and images.
+  // --- Page cache / preloading ------------------------------------------
+  // Articles are deliberately NOT HTTP-cacheable, so speed comes from an
+  // in-memory cache instead: at load (and after each swap) every visible
+  // internal link is fetched exactly once, and navigation is served from
+  // memory with no fetch at all. Editor re-renders (swapdoc.loadPlain)
+  // announce their fresh copies via pagerite:page-fetched, keeping the
+  // cache in sync after edits.
+  const pageCache = new Map(); // pathname -> HTML text
+  addEventListener("pagerite:page-fetched", (ev) => {
+    pageCache.set(new URL(ev.detail.url, location.href).pathname, ev.detail.html);
+  });
+
   function preload() {
-    const urls = new Set();
-    for (const a of document.querySelectorAll('#nav a[href^="/"], #main a[href^="/"]')) {
+    const urls = new Set([location.pathname]);
+    for (const a of document.querySelectorAll(
+      '#nav a[href^="/"], #sidebar a[href^="/"], #main a[href^="/"]',
+    )) {
       urls.add(a.pathname);
     }
     for (const url of urls) {
-      if (url === location.pathname) continue;
+      if (pageCache.has(url)) continue;
       fetch(url)
-        .then((r) => (r.ok ? r.text() : ""))
-        .then((html) => {
-          if (!html) return;
-          // Off-screen parse: load the page's images and other resources
-          const doc = new DOMParser().parseFromString(html, "text/html");
-          for (const img of doc.querySelectorAll("img")) {
-            const i = new Image();
-            i.src = img.src;
-          }
-        })
+        .then((r) => (r.ok && (r.headers.get("content-type") || "").includes("text/html")
+          ? r.text() : ""))
+        .then((html) => { if (html) pageCache.set(url, html); })
         .catch(() => {});
     }
   }
@@ -333,16 +335,21 @@ import "overlayscrollbars/overlayscrollbars.css";
     }
     let doc;
     let finalUrl = url;
-    try {
-      const res = await fetch(url);
-      const type = res.headers.get("content-type") || "";
-      if (!res.ok || !type.includes("text/html")) throw new Error("not a page");
-      // Reflect any redirect the server issued.
-      if (res.redirected) finalUrl = res.url;
-      doc = new DOMParser().parseFromString(await res.text(), "text/html");
-    } catch {
-      location.href = url; // fall back to a normal navigation
-      return;
+    const cached = pageCache.get(new URL(url, location.href).pathname);
+    if (cached) {
+      doc = new DOMParser().parseFromString(cached, "text/html");
+    } else {
+      try {
+        const res = await fetch(url);
+        const type = res.headers.get("content-type") || "";
+        if (!res.ok || !type.includes("text/html")) throw new Error("not a page");
+        // Reflect any redirect the server issued.
+        if (res.redirected) finalUrl = res.url;
+        doc = new DOMParser().parseFromString(await res.text(), "text/html");
+      } catch {
+        location.href = url; // fall back to a normal navigation
+        return;
+      }
     }
     if (REGIONS.some((id) => !doc.getElementById(id))) {
       location.href = url;

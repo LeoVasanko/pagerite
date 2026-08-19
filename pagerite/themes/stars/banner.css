@@ -1,0 +1,7 @@
+/* Stars banner design: a drifting starfield (banner.html — canvas + script
+   inlined by the backend into #page-banner). Fixed-height stage matching
+   the canvas. */
+
+#banner {
+  height: 240px;
+}

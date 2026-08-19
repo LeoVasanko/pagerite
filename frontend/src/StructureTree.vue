@@ -144,12 +144,11 @@ function onEnd() {
                 v-if="element.has_content || !element.children.length"
                 type="button"
                 class="act del"
-                :class="{ armed: handlers.arming() === element.path }"
                 :title="element.children.length
                   ? 'delete the landing page (the category keeps its subpages)'
                   : 'delete page'"
-                @click="handlers.armRemove(element)"
-              >{{ handlers.arming() === element.path ? 'delete?' : '✕' }}</button>
+                @click="handlers.removePage(element)"
+              >✕</button>
             </span>
           </template>
         </div>
@@ -298,12 +297,6 @@ body.tree-dragging .treelist {
   font-size: 0.8rem;
   cursor: pointer;
   white-space: nowrap;
-}
-
-/* Two-step delete: the first click arms the button, the second deletes. */
-.act.armed {
-  color: #e06c75;
-  font-weight: 600;
 }
 
 .del:hover {

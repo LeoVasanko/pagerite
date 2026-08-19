@@ -1,0 +1,52 @@
+<canvas id="stars"></canvas>
+<style>
+  #stars {
+    width: 100%;
+    height: 240px;
+    display: block;
+  }
+</style>
+<script><!--
+(() => {
+  const c = document.getElementById('stars')
+  const ctx = c.getContext('2d')
+  const DPR = devicePixelRatio || 1
+
+  const fit = () => {
+    const w = Math.max(1, c.clientWidth)
+    const h = Math.max(1, c.clientHeight)
+    c.width = Math.round(w * DPR)
+    c.height = Math.round(h * DPR)
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0)
+  }
+
+  fit()
+  addEventListener('resize', fit)
+
+  const stars = Array.from({ length: 110 }, () => ({
+    x: Math.random(),
+    y: Math.random(),
+    r: Math.random() * 1.4 + 0.3,
+    v: Math.random() * 0.05 + 0.01
+  }))
+
+  let prev = performance.now()
+  ;(function frame(now) {
+    if (!c.isConnected) return
+    const w = c.clientWidth
+    const h = c.clientHeight
+    const dt = Math.min(now - prev, 100)
+    prev = now
+    ctx.fillStyle = '#0b0e1d'
+    ctx.fillRect(0, 0, w, h)
+    ctx.fillStyle = '#cdd6ff'
+    for (const s of stars) {
+      s.x = (s.x + (s.v * dt) / 1000) % 1
+      ctx.beginPath()
+      ctx.arc(s.x * w, s.y * h, s.r, 0, 7)
+      ctx.fill()
+    }
+    requestAnimationFrame(frame)
+  })(prev)
+})()
+</script>

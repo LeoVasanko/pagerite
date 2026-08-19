@@ -132,22 +132,35 @@ body {
   overflow: hidden;
   /* Stack the design artwork and the page's own banner code on top of
      each other (artwork first): the banner is a background layer, author
-     code overlays it. A single child behaves exactly as before. */
+     code overlays it. A single child behaves exactly as before. The track
+     is explicitly banner-sized: an auto row would size to the content
+     (an SVG's intrinsic aspect ratio makes it far taller than the banner),
+     and children's height:100% would resolve against that bloated row. */
   display: grid;
+  grid-template: 100% / 100%;
 }
 
 /* :not(style, script): author-level display:block would override the UA's
-   display:none on those and render their source as banner text. */
+   display:none on those and render their source as banner text. No
+   width/height: the default stretch alignment fills the track without a
+   percentage-resolution cycle. */
 #page-banner>*:not(style, script) {
   grid-area: 1 / 1;
   display: block;
-  width: 100%;
-  height: 100%;
   object-fit: cover;
+  /* Banner artwork is bottom-anchored: the meaningful content (horizon,
+     ground, characters) sits at the bottom, so on wide viewports — where
+     the fixed-height banner crops the artwork vertically — the sky/top is
+     what scrolls out of view. object-position covers replaced elements
+     (img, canvas); inline SVG is anchored by the transform-origin below
+     together with preserveAspectRatio="...YMax slice" in the artwork. */
+  object-position: bottom;
   /* Scroll parallax: pagerite.js sets --pry on <html>; the banner stays
      windowed in place while the artwork drifts inside it. The scale
-     provides overscan so the drift never reveals an edge. */
+     provides overscan so the drift never reveals an edge; scaling from the
+     bottom keeps the artwork's bottom edge pinned to the banner's. */
   transform: scale(1.25) translateY(var(--pry, 0px));
+  transform-origin: bottom;
   will-change: transform;
 }
 
