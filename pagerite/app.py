@@ -655,7 +655,18 @@ def _track_entry(path: str, request: Request) -> None:
 
     Nothing is counted on the GET itself — the client's /_a ping starts the
     visit, so bots and admin browsing never register as visits.
+
+    The devserver's health probe (``GET /?from=devserver.py`` from
+    ``127.0.0.1``) is ignored: it is not real traffic and would otherwise be
+    logged as a crawler hit.  The root-path and localhost checks prevent
+    remote visitors from hiding traffic with the same query string.
     """
+    if (
+        path == ""
+        and str(request.url.query) == "from=devserver.py"
+        and _client_ip(request) == "127.0.0.1"
+    ):
+        return
     own_origin = f"https://{urlparse(str(request.base_url)).netloc}"
     analytics_store.track_entry(
         request.headers.get("referer", ""),
