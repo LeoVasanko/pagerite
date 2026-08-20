@@ -8,13 +8,8 @@
 // See docs/analytics.md for the data format.
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RANGES } from './analytics/time.js'
-import {
-  calcTotalViews,
-  countByField,
-  countUtmTags,
-  formatCounts,
-  formatVisitRows,
-} from './analytics/format.js'
+import { calcTotalViews, formatVisitRows } from './analytics/format.js'
+import * as flagSvgs from 'country-flag-icons/string/3x2'
 import TransitionGraph from './TransitionGraph.vue'
 import VisitorCharts from './VisitorCharts.vue'
 
@@ -62,14 +57,19 @@ watch(range, (r) => {
 })
 
 const visitRows = computed(() => formatVisitRows(visits.value, pageTree.value))
-const languageCounts = computed(() => countByField(visits.value, 'lang'))
-const countryCounts = computed(() => countByField(visits.value, 'country'))
-const utmTagCounts = computed(() => countUtmTags(visits.value))
-const hasBreakdowns = computed(() =>
-  languageCounts.value.length > 0
-  || countryCounts.value.length > 0
-  || utmTagCounts.value.length > 0,
-)
+
+function flagSvg(code) {
+  return flagSvgs[code?.toUpperCase()] || ''
+}
+
+function countryName(code) {
+  if (!code) return ''
+  try {
+    return new Intl.DisplayNames(['en'], { type: 'region' }).of(code.toUpperCase())
+  } catch {
+    return ''
+  }
+}
 </script>
 
 <template>
@@ -91,22 +91,6 @@ const hasBreakdowns = computed(() =>
         <section class="totals">
           <div><strong>{{ visits.length }}</strong> visits</div>
           <div><strong>{{ totalViews }}</strong> page views</div>
-        </section>
-
-        <section v-if="hasBreakdowns" class="breakdowns">
-          <div v-if="languageCounts.length" class="breakdown">
-            <h3>Languages</h3>
-            <p>{{ formatCounts(languageCounts) }}</p>
-          </div>
-          <div v-if="countryCounts.length" class="breakdown">
-            <h3>Countries</h3>
-            <p>{{ formatCounts(countryCounts) }}</p>
-            <p class="note">from Accept-Language or DB-IP when available</p>
-          </div>
-          <div v-if="utmTagCounts.length" class="breakdown">
-            <h3>UTM tags</h3>
-            <p>{{ formatCounts(utmTagCounts) }}</p>
-          </div>
         </section>
 
         <VisitorCharts :data="data" :range="range" />
@@ -142,7 +126,10 @@ const hasBreakdowns = computed(() =>
                   <td>{{ v.ip }}</td>
                   <td>{{ v.host }}</td>
                   <td>{{ v.lang }}</td>
-                  <td>{{ v.country }}</td>
+                  <td class="country">
+                    <span v-if="flagSvg(v.country)" class="flag" v-html="flagSvg(v.country)" :title="countryName(v.country) || v.country"></span>
+                    <template v-else>—</template>
+                  </td>
                   <td class="ua" :title="v.ua">{{ v.ua }}</td>
                   <td>{{ v.utm }}</td>
                 </tr>
@@ -288,31 +275,20 @@ const hasBreakdowns = computed(() =>
   white-space: nowrap;
 }
 
-.breakdowns {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
-  gap: 1rem;
+.visit-table .country .flag {
+  display: inline-flex;
+  width: 18px;
+  height: 12px;
+  border-radius: 2px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2) inset;
 }
 
-.breakdown {
-  font-size: 0.9rem;
-}
-
-.breakdown h3 {
-  margin: 0 0 0.3rem;
-  font-size: 0.9rem;
-  color: var(--muted);
-}
-
-.breakdown p {
-  margin: 0;
-  line-height: 1.4;
-}
-
-.breakdown .note {
-  font-size: 0.8rem;
-  color: var(--muted);
-  margin-top: 0.2rem;
+.visit-table .country .flag :deep(svg) {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 .empty, .loading, .error { color: var(--muted); }

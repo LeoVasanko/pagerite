@@ -18,6 +18,7 @@
     "@codemirror/view": "^6.43.8",
     "@lezer/highlight": "^1.2.3",
     "codemirror": "^6.0.2",
+    "country-flag-icons": "^1.6.20",
     "overlayscrollbars": "^2.16.0",
     "transliteration": "^2.6.1",
     "vue": "^3.5.26",
