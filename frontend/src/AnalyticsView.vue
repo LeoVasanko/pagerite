@@ -8,7 +8,13 @@
 // See docs/analytics.md for the data format.
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RANGES } from './analytics/time.js'
-import { calcTotalViews, formatRecentVisits } from './analytics/format.js'
+import {
+  calcTotalViews,
+  countByField,
+  countUtmTags,
+  formatCounts,
+  formatVisitRows,
+} from './analytics/format.js'
 import TransitionGraph from './TransitionGraph.vue'
 import VisitorCharts from './VisitorCharts.vue'
 
@@ -55,7 +61,15 @@ watch(range, (r) => {
   }
 })
 
-const recentVisits = computed(() => formatRecentVisits(visits.value, pageTree.value))
+const visitRows = computed(() => formatVisitRows(visits.value, pageTree.value))
+const languageCounts = computed(() => countByField(visits.value, 'lang'))
+const countryCounts = computed(() => countByField(visits.value, 'country'))
+const utmTagCounts = computed(() => countUtmTags(visits.value))
+const hasBreakdowns = computed(() =>
+  languageCounts.value.length > 0
+  || countryCounts.value.length > 0
+  || utmTagCounts.value.length > 0,
+)
 </script>
 
 <template>
@@ -79,22 +93,62 @@ const recentVisits = computed(() => formatRecentVisits(visits.value, pageTree.va
           <div><strong>{{ totalViews }}</strong> page views</div>
         </section>
 
+        <section v-if="hasBreakdowns" class="breakdowns">
+          <div v-if="languageCounts.length" class="breakdown">
+            <h3>Languages</h3>
+            <p>{{ formatCounts(languageCounts) }}</p>
+          </div>
+          <div v-if="countryCounts.length" class="breakdown">
+            <h3>Countries</h3>
+            <p>{{ formatCounts(countryCounts) }}</p>
+            <p class="note">from Accept-Language or DB-IP when available</p>
+          </div>
+          <div v-if="utmTagCounts.length" class="breakdown">
+            <h3>UTM tags</h3>
+            <p>{{ formatCounts(utmTagCounts) }}</p>
+          </div>
+        </section>
+
         <VisitorCharts :data="data" :range="range" />
         <TransitionGraph :data="data" :range="range" :page-tree="pageTree" @close="emit('close')" />
 
         <section>
           <h2>Recent visits</h2>
-          <ul v-if="recentVisits.length" class="visits">
-            <li v-for="(v, i) in recentVisits" :key="i">
-              <span class="when">{{ v.when }}</span>
-              <span class="trail">
-                <a v-for="(s, si) in v.steps" :key="si"
-                   :href="s.path" :title="s.title" @click="emit('close')">
-                  {{ s.slug }}
-                </a>
-              </span>
-            </li>
-          </ul>
+          <div v-if="visitRows.length" class="visit-table-wrap">
+            <table class="visit-table">
+              <thead>
+                <tr>
+                  <th>when</th>
+                  <th>trail</th>
+                  <th>referer</th>
+                  <th>ip</th>
+                  <th>host</th>
+                  <th>lang</th>
+                  <th>country</th>
+                  <th>ua</th>
+                  <th>utm</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(v, i) in visitRows" :key="i">
+                  <td class="when">{{ v.when }}</td>
+                  <td class="trail">
+                    <a v-for="(s, si) in v.trail" :key="si"
+                       :href="s.path" :title="s.title" @click="emit('close')">
+                      {{ s.slug }}
+                    </a>
+                  </td>
+                  <td>{{ v.referer }}</td>
+                  <td>{{ v.ip }}</td>
+                  <td>{{ v.host }}</td>
+                  <td>{{ v.lang }}</td>
+                  <td>{{ v.country }}</td>
+                  <td class="ua" :title="v.ua">{{ v.ua }}</td>
+                  <td>{{ v.utm }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
           <p v-else class="empty">no visits recorded yet</p>
         </section>
       </template>
@@ -177,34 +231,88 @@ const recentVisits = computed(() => formatRecentVisits(visits.value, pageTree.va
 }
 .totals strong { font-size: 1.5rem; }
 
-.visits {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.visit-table-wrap {
+  overflow-x: auto;
 }
-.visits li {
-  display: flex;
-  gap: 1rem;
-  padding: 0.2rem 0;
-  border-bottom: 1px solid var(--line);
-}
-.visits .when {
-  flex-shrink: 0;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-.visits .trail {
+
+.visit-table {
+  width: 100%;
+  border-collapse: collapse;
   font-family: monospace;
-  word-break: normal;
+  font-size: 0.82rem;
+  line-height: 1.3;
+}
+
+.visit-table th,
+.visit-table td {
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.visit-table th {
+  color: var(--muted);
+  font-weight: normal;
+  text-transform: lowercase;
+  position: sticky;
+  top: 0;
+  background: var(--bg, Canvas);
+}
+
+.visit-table .when {
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.visit-table .trail {
+  max-width: 20rem;
   overflow-wrap: break-word;
 }
-.visits .trail a {
+
+.visit-table .trail a {
   color: var(--text);
   text-decoration: none;
 }
-.visits .trail a:hover { color: var(--accent); }
-.visits .trail a + a {
+
+.visit-table .trail a:hover { color: var(--accent); }
+
+.visit-table .trail a + a {
   margin-left: 0.5rem;
+}
+
+.visit-table .ua {
+  max-width: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.breakdowns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 1rem;
+}
+
+.breakdown {
+  font-size: 0.9rem;
+}
+
+.breakdown h3 {
+  margin: 0 0 0.3rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.breakdown p {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.breakdown .note {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-top: 0.2rem;
 }
 
 .empty, .loading, .error { color: var(--muted); }

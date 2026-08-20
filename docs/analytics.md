@@ -24,9 +24,9 @@ The client (`pagerite.js`) POSTs fire-and-forget pings to `/_a` with
   nothing, so bots and admin browsing never register. Reloads are not
   visits: the ping is skipped (PerformanceNavigationTiming `reload`), so a
   refresh neither counts a second view nor logs a self-transition. The GET
-  handler only stashes a cross-origin https `Referer` (origin part only) in
-  an in-memory IP → referer table, consumed by the ping that starts the
-  visit; internal or absent referers never touch the table.
+  handler stashes a cross-origin https `Referer` (origin part only) and any
+  `utm_*` query parameters in in-memory IP tables, consumed by the ping that
+  starts the visit; internal or absent referers never touch the referer table.
 - **Internal fetch-navigations**: `to` is the target path, sent only after
   the swap actually happened (a failed swap falls back to a full load,
   whose initial ping counts the view instead — no gap, no double count).
@@ -41,6 +41,19 @@ The client (`pagerite.js`) POSTs fire-and-forget pings to `/_a` with
 - The server validates `to`: internal paths must be valid slug paths
   ("/" or `[a-z0-9_-]` segments), external ones are re-derived to the
   https origin and accepted only when the client sent exactly that.
+- The initial ping also records the visitor's `User-Agent` and
+  `Accept-Language` headers. The first `Accept-Language` tag is stored as
+  `lang` (e.g. `en-us`) and its region subtag, if present, is stored as
+  an initial `country` (e.g. `US`).
+- The visitor IP is stored.  A reverse-DNS lookup is attempted for each new
+  visit and the result, when available, is cached in RAM and stored as
+  `host`; local/reserved/multicast addresses are skipped.
+- If a DB-IP MMDB file (`dbip-*.mmdb` or `dbip-*.mmdb.gz`) is present in the
+  repository root, it is loaded at startup and used to look up a more accurate
+  `country`.  The MMDB lookup and the reverse-DNS lookup run in background
+  tasks after the visit is stored, so the `/ _a` response is never delayed.
+  The decompressed `dbip-*.mmdb` file is kept in the repository root and
+  ignored by git.
 
 ## Visits and sessions
 
@@ -49,17 +62,26 @@ There are no cookies. A visit is tied together by the (IP, User-Agent) pair
 direct peer): the first ping from a pair starts a new visit, subsequent
 pings extend it. Pings arriving with no known session (server restart)
 start a fresh visit from the first ping — treated as missing data rather
-than dropped. The (IP, UA) → visit map and the IP → entry-referer table
-are in-memory only; IPs are never persisted.
+than dropped. The (IP, UA) → visit map and the IP → entry-referer/UTM
+tables are in-memory only, but the IP and any resolvable reverse-DNS host
+name are stored on the `Visit` record itself.
 
 Each `Visit` record:
 
 - `start` — timestamp of the first event,
 - `entry` — first page (path) seen,
 - `referer` — external https origin of the initial load, `""` for direct,
+- `ip` — visitor IP address (first `X-Forwarded-For` hop, or direct peer),
+- `host` — reverse-DNS host name for `ip` when resolvable, else `""`,
 - `trail` — everything seen afterwards in first-seen order: page paths and
   external exit origins. Re-visiting an already seen page (incl. the entry)
   does not append.
+- `lang` — first `Accept-Language` tag, lowercased (e.g. `en-us`),
+- `country` — two-letter country code.  Initially derived from the
+  `Accept-Language` region subtag, but overwritten by the DB-IP MMDB result
+  when a database is available,
+- `ua` — raw `User-Agent` string from the initial ping,
+- `utm` — `utm_*` query parameters from the landing URL, as a dict.
 
 ## Aggregates
 

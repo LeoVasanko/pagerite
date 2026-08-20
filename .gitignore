@@ -3,6 +3,7 @@
 *.lock
 *.kantadb
 pagerite.analytics.json
+dbip-*.mmdb*
 /pagerite/frontend-build
 package-lock.json
 

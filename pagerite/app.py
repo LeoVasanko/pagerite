@@ -12,13 +12,19 @@ walking the tree (``resolve``), moves are slot detach/attach
 (``find_slot``) with a fresh order key from the new siblings.
 """
 
+import asyncio
+import gzip
+import ipaddress
 import mimetypes
 import os
 import re
+import shutil
+import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from email.utils import format_datetime
+from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -50,6 +56,74 @@ ANALYTICS_PATH = Path(
     os.getenv("PAGERITE_ANALYTICS", DB_PATH.replace(".kantadb", "") + ".analytics.json")
 )
 analytics_store = analytics.Store(ANALYTICS_PATH)
+
+
+# Repository root from this file's location (pagerite/app.py -> ..).
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _geoip_db_path() -> Path | None:
+    """Find a DB-IP MMDB in the repo root, preferring an already-decompressed
+    ``.mmdb`` over the matching ``.mmdb.gz``.  Returns None if none is present.
+    """
+    mmdb = sorted(_REPO_ROOT.glob("dbip-*.mmdb"))
+    if mmdb:
+        return mmdb[0]
+    gz = sorted(_REPO_ROOT.glob("dbip-*.mmdb.gz"))
+    if gz:
+        return gz[0]
+    return None
+
+
+class GeoIP:
+    """Lazy DB-IP MMDB reader.  Call ``_load()`` once at startup before
+    concurrent requests arrive; ``country()`` is read-only and safe to call
+    from ``asyncio.to_thread`` workers afterwards.
+    """
+
+    def __init__(self) -> None:
+        self._reader: object | None = None
+
+    def _decompress(self, source: Path, target: Path) -> None:
+        if target.exists():
+            return
+        tmp = target.with_suffix(target.suffix + ".tmp")
+        with gzip.open(source, "rb") as src, open(tmp, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+        os.replace(tmp, target)
+
+    def _load(self) -> None:
+        if self._reader is not None:
+            return
+        source = _geoip_db_path()
+        if source is None:
+            return
+        if source.suffix == ".gz":
+            target = source.with_suffix("")
+            self._decompress(source, target)
+            source = target
+        try:
+            import maxminddb
+
+            self._reader = maxminddb.open_database(str(source))
+        except Exception:
+            pass
+
+    def country(self, ip: str) -> str:
+        """Two-letter ISO country code for ``ip``, or "" when unavailable."""
+        if not ip or self._reader is None:
+            return ""
+        try:
+            rec = self._reader.get(ip)
+            if rec:
+                return (rec.get("country") or {}).get("iso_code", "")
+        except Exception:
+            pass
+        return ""
+
+
+_geoip = GeoIP()
+
 
 # Our own data root; kanta edits it in place, reads are plain attribute access.
 data = Data()
@@ -150,10 +224,13 @@ def _seed(data: Data) -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Open the database, migrate legacy content, load assets."""
+    """Open the database, migrate legacy content, load assets, load GeoIP."""
     await kanta.open()
     _migrate_legacy()
     await frontend.load()
+    # Decompress/open the DB-IP MMDB once at startup.  Lookups are then
+    # read-only and safe to run in background ``to_thread`` workers.
+    await asyncio.to_thread(_geoip._load)
     yield
     await kanta.close()
 
@@ -510,6 +587,43 @@ def _client_ip(request: Request) -> str:
     return forwarded or (request.client.host if request.client else "")
 
 
+@lru_cache(maxsize=4096)
+def _cached_ptr(ip: str) -> str:
+    """Reverse-DNS lookup with in-RAM LRU cache.  Returns the host name or ""."""
+    if not ip:
+        return ""
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return ""
+    if addr.is_private or addr.is_loopback or addr.is_reserved or addr.is_multicast or addr.is_link_local:
+        return ""
+    try:
+        host, _, _ = socket.gethostbyaddr(ip)
+    except socket.herror:
+        return ""
+    return host
+
+
+async def _lookup_host(ip: str) -> str:
+    """Async wrapper around ``_cached_ptr``; runs the blocking lookup in a thread."""
+    return await asyncio.to_thread(_cached_ptr, ip)
+
+
+async def _geoip_country(ip: str) -> str:
+    """Async wrapper around the DB-IP MMDB lookup."""
+    return await asyncio.to_thread(_geoip.country, ip)
+
+
+async def _enrich_visit(index: int, ip: str) -> None:
+    """Run non-blocking reverse-DNS and geoip enrichment for a new visit."""
+    if not ip:
+        return
+    host = await _lookup_host(ip)
+    country = await _geoip_country(ip)
+    analytics_store.enrich_visit(index, host=host, country=country)
+
+
 class AnalyticsPing(BaseModel):
     """Navigation ping from pagerite.js (see docs/analytics.md)."""
 
@@ -519,22 +633,35 @@ class AnalyticsPing(BaseModel):
 
 @app.post("/_a", status_code=204)
 async def analytics_ping(ping: AnalyticsPing, request: Request) -> None:
-    """Record a navigation ping ({fr, to}); fire-and-forget, never fails."""
-    analytics_store.ping(
-        ping.fr, ping.to, _client_ip(request),
+    """Record a navigation ping ({fr, to}); fire-and-forget, never fails.
+
+    The reverse-DNS and DB-IP geoip lookups happen in a background task so
+    the response is never delayed by slow DNS or the first MMDB decompress.
+    """
+    ip = _client_ip(request)
+    index = analytics_store.ping(
+        ping.fr,
+        ping.to,
+        ip,
         request.headers.get("user-agent", ""),
+        request.headers.get("accept-language", ""),
     )
+    if index is not None:
+        asyncio.create_task(_enrich_visit(index, ip))
 
 
 def _track_entry(path: str, request: Request) -> None:
-    """Stash the referer of the document GET for the initial ping.
+    """Stash the referer and UTM tags of the document GET for the initial ping.
 
     Nothing is counted on the GET itself — the client's /_a ping starts the
     visit, so bots and admin browsing never register.
     """
     own_origin = f"https://{urlparse(str(request.base_url)).netloc}"
     analytics_store.entry_referer(
-        request.headers.get("referer", ""), own_origin, _client_ip(request)
+        request.headers.get("referer", ""),
+        own_origin,
+        _client_ip(request),
+        str(request.url.query),
     )
 
 
