@@ -651,16 +651,18 @@ async def analytics_ping(ping: AnalyticsPing, request: Request) -> None:
 
 
 def _track_entry(path: str, request: Request) -> None:
-    """Stash the referer and UTM tags of the document GET for the initial ping.
+    """Stash the referer/UTM tags and queue a pending crawler hit for the GET.
 
     Nothing is counted on the GET itself — the client's /_a ping starts the
-    visit, so bots and admin browsing never register.
+    visit, so bots and admin browsing never register as visits.
     """
     own_origin = f"https://{urlparse(str(request.base_url)).netloc}"
-    analytics_store.entry_referer(
+    analytics_store.track_entry(
         request.headers.get("referer", ""),
         own_origin,
         _client_ip(request),
+        request.headers.get("user-agent", ""),
+        "/" if path == "" else f"/{path}",
         str(request.url.query),
     )
 
@@ -678,6 +680,15 @@ def _is_reserved(path: str) -> bool:
     if path == "":
         return False
     return any(not _SLUG_RE.match(seg) for seg in path.split("/"))
+
+
+def _is_trackable_path(path: str) -> bool:
+    """Content URLs only: skip auth endpoints and reserved/machinery paths."""
+    if not path:
+        return True
+    if path == "auth" or path.startswith("auth/"):
+        return False
+    return not _is_reserved(path)
 
 
 def _check_reserved(path: str) -> None:
@@ -881,7 +892,8 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
         etag = f'"{path}@{node.modified.timestamp()}v{data.version}"'
         if request.headers.get("if-none-match") == etag:
             return Response(status_code=304)
-        _track_entry(path, request)
+        if _is_trackable_path(path):
+            _track_entry(path, request)
         return HTMLResponse(
             views.render_page(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html, str(request.base_url).rstrip("/")),
             headers={
@@ -893,7 +905,8 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
     if node is not None and node.published and node.content is None:
         # Category label without a landing page: placeholder with the pen
         # to create it (404 — no page here, but the node is real).
-        _track_entry(path, request)
+        if _is_trackable_path(path):
+            _track_entry(path, request)
         return HTMLResponse(
             views.render_category(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html),
             404,
@@ -908,5 +921,6 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
         for slug, item in sorted_nodes(data.menu):
             if item.published:
                 return RedirectResponse(f"/{slug}")
-    _track_entry(path, request)
+    if _is_trackable_path(path):
+        _track_entry(path, request)
     return HTMLResponse(views.render_not_found(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html), 404)

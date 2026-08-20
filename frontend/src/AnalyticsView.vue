@@ -8,7 +8,14 @@
 // See docs/analytics.md for the data format.
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RANGES } from './analytics/time.js'
-import { calcTotalViews, formatVisitRows } from './analytics/format.js'
+import {
+  calcTotalViews,
+  copyIp,
+  countCrawlerUas,
+  formatCounts,
+  formatCrawlerRows,
+  formatVisitRows,
+} from './analytics/format.js'
 import * as flagSvgs from 'country-flag-icons/string/3x2'
 import TransitionGraph from './TransitionGraph.vue'
 import VisitorCharts from './VisitorCharts.vue'
@@ -57,6 +64,9 @@ watch(range, (r) => {
 })
 
 const visitRows = computed(() => formatVisitRows(visits.value, pageTree.value))
+const crawlers = computed(() => data.value?.crawlers || [])
+const crawlerRows = computed(() => formatCrawlerRows(crawlers.value))
+const topCrawlerUas = computed(() => countCrawlerUas(crawlers.value).slice(0, 10))
 
 function flagSvg(code) {
   return flagSvgs[code?.toUpperCase()] || ''
@@ -106,7 +116,6 @@ function countryName(code) {
                   <th>trail</th>
                   <th>referer</th>
                   <th>ip</th>
-                  <th>host</th>
                   <th>lang</th>
                   <th>country</th>
                   <th>ua</th>
@@ -123,20 +132,59 @@ function countryName(code) {
                     </a>
                   </td>
                   <td>{{ v.referer }}</td>
-                  <td>{{ v.ip }}</td>
-                  <td>{{ v.host }}</td>
+                  <td>
+                    <span class="clickable-ip"
+                          :title="`Click to copy full IP: ${v.ip}`"
+                          @click="copyIp(v.ip)">{{ v.ipDisplay }}</span>
+                  </td>
                   <td>{{ v.lang }}</td>
                   <td class="country">
                     <span v-if="flagSvg(v.country)" class="flag" v-html="flagSvg(v.country)" :title="countryName(v.country) || v.country"></span>
                     <template v-else>—</template>
                   </td>
-                  <td class="ua" :title="v.ua">{{ v.ua }}</td>
+                  <td class="ua" :title="v.uaRaw">{{ v.ua }}</td>
                   <td>{{ v.utm }}</td>
                 </tr>
               </tbody>
             </table>
           </div>
           <p v-else class="empty">no visits recorded yet</p>
+        </section>
+
+        <section>
+          <h2>Crawlers</h2>
+          <div v-if="topCrawlerUas.length" class="crawler-top-uas">
+            <p><strong>top UAs:</strong> {{ formatCounts(topCrawlerUas) }}</p>
+          </div>
+          <div v-if="crawlerRows.length" class="visit-table-wrap">
+            <table class="visit-table">
+              <thead>
+                <tr>
+                  <th>when</th>
+                  <th>entry</th>
+                  <th>ip</th>
+                  <th>ua</th>
+                  <th>referer</th>
+                  <th>query</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(c, i) in crawlerRows" :key="i">
+                  <td class="when">{{ c.when }}</td>
+                  <td>{{ c.entry }}</td>
+                  <td>
+                    <span class="clickable-ip"
+                          :title="`Click to copy full IP: ${c.ip}`"
+                          @click="copyIp(c.ip)">{{ c.ipDisplay }}</span>
+                  </td>
+                  <td class="ua" :title="c.uaRaw">{{ c.ua }}</td>
+                  <td>{{ c.referer }}</td>
+                  <td>{{ c.query }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p v-else class="empty">no crawler hits recorded yet</p>
         </section>
       </template>
     </div>
@@ -268,6 +316,16 @@ function countryName(code) {
   margin-left: 0.5rem;
 }
 
+.visit-table .clickable-ip {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+
+.visit-table .clickable-ip:hover {
+  color: var(--accent);
+}
+
 .visit-table .ua {
   max-width: 18rem;
   overflow: hidden;
@@ -289,6 +347,15 @@ function countryName(code) {
   width: 100%;
   height: 100%;
   display: block;
+}
+
+.crawler-top-uas {
+  font-size: 0.9rem;
+  margin-bottom: 0.6rem;
+}
+
+.crawler-top-uas strong {
+  color: var(--muted);
 }
 
 .empty, .loading, .error { color: var(--muted); }

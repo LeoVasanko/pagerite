@@ -17,11 +17,34 @@ rewritten atomically on every recorded event.
 import os
 import re
 import tempfile
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import msgspec
+from ua_parser import parse
+
+
+def _compact_user_agent(ua: str) -> str:
+    """Format a User-Agent string into a compact display form.
+
+    Returns the original UA when the parser cannot identify the browser/OS.
+    """
+    if not ua or not ua.strip() or ua == "-":
+        return ""
+    r = parse(ua)
+    browser = r.user_agent.family if r.user_agent else None
+    ver = r.user_agent.major if r.user_agent else ""
+    os_name = r.os.family if r.os else None
+    dev = r.device.family if r.device else None
+    if browser in (None, "Other") and os_name in (None, "Other"):
+        return ua
+    browser = browser if browser and browser != "Other" else ""
+    os_name = os_name if os_name and os_name != "Other" else ""
+    if dev in (None, "Other") or dev == browser:
+        dev = ""
+    parts = [f"{browser}/{ver}" if browser else "", os_name, dev]
+    return " ".join(p for p in parts if p).strip()
 
 
 class Visit(msgspec.Struct, omit_defaults=True):
@@ -47,8 +70,25 @@ class Visit(msgspec.Struct, omit_defaults=True):
     country: str = ""
     #: Raw User-Agent header from the initial ping.
     ua: str = ""
+    #: Compact display form of ``ua`` (browser/OS/device) when parsable.
+    ua_pretty: str = ""
     #: UTM query parameters from the landing URL, keyed by parameter name.
     utm: dict[str, str] = {}
+
+
+class CrawlerHit(msgspec.Struct, omit_defaults=True):
+    """A document GET that was never followed by an analytics ping."""
+
+    start: datetime
+    entry: str
+    ip: str = ""
+    ua: str = ""
+    #: Compact display form of ``ua`` when parsable.
+    ua_pretty: str = ""
+    #: External https origin of the initial load, "" for direct/none.
+    referer: str = ""
+    #: Raw query string of the landing URL (UTM tags can be parsed from it).
+    query: str = ""
 
 
 class Analytics(msgspec.Struct, omit_defaults=True):
@@ -56,6 +96,8 @@ class Analytics(msgspec.Struct, omit_defaults=True):
     dropped by deleting list entries / bucket keys."""
 
     visits: list[Visit] = []
+    #: Document GETs that never produced a ping, treated as crawler/bot hits.
+    crawlers: list[CrawlerHit] = []
     #: Page transition matrix: from -> to -> count. ``from`` is the referer
     #: origin or "(direct)" for initial loads, a page path for pings.
     transitions: dict[str, dict[str, int]] = {}
@@ -125,6 +167,9 @@ def _utm_tags(query: str) -> dict[str, str]:
     return {k: v[0] for k, v in parsed.items() if k.startswith("utm_")}
 
 
+_CRAWLER_TIMEOUT = timedelta(seconds=10)
+
+
 class Store:
     """In-memory analytics data plus the (IP, UA) -> visit session map."""
 
@@ -147,6 +192,9 @@ class Store:
         #: Only non-empty sets are stored, so a later parameter-less page
         #: does not overwrite an earlier tagged landing URL.
         self.pending_utms: dict[str, dict[str, str]] = {}
+        #: Document GETs that have not yet been matched by a ping.  Kept
+        #: in RAM only; expired entries are written to ``data.crawlers``.
+        self.pending_crawlers: list[CrawlerHit] = []
 
     def _save(self) -> None:
         """Rewrite the JSON file atomically (temp file + rename)."""
@@ -159,6 +207,21 @@ class Store:
             os.replace(tmp, self.path)
         except OSError:
             pass  # analytics must never break page serving
+
+    def _flush_crawlers(self, now: datetime | None = None) -> None:
+        """Move expired pending crawler hits into persistent ``data.crawlers``."""
+        if not self.pending_crawlers:
+            return
+        now = now or datetime.now(UTC)
+        cutoff = now - _CRAWLER_TIMEOUT
+        expired: list[CrawlerHit] = []
+        remaining: list[CrawlerHit] = []
+        for hit in self.pending_crawlers:
+            (expired if hit.start <= cutoff else remaining).append(hit)
+        if expired:
+            self.pending_crawlers = remaining
+            self.data.crawlers.extend(expired)
+            self._save()
 
     def _count(self, table: dict[str, int], key: str) -> None:
         table[key] = table.get(key, 0) + 1
@@ -183,6 +246,7 @@ class Store:
             lang=lang,
             country=country,
             ua=ua,
+            ua_pretty=_compact_user_agent(ua),
             utm=utm or {},
         )
         self.data.visits.append(visit)
@@ -215,10 +279,16 @@ class Store:
         if changed:
             self._save()
 
-    def entry_referer(
-        self, referer: str, own_origin: str, ip: str, query: str = ""
+    def track_entry(
+        self,
+        referer: str,
+        own_origin: str,
+        ip: str,
+        ua: str,
+        entry: str,
+        query: str = "",
     ) -> None:
-        """Stash the entry referer and UTM tags of a document GET for ping attribution.
+        """Stash the entry referer/UTM tags and queue a pending crawler hit.
 
         Nothing is counted here — the client's initial /_a ping starts the
         visit (only non-admin clients ping). Only a cross-origin https
@@ -226,7 +296,13 @@ class Store:
         stashed origin untouched.  UTM parameters are kept only when the
         landing URL actually carries them, so a subsequent parameter-less page
         does not erase an earlier tagged landing.
+
+        Every document GET is also queued as a pending crawler hit.  If a ping
+        from the same (IP, UA) pair arrives within ``_CRAWLER_TIMEOUT``, the
+        hit is discarded; otherwise it is flushed to ``data.crawlers``.
         """
+        now = datetime.now(UTC)
+        self._flush_crawlers(now)
         if referer:
             origin = _origin(referer)
             if origin is not None and origin != own_origin:
@@ -234,6 +310,17 @@ class Store:
         utms = _utm_tags(query)
         if utms:
             self.pending_utms[ip] = utms
+        self.pending_crawlers.append(
+            CrawlerHit(
+                start=now,
+                entry=entry,
+                ip=ip,
+                ua=ua,
+                ua_pretty=_compact_user_agent(ua),
+                referer=self.pending_referers.get(ip, ""),
+                query=query,
+            )
+        )
 
     def ping(
         self,
@@ -254,6 +341,12 @@ class Store:
         Returns the index of the new visit when one is created, so callers
         can enrich it later with non-blocking lookups (host, geoip country).
         """
+        self._flush_crawlers()
+        # A real visitor ping cancels any pending crawler hits from this
+        # (IP, UA) pair.
+        self.pending_crawlers = [
+            hit for hit in self.pending_crawlers if not (hit.ip == ip and hit.ua == ua)
+        ]
         if to.startswith("/") and not to.startswith("//"):
             target = _internal_path(to) or ""
         else:

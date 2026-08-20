@@ -25,6 +25,7 @@ dependencies = [
     "maxminddb>=3.1.1",
     "mdit-py-plugins>=0.6.1",
     "pygments>=2.20.0",
+    "ua-parser>=1.0.2",
 ]
 
 [project.scripts]

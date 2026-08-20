@@ -54,6 +54,10 @@ The client (`pagerite.js`) POSTs fire-and-forget pings to `/_a` with
   tasks after the visit is stored, so the `/ _a` response is never delayed.
   The decompressed `dbip-*.mmdb` file is kept in the repository root and
   ignored by git.
+- **Crawler hits**: every document GET is queued in RAM as a pending crawler
+  hit.  If a ping from the same (IP, User-Agent) pair arrives within 10
+  seconds the hit is discarded; otherwise it is written to `crawlers`.
+  Crawlers do not count as visits or views.
 
 ## Visits and sessions
 
@@ -81,7 +85,21 @@ Each `Visit` record:
   `Accept-Language` region subtag, but overwritten by the DB-IP MMDB result
   when a database is available,
 - `ua` — raw `User-Agent` string from the initial ping,
+- `ua_pretty` — compact display form of the UA (browser/OS/device) when
+  parsable, otherwise the raw string,
 - `utm` — `utm_*` query parameters from the landing URL, as a dict.
+
+Each `CrawlerHit` record:
+
+- `start` — timestamp of the document GET,
+- `entry` — page path requested,
+- `ip` — IP address,
+- `ua` — raw `User-Agent` header,
+- `ua_pretty` — compact display form of the UA when parsable,
+- `referer` — external https origin of the request, `""` for direct/none,
+- `query` — raw query string of the request.
+
+Crawler hits are grouped by User-Agent in the analytics viewer.
 
 ## Aggregates
 
