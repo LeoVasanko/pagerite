@@ -97,30 +97,30 @@ import "overlayscrollbars/overlayscrollbars.css";
     // Editing is open for admins and, as a dev/no-proxy fallback, when no
     // Paskia SSO is detected at all.
     const canEdit = isAdmin || !ssoAvailable;
+    // The analytics page is a read-only dashboard: editing pens and the side
+    // panel do not apply there. Login/logout links are still useful.
+    const onAnalytics = currentPath === "/_a";
     const banner = document.getElementById("page-banner");
     if (banner) {
       const old = banner.parentElement.querySelector(".editor-pens");
       if (old) old.remove();
       const pens = document.createElement("div");
       pens.className = "editor-pens";
-      if (canEdit) {
+      if (canEdit && !onAnalytics) {
         pens.append(makePen("banner"));
         pens.append(makePen("site"));
-        if (editorMeta) {
-          // Full-screen analytics view (separate from the docked panel).
-          const btn = document.createElement("button");
-          btn.type = "button";
-          btn.className = "edit-link analytics-link";
-          btn.title = "analytics";
-          btn.textContent = "📊";
-          btn.dataset.editorSrc = editorMeta.src;
-          pens.append(btn);
-        }
+        // Analytics viewer is now a normal page at /_a.
+        const a = document.createElement("a");
+        a.className = "edit-link analytics-link";
+        a.href = "/_a";
+        a.title = "analytics";
+        a.textContent = "📊";
+        pens.append(a);
       }
       if (ssoAvailable) pens.append(makeAuthLink(isAdmin));
       banner.after(pens);
     }
-    if (canEdit) injectPagePen();
+    if (canEdit && !onAnalytics) injectPagePen();
   }
 
   async function setupAuth() {
@@ -149,18 +149,6 @@ import "overlayscrollbars/overlayscrollbars.css";
 
     renderAuthUi();
     pingEntryOnce();
-
-    // The analytics app is addressable by URL (#/analytics/<range>), so a
-    // refresh or a shared link lands back in it. Only for editors.
-    const openAnalyticsFromHash = () => {
-      if (!location.hash.startsWith("#/analytics")) return;
-      if (!(isAdmin || !ssoAvailable) || !editorMeta) return;
-      import(/* @vite-ignore */ editorMeta.src)
-        .then((m) => m.openAnalytics())
-        .catch((e) => console.error("analytics view load failed:", e));
-    };
-    openAnalyticsFromHash();
-    addEventListener("hashchange", openAnalyticsFromHash);
   }
 
   // Returning to the page via history back/forward may restore a cached
@@ -356,11 +344,13 @@ import "overlayscrollbars/overlayscrollbars.css";
   // back/forward (popstate never pings) and everything while we know the
   // user is an admin — but only when SSO is actually in use; with no auth
   // (dev/test) "admin" is everyone's state and nothing would be recorded —
-  // or has the editor/analytics view open (admin noise, not visits).
+  // or has the editor open (admin noise, not visits). The analytics page
+  // itself (/_a) is also excluded even though fetch-navigation treats it like
+  // a normal article.
   // See docs/analytics.md.
   function ping(to, fr = currentPath) {
     if ((ssoAvailable && isAdmin) || document.body.classList.contains("editing")
-        || document.body.classList.contains("analytics-open")) return;
+        || to === "/_a" || fr === "/_a") return;
     try {
       fetch("/_a", {
         method: "POST",
@@ -385,6 +375,36 @@ import "overlayscrollbars/overlayscrollbars.css";
     ping(currentPath);
   }
 
+  // --- Analytics page mount/unmount --------------------------------------
+  // The analytics page is a normal page whose body is rendered by the server
+  // but whose content is a Vue app. We load the entry module on demand so the
+  // analytics bundle is only fetched when visiting /_a, and unmount the app
+  // before swapping away so Vue teardown runs cleanly.
+  let analyticsUnmount = null;
+
+  function teardownAnalytics() {
+    analyticsUnmount?.();
+    analyticsUnmount = null;
+  }
+
+  async function mountAnalytics(doc) {
+    const src = doc.querySelector('meta[name="pagerite:analytics-src"]')?.content;
+    if (!src) {
+      teardownAnalytics();
+      return;
+    }
+    try {
+      const mod = await import(/* @vite-ignore */ src);
+      const container = document.getElementById("analytics-app");
+      if (container) {
+        mod.mount(container);
+        analyticsUnmount = mod.unmount;
+      }
+    } catch (e) {
+      console.error("analytics mount failed:", e);
+    }
+  }
+
   // --- Fetch navigation ------------------------------------------------
   async function load(url, push = true, back = false) {
     // Navigating with the editor open closes it; unsaved edits are lost
@@ -392,6 +412,7 @@ import "overlayscrollbars/overlayscrollbars.css";
     if (document.body.classList.contains("editing")) {
       editorModule?.then((m) => m.closeEditor());
     }
+    teardownAnalytics();
     let doc;
     let finalUrl = url;
     const cached = pageCache.get(new URL(url, location.href).pathname);
@@ -450,6 +471,7 @@ import "overlayscrollbars/overlayscrollbars.css";
       runScripts(document.getElementById("page-banner"));
       runScripts(document.getElementById("main"));
       applyEffects();
+      mountAnalytics(document);
     };
     // Rotating cube page transition (see the FRAGILE block in pagerite.css);
     // mirrored when navigating back through history. Navigation within the
@@ -479,16 +501,6 @@ import "overlayscrollbars/overlayscrollbars.css";
     // the Vue app on demand (with any extra styles) and mount it in place.
     // Clicking the pen of the already-open tab closes the shell; clicking
     // another pen switches the shell to that tab.
-    // The 📊 pen opens the full-screen analytics view (its own Vue app,
-    // not a tab of the docked editor shell).
-    const analyticsBtn = ev.target.closest("button.analytics-link");
-    if (analyticsBtn && analyticsBtn.dataset.editorSrc) {
-      ev.preventDefault();
-      import(/* @vite-ignore */ analyticsBtn.dataset.editorSrc)
-        .then((m) => m.openAnalytics())
-        .catch((e) => console.error("analytics view load failed:", e));
-      return;
-    }
     const editBtn = ev.target.closest("button.edit-link");
     if (editBtn && editBtn.dataset.editorSrc) {
       ev.preventDefault();
@@ -525,8 +537,10 @@ import "overlayscrollbars/overlayscrollbars.css";
     }
     // Same-page anchor links (footnotes etc.): let the browser handle them
     if (url.pathname === location.pathname && url.hash) return;
-    // Machinery and auth endpoints are never fetch-navigated.
-    if (url.pathname.startsWith("/_") || url.pathname.startsWith("/auth")) return;
+    // Machinery and auth endpoints are never fetch-navigated, except the
+    // public analytics viewer page at /_a.
+    if ((url.pathname.startsWith("/_") && url.pathname !== "/_a")
+        || url.pathname.startsWith("/auth")) return;
     ev.preventDefault();
     // Capture the source now: load() updates currentPath before pinging.
     const from = currentPath;
@@ -534,7 +548,7 @@ import "overlayscrollbars/overlayscrollbars.css";
   });
 
   addEventListener("popstate", () => {
-    // Hash-only history entries (the analytics app) are not navigations.
+    // Hash-only history entries are not navigations.
     if (location.pathname === currentPath) return;
     load(location.href, false, true);
   });
@@ -603,4 +617,5 @@ import "overlayscrollbars/overlayscrollbars.css";
 
   setupAuth();
   applyEffects();
+  mountAnalytics(document);
 })();

@@ -22,7 +22,6 @@ const props = defineProps({
   range: { type: String, required: true },
   pageTree: { type: Array, default: null },
 })
-const emit = defineEmits(['close'])
 
 const window = computed(() => rangeWindow(props.range))
 
@@ -116,7 +115,7 @@ onBeforeUnmount(() => cancelAnimationFrame(rafId))
         <text :x="x.x" :y="x.y + x.r + 11" class="txlabel">{{ x.label }}</text>
       </g>
       <g v-for="n in graph.nodes" :key="n.path">
-        <a :href="n.path" :title="n.title" @click="emit('close')">
+        <a :href="n.path" :title="n.title">
           <circle :cx="n.x" :cy="n.y" :r="TNODE_R" class="tnode" />
           <text :x="n.x" :y="n.y - 2" class="tnodeslug">{{ n.label }}</text>
           <text :x="n.x" :y="n.y + 12" class="tnodecount">{{ n.views }}</text>

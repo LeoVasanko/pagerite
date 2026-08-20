@@ -631,6 +631,22 @@ class AnalyticsPing(BaseModel):
     to: str
 
 
+@app.get("/_a", response_model=None)
+async def analytics_page(request: Request) -> HTMLResponse:
+    """Render the analytics viewer as a normal site page at /_a.
+
+    The page itself is public, but the data endpoint (/_api/analytics) stays
+    admin-gated like the rest of /_api, so only authorized users see the
+    statistics; others get the viewer with a "could not be loaded" message.
+    """
+    return HTMLResponse(
+        views.render_analytics(
+            data.menu, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html
+        ),
+        headers={"cache-control": "no-cache"},
+    )
+
+
 @app.post("/_a", status_code=204)
 async def analytics_ping(ping: AnalyticsPing, request: Request) -> None:
     """Record a navigation ping ({fr, to}); fire-and-forget, never fails.
@@ -716,7 +732,7 @@ async def get_analytics() -> Response:
     """The collected visit analytics as JSON (see docs/analytics.md).
 
     Admin-only via the /_api forward-auth gate, like every management
-    endpoint. Powers the full-screen analytics viewer in the frontend.
+    endpoint. Powers the analytics viewer rendered at /_a.
     """
     return Response(
         msgspec.json.encode(analytics_store.data), media_type="application/json"

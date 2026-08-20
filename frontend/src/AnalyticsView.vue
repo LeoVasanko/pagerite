@@ -1,12 +1,10 @@
 <script setup>
-// Full-screen analytics app (replaces the page chrome while open; opened via
-// the 📊 pen or directly by URL hash #/analytics/<range>, so refresh and link
-// sharing work). Fetches the raw collected data from /_api/analytics
-// (admin-gated by the auth proxy) and renders it: totals, smoothed
-// visit/views curves over a selectable range, a transition map, and the
-// recent visit trails. Read-only.
+// Analytics viewer rendered as a normal page inside #main. Fetches the raw
+// collected data from /_api/analytics (admin-gated by the auth proxy) and
+// renders totals, smoothed visit/views curves, a transition map, and recent
+// visit/crawler tables. Read-only.
 // See docs/analytics.md for the data format.
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { RANGES } from './analytics/time.js'
 import {
   calcTotalViews,
@@ -23,7 +21,6 @@ import VisitorCharts from './VisitorCharts.vue'
 const props = defineProps({
   initialRange: { type: String, default: 'week' },
 })
-const emit = defineEmits(['close'])
 
 const data = ref(null)
 const pageTree = ref(null)
@@ -45,22 +42,16 @@ onMounted(async () => {
   } catch { /* map just narrows to pages seen in transitions */ }
 })
 
-function onKeydown(ev) {
-  if (ev.key === 'Escape') emit('close')
-}
-onMounted(() => addEventListener('keydown', onKeydown))
-onUnmounted(() => removeEventListener('keydown', onKeydown))
-
 const visits = computed(() => data.value?.visits || [])
 const totalViews = computed(() => calcTotalViews(data.value?.views))
 
 const range = ref(RANGES[props.initialRange] ? props.initialRange : 'week')
 
-// Keep the URL shareable: the hash names the open view and its range.
+// Keep the URL shareable when the range changes.
 watch(range, (r) => {
-  if (location.hash.startsWith('#/analytics')) {
-    history.replaceState(null, '', `#/analytics/${r}`)
-  }
+  const url = new URL(location.href)
+  url.searchParams.set('range', r)
+  history.replaceState(null, '', url)
 })
 
 const visitRows = computed(() => formatVisitRows(visits.value, pageTree.value))
@@ -93,7 +84,7 @@ function countryName(code) {
             {{ r.label }}
           </button>
         </nav>
-        <button type="button" class="close" title="close" @click="emit('close')">✕</button>
+        <a href="/" class="close" title="home">✕</a>
       </header>
       <p v-if="error" class="error">⚠️ {{ error }}</p>
       <p v-else-if="!data" class="loading">loading…</p>
@@ -104,7 +95,7 @@ function countryName(code) {
         </section>
 
         <VisitorCharts :data="data" :range="range" />
-        <TransitionGraph :data="data" :range="range" :page-tree="pageTree" @close="emit('close')" />
+        <TransitionGraph :data="data" :range="range" :page-tree="pageTree" />
 
         <section>
           <h2>Recent visits</h2>
@@ -360,14 +351,4 @@ function countryName(code) {
 
 .empty, .loading, .error { color: var(--muted); }
 .error { color: var(--error, #c00); }
-</style>
-
-<style>
-/* True full screen: while the analytics app is open the page chrome is
-   hidden, so the document itself (not an overlay) scrolls the view. */
-body.analytics-open #banner,
-body.analytics-open #content,
-body.analytics-open > footer {
-  display: none;
-}
 </style>

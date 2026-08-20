@@ -11,8 +11,10 @@ Struct dumped to disk — separate from the kanta content database, path from
   the `POST /_a` ping endpoint, and `GET /_api/analytics` (admin-gated like
   every `/_api` endpoint).
 - `frontend/src/pagerite.js` — client navigation pings and the 📊 pen.
-- `frontend/src/AnalyticsView.vue` — full-screen viewer (its own Vue app via
-  `openAnalytics()`/`closeAnalytics()` in `main.js`, not a docked-panel tab).
+- `frontend/src/AnalyticsView.vue` — viewer component rendered inside the
+  normal site layout on the `/_a` analytics page.
+- `frontend/src/analytics-main.js` — page entry that mounts `AnalyticsView`
+  into `#analytics-app` inside `#main`.
 
 ## What is collected
 
@@ -33,11 +35,11 @@ The client (`pagerite.js`) POSTs fire-and-forget pings to `/_a` with
 - **External links** (`https` only): `to` is the link's origin. This is the
   exit-link record; the user may continue navigating afterwards (new tab,
   back), so the exit origin is not necessarily the last trail entry.
-- **Excluded**: back/forward (popstate) navigations, and everything while
-  the user is known to be an admin *and SSO is actually in use* — with no
-  auth proxy (dev/test) "admin" is everyone's state, so the gate is off and
-  everything is recorded — or has the editor open (`body.editing`) or the
-  analytics view open (`body.analytics-open`) — admin noise, not visits.
+- **Excluded**: back/forward (popstate) navigations, navigation involving
+  the analytics page itself (`/_a`), and everything while the user is known to
+  be an admin *and SSO is actually in use* — with no auth proxy (dev/test)
+  "admin" is everyone's state, so the gate is off and everything is recorded —
+  or has the editor open (`body.editing`). Admin noise, not visits.
 - The server validates `to`: internal paths must be valid slug paths
   ("/" or `[a-z0-9_-]` segments), external ones are re-derived to the
   https origin and accepted only when the client sent exactly that.
@@ -126,12 +128,21 @@ this cheap enough; batching can be added later without changing the format.
 ## Viewing
 
 The 📊 pen in the banner corner (admins only, injected by pagerite.js next to
-the edit pens) opens `AnalyticsView.vue` — a true full-screen app, not an
-overlay: `body.analytics-open` hides the page chrome and the document itself
-scrolls the view, styled by the active theme's variables. It is addressable
-by URL: `#/analytics/<range>` (`week` default; opening via the pen pushes a
-history entry so the back button exits, and pagerite.js auto-opens it on
-load for editors when the hash is present, so refresh and link sharing work).
+the edit pens) links to `/_a`, the analytics page. It is a normal site page:
+the standard banner, navigation and footer stay in place, and the analytics
+content is rendered inside `#main`. The page itself is public, but the data
+still comes from `GET /_api/analytics`, which remains admin-gated like the
+rest of the management API; visitors without access see the viewer with a
+"could not be loaded" message.
+
+Because it is a real page, fetch-navigation handles it like any other internal
+link: clicking the 📊 pen (or any link to `/_a`) fetches the server-rendered
+HTML, swaps the dynamic regions and mounts the Vue analytics app in place. The
+range selector updates the URL query string (`?range=week` etc.) so links to
+a specific range can be shared.
+
+`AnalyticsView.vue` is no longer a full-screen overlay; the `body.analytics-open`
+page-chrome hiding and `#/analytics/<range>` hash routing have been removed.
 
 Charts are SVG curves (Catmull-Rom over an edge-aware adaptive Gaussian —
 a change-point detector splits the series at traffic-level shifts, then

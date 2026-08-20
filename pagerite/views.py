@@ -118,6 +118,7 @@ def _layout(
     banner_design: str = "",
     favicon: str = "",
     social: dict[str, str] | None = None,
+    extra_meta: dict[str, str] | None = None,
 ) -> Template:
     """Page layout template with standard asset URLs and ES-module scripts.
 
@@ -134,6 +135,9 @@ def _layout(
 
     ``social`` maps meta keys to contents: ``og:*``/``article:*`` go out as
     property attributes, everything else (description, twitter:*) as name.
+
+    ``extra_meta`` is emitted as plain ``<meta name="..." content="...">``
+    tags after the editor meta tags; used for page-specific import hints.
     """
     doc = Document(E.Title, lang="en")
     # Responsive layout (see the 48rem breakpoint in pagerite.css) needs
@@ -158,6 +162,8 @@ def _layout(
     doc.meta(name="pagerite:editor-src", content=script[-1])
     if editor_css:
         doc.meta(name="pagerite:editor-css", content=editor_css)
+    for key, value in (extra_meta or {}).items():
+        doc.meta(name=key, content=value)
     # Stylesheet links carry stable ids so the site editor's hot swap can
     # keep each sheet at its rendered position (see swapRegions).
     vite_url = os.environ.get("PAGERITE_VITE_URL")
@@ -652,3 +658,53 @@ def _editor_assets() -> tuple[list[str], str | None]:
         entry = manifest["src/main.js"]
         _asset_cache["editor"] = [f"/{entry['file']}"], _editor_css_url(None)
     return _asset_cache["editor"]
+
+
+def _analytics_assets() -> tuple[list[str], list[str]]:
+    """Script and stylesheet URLs for the analytics page entry."""
+    vite_url = os.environ.get("PAGERITE_VITE_URL")
+    if vite_url:
+        return [f"{vite_url}/src/analytics-main.js"], []
+    if "analytics" not in _asset_cache:
+        manifest = _manifest()
+        entry = manifest["src/analytics-main.js"]
+        scripts = [f"/{entry['file']}"]
+        stylesheets = [f"/{css}" for css in entry.get("css", [])]
+        _asset_cache["analytics"] = scripts, stylesheets
+    return _asset_cache["analytics"]
+
+
+def render_analytics(
+    menu: dict[str, Node],
+    brand: str = SITE_NAME,
+    custom_css: str = "",
+    theme: str = "",
+    favicon: str = "",
+    brand_html: str = "",
+) -> str:
+    """Render the analytics viewer as a normal page at /_a."""
+    page_scripts, page_stylesheets = _page_assets()
+    analytics_scripts, analytics_stylesheets = _analytics_assets()
+    scripts = page_scripts + analytics_scripts
+    stylesheets = page_stylesheets + analytics_stylesheets
+    doc = E.article
+    with doc:
+        doc.div(id="analytics-app")
+    return str(
+        _layout(
+            scripts,
+            stylesheets,
+            custom_css,
+            theme,
+            banner_design(menu, "_a", theme),
+            favicon,
+            extra_meta={"pagerite:analytics-src": analytics_scripts[0]},
+        )(
+            Title=f"Analytics – {brand}" if brand else "Analytics",
+            Brand=_brand_link(brand, brand_html),
+            Nav=nav_html(menu, "_a"),
+            Sidebar=sidebar_html(menu, "_a"),
+            Banner=banner_html(menu, "_a", theme),
+            Main=HTML(str(doc)),
+        ),
+    )

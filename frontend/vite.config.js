@@ -40,6 +40,7 @@ export default defineConfig({
       input: {
         main: fileURLToPath(new URL('./src/main.js', import.meta.url)),
         pagerite: fileURLToPath(new URL('./src/pagerite.js', import.meta.url)),
+        analytics: fileURLToPath(new URL('./src/analytics-main.js', import.meta.url)),
         // Only the base CSS is built; theme/banner-design stylesheets live
         // in pagerite/themes/{name}/ and are served by the backend as-is.
         pagerite_base: fileURLToPath(new URL('./src/assets/pagerite.css', import.meta.url)),
