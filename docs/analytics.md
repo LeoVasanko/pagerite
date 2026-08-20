@@ -103,8 +103,10 @@ Crawler hits are grouped by User-Agent in the analytics viewer.
 
 ## Aggregates
 
-- `transitions`: sparse nested dict `from -> to -> count`. `from` is the
-  referer origin or `"(direct)"` for initial loads, a page path for pings.
+- `transitions`: time series of page transitions, sparse nested dict
+  `from -> to -> bucket -> count` with the same 5-minute bucketing as
+  `views`. `from` is the referer origin or `"(direct)"` for initial loads,
+  a page path for pings.
 - `views`: time series of page loads, `path -> bucket -> count`, sparse: only
   non-zero 5-minute buckets exist (bucket key is its floored ISO timestamp).
   Every load counts, including repeats within a visit; external exit origins
@@ -156,7 +158,14 @@ months/years. Below the charts: a radial **transition map** (all pages from
 `/_api/pages` — front page at the center, each slug level on its own ring,
 siblings clockwise in navigation order from the top, radial gap equal to
 the arc spacing — opposite transition directions joined into organic
-tapered connections whose middle width is the total count over the full
-recorded timescale; internal navigation only for now), per-page view
+tapered connections whose middle width grows logarithmically with the
+count (a single count renders as a ~1 px line, uncapped), connections
+carrying less than 1% of the total traffic
+pruned; beads are simulated one by one in JS (requestAnimationFrame) and
+flow along each edge, emitted at a rate linearly proportional
+to the directional count with no in-flight limit, opposing directions
+offset onto parallel lanes. External referers show as a node row above the
+map, external exits as small nodes fanned outwards from their source
+page), per-page view
 counts, the top transitions and the 50 most recent visit trails. Data comes from `GET /_api/analytics`, which
 returns the raw JSON file contents.

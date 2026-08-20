@@ -6,11 +6,43 @@
  * paths seen in transitions (deleted pages); siblings run clockwise in
  * navigation order, starting at the top. Internal path -> path transitions
  * join opposite directions into straight connections (middle width = total
- * count, wrapping the node circles at both ends); external referers/exits
- * are not shown (yet). Self-loops (reload pings) are also skipped.
+ * count, wrapping the node circles at both ends). Connection width grows
+ * logarithmically with the count (a single count renders as a ~1 px
+ * line, uncapped growth); connections carrying less than 1% of the total
+ * traffic are pruned, which naturally keeps the graph under ~100
+ * connections. Animated beads flow along every edge in each direction,
+ * emitted at time intervals inversely proportional (linear) to the
+ * directional count.
+ * External referers appear as nodes in a row above the map, external exits
+ * as small nodes just outside their source page, angled away from the
+ * center. Self-loops (reload pings) are skipped.
  */
 
 export const TNODE_R = 34 // node circles hold the slug and the view count
+export const EXT_R = 16 // external referer/exit nodes
+
+// Edge width (half-width of the thin middle) grows logarithmically with
+// the count, anchored so a single recorded transition renders as a ~1 px
+// line. There is no cap — growth is slow enough that even very hot
+// connections stay reasonable. Connections carrying less than
+// PRUNE_FRACTION of the total traffic are not drawn at all (this also
+// keeps the number of drawn connections under ~100).
+const WMID_MIN = 0.5
+const WIDTH_GROWTH = 1.5
+const PRUNE_FRACTION = 0.01
+
+// Beads: each edge direction emits beads at count * BEAD_RATE beads per
+// second (linear in the count). The component simulates every bead
+// independently in JS at BEAD_SPEED along the edge, with no limit on
+// beads in flight.
+export const BEAD_SPEED = 180 // svg units per second
+export const BEAD_R = 2.2
+const BEAD_RATE = 0.12 // beads per second per recorded transition
+const FLOW_OFFSET = 3 // lane offset to the right of the travel direction
+
+const MAX_EXT_IN = 8 // referer nodes in the top row
+const MAX_EXT_OUT = 12 // exit nodes, at most MAX_EXT_OUT_PER_PAGE per page
+const MAX_EXT_OUT_PER_PAGE = 3
 
 /** Flatten the site tree into navigation order via DFS. */
 function buildNavigationOrder(pageTree) {
@@ -49,6 +81,36 @@ function collectInternalTransitions(transitions) {
     }
   }
   return internal
+}
+
+/** Short display label for an external origin (protocol stripped). */
+function extLabel(ext) {
+  const s = ext.replace(/^https?:\/\//, '')
+  return s.length > 18 ? `${s.slice(0, 17)}…` : s
+}
+
+/**
+ * Collect external transitions: referer origin -> entry page (incoming) and
+ * page -> exit origin (outgoing). Aggregated per (origin, page) pair, with
+ * separate directional counts. "(direct)" entries are not links and skipped.
+ */
+function collectExternalPairs(transitions) {
+  const pairs = new Map() // `${ext} ${page}` -> {ext, page, in, out}
+  for (const [fr, tos] of Object.entries(transitions || {})) {
+    for (const [to, count] of Object.entries(tos)) {
+      const frExt = !fr.startsWith('/')
+      const toExt = !to.startsWith('/')
+      if (frExt === toExt) continue // internal-internal or ext-ext
+      const ext = frExt ? fr : to
+      const page = frExt ? to : fr
+      if (!ext.startsWith('http')) continue
+      const k = `${ext} ${page}`
+      const p = pairs.get(k) || { ext, page, in: 0, out: 0 }
+      p[frExt ? 'in' : 'out'] += count
+      pairs.set(k, p)
+    }
+  }
+  return [...pairs.values()]
 }
 
 /** Build nodes with depth and a path lookup map; children are wired to parents. */
@@ -189,8 +251,12 @@ function aggregatePairs(internal) {
 
 const fmtPt = (p) => `${p[0].toFixed(2)} ${p[1].toFixed(2)}`
 
-/** Build one ribbon edge between two nodes with counts ab and ba. */
-function buildRibbon(a, b, ab, ba) {
+/**
+ * Build one ribbon edge between two nodes with counts ab and ba.
+ * `wMid` is the half-width of the thin middle (already strength-scaled by
+ * the caller); `ra`/`rb` are the radii of the node circles each end wraps.
+ */
+function buildRibbon(a, b, ab, ba, wMid, ra = TNODE_R, rb = TNODE_R) {
   const count = ab + ba
   const len = Math.hypot(b.x - a.x, b.y - a.y) || 1
   const ux = (b.x - a.x) / len
@@ -198,18 +264,21 @@ function buildRibbon(a, b, ab, ba) {
   const nx = -uy
   const ny = ux
 
-  // Half-width of the thin middle and radius of the node surround.
-  const wMid = 0.75 + 6.75 * (Math.min(count, 100) / 100) ** 1.5
-  const R2 = TNODE_R + 3
+  // Radius of each node surround and the attachment geometry on it.
+  const R2A = ra + 3
+  const R2B = rb + 3
 
   // Attachment points sit somewhat forward from the side of the node,
   // leaving enough room for the surround to flow naturally into the flare.
   const BETA = (65 * Math.PI) / 180
-  const END = R2 * Math.cos(BETA)
-  const wEnd = R2 * Math.sin(BETA)
+  const ENDA = R2A * Math.cos(BETA)
+  const wEndA = R2A * Math.sin(BETA)
+  const ENDB = R2B * Math.cos(BETA)
+  const wEndB = R2B * Math.sin(BETA)
 
-  // Fixed flare length, clamped so the two ends cannot overlap.
-  const FLARE = Math.min(36, Math.max(0, (len - 2 * END) / 2))
+  // Flares take a fair share of the free span while leaving the
+  // count-scaled thin middle a visible share of the connection length.
+  const FLARE = Math.min(36, Math.max(0, (len - ENDA - ENDB) * 0.4))
 
   // Point on the connection centerline at distance t from A, offset s
   // perpendicular to it.
@@ -219,7 +288,7 @@ function buildRibbon(a, b, ab, ba) {
   ]
 
   // Arc around a node from p to q the long way, passing its back side.
-  const wrap = (p, q, node, back) => {
+  const wrap = (p, q, node, back, R2) => {
     const ang = (pt2) =>
       Math.atan2(pt2[1] - node[1], pt2[0] - node[0])
 
@@ -231,7 +300,7 @@ function buildRibbon(a, b, ab, ba) {
   }
 
   // Build one side of a flare in node -> middle order.
-  const flarePoints = (endT, midT, s, dir) => {
+  const flarePoints = (endT, midT, s, dir, R2, END, wEnd) => {
     const span = Math.abs(midT - endT)
     const pEnd = P(endT, s * wEnd)
     const pMid = P(midT, s * wMid)
@@ -271,25 +340,25 @@ function buildRibbon(a, b, ab, ba) {
     return `C ${fmtPt(f.cMid)} ${fmtPt(f.cEnd)} ${fmtPt(f.pEnd)} `
   }
 
-  const LA = P(END, wEnd)
-  const RA = P(END, -wEnd)
-  const LB = P(len - END, wEnd)
-  const RB = P(len - END, -wEnd)
+  const LA = P(ENDA, wEndA)
+  const RA = P(ENDA, -wEndA)
+  const LB = P(len - ENDB, wEndB)
+  const RB = P(len - ENDB, -wEndB)
 
-  const aLeft = flarePoints(END, END + FLARE, 1, 1)
-  const bLeft = flarePoints(len - END, len - END - FLARE, 1, -1)
-  const bRight = flarePoints(len - END, len - END - FLARE, -1, -1)
-  const aRight = flarePoints(END, END + FLARE, -1, 1)
+  const aLeft = flarePoints(ENDA, ENDA + FLARE, 1, 1, R2A, ENDA, wEndA)
+  const bLeft = flarePoints(len - ENDB, len - ENDB - FLARE, 1, -1, R2B, ENDB, wEndB)
+  const bRight = flarePoints(len - ENDB, len - ENDB - FLARE, -1, -1, R2B, ENDB, wEndB)
+  const aRight = flarePoints(ENDA, ENDA + FLARE, -1, 1, R2A, ENDA, wEndA)
 
   const d = `M ${fmtPt(LA)} `
     + curve(aLeft)
     + `L ${fmtPt(bLeft.pMid)} `
     + curve(bLeft, true)
-    + wrap(LB, RB, [b.x, b.y], P(len + R2, 0))
+    + wrap(LB, RB, [b.x, b.y], P(len + R2B, 0), R2B)
     + curve(bRight)
     + `L ${fmtPt(aRight.pMid)} `
     + curve(aRight, true)
-    + wrap(RA, LA, [a.x, a.y], P(-R2, 0))
+    + wrap(RA, LA, [a.x, a.y], P(-R2A, 0), R2A)
     + 'Z'
 
   return {
@@ -298,43 +367,98 @@ function buildRibbon(a, b, ab, ba) {
   }
 }
 
-/** Build ribbon edges for every aggregated page-to-page pair. */
-function buildRibbonEdges(pairs, byPath) {
-  return [...pairs].map(([k, [ab, ba]]) => {
-    const [pf, pt] = k.split(' ')
-    const a = byPath.get(pf)
-    const b = byPath.get(pt)
-    return buildRibbon(a, b, ab, ba)
-  })
-}
+/**
+ * Flow descriptors for the bead animation, one per edge direction with a
+ * nonzero count: a straight segment running from inside the source node
+ * to inside the target node (beads render under the node circles, so
+ * they emerge from and vanish beneath the nodes rather than popping in
+ * at the surround), plus the emission interval (seconds between beads,
+ * inverse of count * BEAD_RATE). Each segment is offset to the
+ * right-hand side of its travel direction, so opposing flows on the same
+ * edge run on parallel lanes instead of colliding. The component turns
+ * these into independently simulated beads.
+ */
+function buildFlows(a, b, ra, rb, ab, ba) {
+  const len = Math.hypot(b.x - a.x, b.y - a.y) || 1
+  const ux = (b.x - a.x) / len
+  const uy = (b.y - a.y) / len
+  const t0 = ra / 3
+  const t1 = len - rb / 3
+  if (t1 - t0 < 12) return []
 
-/** Parse a visit start timestamp, which may already be numeric or an ISO string. */
-function visitStart(v) {
-  return typeof v.start === 'number' ? v.start : Date.parse(v.start)
+  // Unit normal pointing to the visual right of the A -> B direction.
+  const rx = -uy
+  const ry = ux
+  const span = t1 - t0
+  const flow = (count, fromT, toT) => {
+    // Each direction shifts to its own right, away from the opposing lane.
+    const s = fromT < toT ? FLOW_OFFSET : -FLOW_OFFSET
+    return {
+      x1: a.x + fromT * ux + s * rx,
+      y1: a.y + fromT * uy + s * ry,
+      x2: a.x + toT * ux + s * rx,
+      y2: a.y + toT * uy + s * ry,
+      len: span,
+      interval: 1 / (count * BEAD_RATE),
+    }
+  }
+  const flows = []
+  if (ab) flows.push(flow(ab, t0, t1))
+  if (ba) flows.push(flow(ba, t1, t0))
+  return flows
 }
 
 /**
- * Derive internal path -> path transitions from the visits list, optionally
- * restricted to a time window. This is the only time-filterable source of
- * transitions (the server-side aggregate has no per-transition timestamps).
- * Re-visits within the same visit are not recorded in `trail`, so this yields
- * first-seen navigation chains rather than every ping.
+ * Half-width for a connection middle: logarithmic in the count, anchored
+ * so a single count lands exactly at WMID_MIN (~1 px line), uncapped.
+ * Absolute on purpose — cool routes stay visible regardless of how hot
+ * the hottest connection is.
  */
-export function buildTransitionsFromVisits(visits, t0, t1) {
-  const transitions = {}
-  for (const v of visits || []) {
-    const start = visitStart(v)
-    if ((t0 != null && start < t0) || (t1 != null && start >= t1)) continue
-    const path = [v.entry, ...(v.trail || [])].filter((p) => p?.startsWith('/'))
-    for (let i = 0; i < path.length - 1; i++) {
-      const fr = path[i]
-      const to = path[i + 1]
-      if (fr === to) continue
-      transitions[fr] = transitions[fr] || {}
-      transitions[fr][to] = (transitions[fr][to] || 0) + 1
+const scaledWidth = (count) => WMID_MIN + WIDTH_GROWTH * Math.log1p(count - 1)
+
+/**
+ * Build ribbon edges and bead flows for every aggregated page-to-page
+ * pair. Pairs carrying less than PRUNE_FRACTION of the total internal
+ * traffic are pruned (this naturally bounds the graph to ~100 edges).
+ */
+function buildInternalEdges(pairs, byPath) {
+  let total = 0
+  for (const [, [ab, ba]] of pairs) total += ab + ba
+  const minCount = total * PRUNE_FRACTION
+
+  const edges = []
+  const flows = []
+  for (const [k, [ab, ba]] of pairs) {
+    if (ab + ba < minCount) continue
+    const [pf, pt] = k.split(' ')
+    const a = byPath.get(pf)
+    const b = byPath.get(pt)
+    edges.push(buildRibbon(a, b, ab, ba, scaledWidth(ab + ba)))
+    flows.push(...buildFlows(a, b, TNODE_R, TNODE_R, ab, ba))
+  }
+  return { edges, flows }
+}
+
+/**
+ * Sum the bucketed transition matrix (from -> to -> bucket ISO -> count)
+ * into a plain from -> to -> count matrix for the window [t0, t1).
+ */
+export function filterTransitionsByRange(transitions, t0, t1) {
+  const out = {}
+  for (const [fr, tos] of Object.entries(transitions || {})) {
+    for (const [to, buckets] of Object.entries(tos)) {
+      let n = 0
+      for (const [k, c] of Object.entries(buckets)) {
+        const t = Date.parse(k)
+        if ((t0 == null || t >= t0) && (t1 == null || t < t1)) n += c
+      }
+      if (n) {
+        out[fr] = out[fr] || {}
+        out[fr][to] = n
+      }
     }
   }
-  return transitions
+  return out
 }
 
 /** Keep only the 5-minute view buckets that fall inside [t0, t1). */
@@ -352,11 +476,98 @@ export function filterViewsByRange(views, t0, t1) {
 }
 
 /**
+ * Place external referer and exit nodes and build their edges and bead
+ * flows.
+ * Referers (incoming links) form a row centered above the map, hottest
+ * first; exits sit just outside their source page, fanned away from the
+ * center and nudged outwards until they no longer overlap any node.
+ * Widths and pruning use the same log scale and traffic-share rule as
+ * internal connections.
+ */
+function buildExternal(external, byPath, radius, innerBounds) {
+  const extNodes = []
+  const edges = []
+  const flows = []
+  let extTotal = 0
+  for (const p of external) extTotal += p.in + p.out
+  const minCount = extTotal * PRUNE_FRACTION
+  const live = external.filter((p) => byPath.has(p.page))
+  if (!live.length) return { extNodes, edges, flows }
+
+  const width = scaledWidth
+
+  const overlaps = (x, y, r) =>
+    [...byPath.values(), ...extNodes].some(
+      (n) => Math.hypot(n.x - x, n.y - y) < (n.r ?? TNODE_R) + r + 10,
+    )
+
+  // Incoming: one referer node per origin, in a row centered above the
+  // map, with an edge to each page that origin led to.
+  const byExt = new Map() // ext -> pairs, sorted by total incoming count
+  for (const p of live.filter((p) => p.in >= minCount)) {
+    const g = byExt.get(p.ext) || []
+    g.push(p)
+    byExt.set(p.ext, g)
+  }
+  const origins = [...byExt]
+    .map(([ext, ps]) => ({ ext, ps, total: ps.reduce((s, p) => s + p.in, 0) }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, MAX_EXT_IN)
+  if (origins.length) {
+    const cx = (innerBounds.x0 + innerBounds.x1) / 2
+    const y = innerBounds.y0 - TNODE_R - 64
+    const spacing = 2 * EXT_R + 44
+    const x0 = cx - ((origins.length - 1) * spacing) / 2
+    origins.forEach(({ ext, ps }, i) => {
+      const xn = { path: ext, label: extLabel(ext), x: x0 + i * spacing, y, r: EXT_R }
+      extNodes.push(xn)
+      for (const p of ps) {
+        const page = byPath.get(p.page)
+        edges.push(buildRibbon(xn, page, p.in, 0, width(p.in), EXT_R, TNODE_R))
+        flows.push(...buildFlows(xn, page, EXT_R, TNODE_R, p.in, 0))
+      }
+    })
+  }
+
+  // Outgoing: small exit nodes fanned outwards from the source page.
+  const outgoing = live.filter((p) => p.out >= minCount)
+    .sort((a, b) => b.out - a.out).slice(0, MAX_EXT_OUT)
+  const perPage = new Map()
+  for (const p of outgoing) {
+    const used = perPage.get(p.page) || 0
+    if (used >= MAX_EXT_OUT_PER_PAGE) continue
+    perPage.set(p.page, used + 1)
+    const page = byPath.get(p.page)
+    // Fan multiple exits of one page symmetrically around the outward
+    // direction; the center page has no angle, so its exits point down
+    // (the top row above the map belongs to referers).
+    const base = page.depth ? page.angle : Math.PI / 2
+    const ang = base + [0, 0.4, -0.4][used]
+    let dist = TNODE_R + 40
+    let x = page.x + Math.cos(ang) * dist
+    let y = page.y + Math.sin(ang) * dist
+    for (let tries = 0; tries < 5 && overlaps(x, y, EXT_R); tries++) {
+      dist += 24
+      x = page.x + Math.cos(ang) * dist
+      y = page.y + Math.sin(ang) * dist
+    }
+    const xn = { path: p.ext, label: extLabel(p.ext), x, y, r: EXT_R }
+    extNodes.push(xn)
+    edges.push(buildRibbon(page, xn, p.out, 0, width(p.out), TNODE_R, EXT_R))
+    flows.push(...buildFlows(page, xn, TNODE_R, EXT_R, p.out, 0))
+  }
+
+  return { extNodes, edges, flows }
+}
+
+/**
  * Build the radial transition map model.
- * Returns { nodes, edges, arcs, r } or null when there is nothing to show.
+ * Returns { nodes, edges, flows, extNodes, arcs, bounds } or null when
+ * there is nothing to show.
  */
 export function buildTransitionGraph(data, pageTree) {
   const internal = collectInternalTransitions(data?.transitions)
+  const external = collectExternalPairs(data?.transitions)
   const navOrder = buildNavigationOrder(pageTree)
   const titles = buildTitleMap(pageTree)
 
@@ -368,13 +579,14 @@ export function buildTransitionGraph(data, pageTree) {
   layoutAngles(root, unit, weightFn)
 
   const maxDepth = Math.max(1, ...nodes.map((n) => n.depth))
-  const { radius, GAP } = positionNodes(nodes, maxDepth, unit, data?.views, titles)
+  const { radius } = positionNodes(nodes, maxDepth, unit, data?.views, titles)
   const arcs = buildFamilyArcs(nodes, radius)
   const pairs = aggregatePairs(internal)
-  const edges = buildRibbonEdges(pairs, byPath)
+  const { edges, flows } = buildInternalEdges(pairs, byPath)
 
-  // Tight bounding box of the actual nodes; edges and arcs stay within the
-  // node circles, so node bounds plus node radius are sufficient.
+  // Tight bounding box of the actual page nodes; internal edges and arcs
+  // stay within the node circles, so node bounds plus radius suffice.
+  // External nodes extend the box below.
   const pad = 16
   const xs = nodes.map((n) => n.x)
   const ys = nodes.map((n) => n.y)
@@ -385,9 +597,19 @@ export function buildTransitionGraph(data, pageTree) {
     y1: Math.max(...ys) + TNODE_R + pad,
   }
 
+  const ext = buildExternal(external, byPath, radius, bounds)
+  for (const xn of ext.extNodes) {
+    bounds.x0 = Math.min(bounds.x0, xn.x - xn.r - pad)
+    bounds.y0 = Math.min(bounds.y0, xn.y - xn.r - pad)
+    bounds.x1 = Math.max(bounds.x1, xn.x + xn.r + pad)
+    bounds.y1 = Math.max(bounds.y1, xn.y + xn.r + pad)
+  }
+
   return {
     nodes,
-    edges,
+    edges: [...edges, ...ext.edges],
+    flows: [...flows, ...ext.flows],
+    extNodes: ext.extNodes,
     arcs,
     bounds,
   }

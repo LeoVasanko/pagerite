@@ -98,9 +98,10 @@ class Analytics(msgspec.Struct, omit_defaults=True):
     visits: list[Visit] = []
     #: Document GETs that never produced a ping, treated as crawler/bot hits.
     crawlers: list[CrawlerHit] = []
-    #: Page transition matrix: from -> to -> count. ``from`` is the referer
-    #: origin or "(direct)" for initial loads, a page path for pings.
-    transitions: dict[str, dict[str, int]] = {}
+    #: Page transitions per 5-minute bucket (sparse):
+    #: from -> to -> bucket ISO -> count. ``from`` is the referer origin or
+    #: "(direct)" for initial loads, a page path for pings.
+    transitions: dict[str, dict[str, dict[str, int]]] = {}
     #: Page views per 5-minute bucket: path -> bucket ISO -> count (sparse).
     views: dict[str, dict[str, int]] = {}
     #: New visits per 5-minute bucket: bucket ISO -> count (sparse).
@@ -179,8 +180,8 @@ class Store:
         if path.exists():
             try:
                 self.data = msgspec.json.decode(path.read_bytes(), type=Analytics)
-            except (msgspec.DecodeError, OSError):
-                pass  # corrupt/unreadable file: start fresh
+            except msgspec.DecodeError, OSError:
+                pass  # legacy schema / corrupt or unreadable file: start fresh
         #: (ip, user-agent) -> index of the current visit in data.visits
         self.sessions: dict[tuple[str, str], int] = {}
         #: ip -> external https origin of the latest document GET carrying
@@ -226,6 +227,11 @@ class Store:
     def _count(self, table: dict[str, int], key: str) -> None:
         table[key] = table.get(key, 0) + 1
 
+    def _count_transition(self, fr: str, to: str, now: datetime) -> None:
+        """Count one transition in its 5-minute bucket (sparse matrix)."""
+        buckets = self.data.transitions.setdefault(fr, {}).setdefault(to, {})
+        self._count(buckets, _bucket(now))
+
     def _new_visit(
         self,
         entry: str,
@@ -253,9 +259,7 @@ class Store:
         self.sessions[key] = len(self.data.visits) - 1
         self._count(self.data.site_visits, _bucket(now))
         self._count(self.data.views.setdefault(entry, {}), _bucket(now))
-        self._count(
-            self.data.transitions.setdefault(referer or "(direct)", {}), entry
-        )
+        self._count_transition(referer or "(direct)", entry, now)
         return visit
 
     def enrich_visit(
@@ -376,7 +380,7 @@ class Store:
             now = datetime.now(UTC)
             if target.startswith("/"):
                 self._count(self.data.views.setdefault(target, {}), _bucket(now))
-            self._count(self.data.transitions.setdefault(fr, {}), target)
+            self._count_transition(fr, target, now)
             # First-seen only: repeat pages and repeated exits don't append.
             if visit.entry != target and target not in visit.trail:
                 visit.trail.append(target)
