@@ -2,6 +2,7 @@
 !.gitignore
 *.lock
 *.kantadb
+pagerite.analytics.json
 /pagerite/frontend-build
 package-lock.json
 

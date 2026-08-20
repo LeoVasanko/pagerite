@@ -106,6 +106,16 @@ import "overlayscrollbars/overlayscrollbars.css";
       if (canEdit) {
         pens.append(makePen("banner"));
         pens.append(makePen("site"));
+        if (editorMeta) {
+          // Full-screen analytics view (separate from the docked panel).
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "edit-link analytics-link";
+          btn.title = "analytics";
+          btn.textContent = "📊";
+          btn.dataset.editorSrc = editorMeta.src;
+          pens.append(btn);
+        }
       }
       if (ssoAvailable) pens.append(makeAuthLink(isAdmin));
       banner.after(pens);
@@ -115,7 +125,7 @@ import "overlayscrollbars/overlayscrollbars.css";
 
   async function setupAuth() {
     const src = document.querySelector('meta[name="pagerite:editor-src"]')?.content;
-    if (!src) return;
+    if (!src) { pingEntryOnce(); return; }
     editorMeta = {
       src,
       css: document.querySelector('meta[name="pagerite:editor-css"]')?.content,
@@ -138,6 +148,19 @@ import "overlayscrollbars/overlayscrollbars.css";
     }
 
     renderAuthUi();
+    pingEntryOnce();
+
+    // The analytics app is addressable by URL (#/analytics/<range>), so a
+    // refresh or a shared link lands back in it. Only for editors.
+    const openAnalyticsFromHash = () => {
+      if (!location.hash.startsWith("#/analytics")) return;
+      if (!(isAdmin || !ssoAvailable) || !editorMeta) return;
+      import(/* @vite-ignore */ editorMeta.src)
+        .then((m) => m.openAnalytics())
+        .catch((e) => console.error("analytics view load failed:", e));
+    };
+    openAnalyticsFromHash();
+    addEventListener("hashchange", openAnalyticsFromHash);
   }
 
   // Returning to the page via history back/forward may restore a cached
@@ -326,6 +349,42 @@ import "overlayscrollbars/overlayscrollbars.css";
     }, { passive: true });
   }
 
+  // --- Analytics pings ---------------------------------------------------
+  // Fire-and-forget POST /_a {fr, to}: on the initial page load (starts the
+  // visit — the server counts nothing from the document GET alone), for
+  // internal fetch-navigations and for external https exits. Excluded:
+  // back/forward (popstate never pings) and everything while we know the
+  // user is an admin — but only when SSO is actually in use; with no auth
+  // (dev/test) "admin" is everyone's state and nothing would be recorded —
+  // or has the editor/analytics view open (admin noise, not visits).
+  // See docs/analytics.md.
+  function ping(to, fr = currentPath) {
+    if ((ssoAvailable && isAdmin) || document.body.classList.contains("editing")
+        || document.body.classList.contains("analytics-open")) return;
+    try {
+      fetch("/_a", {
+        method: "POST",
+        keepalive: true,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ fr, to }),
+      });
+    } catch { /* analytics must never break navigation */ }
+  }
+
+  // The initial page load pings too — it is what starts the visit and
+  // counts the entry page view (the document GET alone records nothing).
+  // Sent once per load, after the auth probes so the admin gate applies;
+  // the pageshow re-probe must not ping again. Reloads are not visits:
+  // pinging them would double-count the view and log a self-transition.
+  let entryPinged = false;
+  function pingEntryOnce() {
+    if (entryPinged) return;
+    entryPinged = true;
+    const nav = performance.getEntriesByType?.("navigation")[0];
+    if (nav ? nav.type === "reload" : performance.navigation?.type === 1) return;
+    ping(currentPath);
+  }
+
   // --- Fetch navigation ------------------------------------------------
   async function load(url, push = true, back = false) {
     // Navigating with the editor open closes it; unsaved edits are lost
@@ -348,12 +407,12 @@ import "overlayscrollbars/overlayscrollbars.css";
         doc = new DOMParser().parseFromString(await res.text(), "text/html");
       } catch {
         location.href = url; // fall back to a normal navigation
-        return;
+        return false;
       }
     }
     if (REGIONS.some((id) => !doc.getElementById(id))) {
       location.href = url;
-      return;
+      return false;
     }
     const doit = () => {
       for (const id of REGIONS) {
@@ -410,6 +469,7 @@ import "overlayscrollbars/overlayscrollbars.css";
     currentPath = new URL(finalUrl, location.href).pathname;
     if (push) history.pushState(null, "", finalUrl);
     scrollTo(0, 0);
+    return true;
   }
 
   addEventListener("click", (ev) => {
@@ -419,6 +479,16 @@ import "overlayscrollbars/overlayscrollbars.css";
     // the Vue app on demand (with any extra styles) and mount it in place.
     // Clicking the pen of the already-open tab closes the shell; clicking
     // another pen switches the shell to that tab.
+    // The 📊 pen opens the full-screen analytics view (its own Vue app,
+    // not a tab of the docked editor shell).
+    const analyticsBtn = ev.target.closest("button.analytics-link");
+    if (analyticsBtn && analyticsBtn.dataset.editorSrc) {
+      ev.preventDefault();
+      import(/* @vite-ignore */ analyticsBtn.dataset.editorSrc)
+        .then((m) => m.openAnalytics())
+        .catch((e) => console.error("analytics view load failed:", e));
+      return;
+    }
     const editBtn = ev.target.closest("button.edit-link");
     if (editBtn && editBtn.dataset.editorSrc) {
       ev.preventDefault();
@@ -447,16 +517,27 @@ import "overlayscrollbars/overlayscrollbars.css";
     const a = ev.target.closest("a[href]");
     if (!a || a.target || a.hasAttribute("download")) return;
     const url = new URL(a.href, location.href);
-    if (url.origin !== location.origin) return;
+    if (url.origin !== location.origin) {
+      // External link: the browser navigates; just record the exit (https
+      // origins only, stripped to the origin part server-side anyway).
+      if (url.protocol === "https:") ping(url.origin);
+      return;
+    }
     // Same-page anchor links (footnotes etc.): let the browser handle them
     if (url.pathname === location.pathname && url.hash) return;
     // Machinery and auth endpoints are never fetch-navigated.
     if (url.pathname.startsWith("/_") || url.pathname.startsWith("/auth")) return;
     ev.preventDefault();
-    load(url);
+    // Capture the source now: load() updates currentPath before pinging.
+    const from = currentPath;
+    load(url).then((ok) => { if (ok) ping(url.pathname, from); });
   });
 
-  addEventListener("popstate", () => load(location.href, false, true));
+  addEventListener("popstate", () => {
+    // Hash-only history entries (the analytics app) are not navigations.
+    if (location.pathname === currentPath) return;
+    load(location.href, false, true);
+  });
 
   // --- Task-list checkboxes ------------------------------------------------
   // Checkboxes in the rendered article are live: toggling them edits the

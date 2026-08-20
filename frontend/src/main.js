@@ -17,6 +17,7 @@ if (import.meta.env.DEV) {
 
 import { createApp } from 'vue'
 import EditorShell from './EditorShell.vue'
+import AnalyticsView from './AnalyticsView.vue'
 
 let host = null
 let app = null
@@ -95,4 +96,53 @@ export function closeEditor() {
     .catch(() => {
       if (!visible && restoreTitle != null) document.title = restoreTitle
     })
+}
+
+// --- Full-screen analytics app ---------------------------------------------
+// Replaces the page chrome while open (body.analytics-open hides it, see
+// AnalyticsView.vue); opened from the 📊 pen or directly via the URL hash
+// #/analytics/<range> so refresh and link sharing stay in analytics.
+let analyticsHost = null
+let analyticsApp = null
+
+function analyticsHashRange() {
+  const m = location.hash.match(/^#\/analytics(?:\/(\w+))?/)
+  return m ? m[1] || 'week' : null
+}
+
+function onHashChange() {
+  if (analyticsHashRange() === null) closeAnalytics()
+  else openAnalytics()
+}
+
+export function openAnalytics() {
+  if (analyticsHost) return
+  let r = analyticsHashRange()
+  if (r === null) {
+    r = 'week'
+    // Pushed (not replaced) so the back button exits the app via hashchange.
+    history.pushState(null, '', `#/analytics/${r}`)
+  }
+  analyticsHost = document.createElement('div')
+  document.body.append(analyticsHost)
+  document.body.classList.add('analytics-open')
+  analyticsApp = createApp(AnalyticsView, {
+    initialRange: r,
+    onClose: closeAnalytics,
+  })
+  analyticsApp.mount(analyticsHost)
+  addEventListener('hashchange', onHashChange)
+}
+
+export function closeAnalytics() {
+  if (!analyticsHost) return
+  removeEventListener('hashchange', onHashChange)
+  analyticsApp?.unmount()
+  analyticsApp = null
+  analyticsHost?.remove()
+  analyticsHost = null
+  document.body.classList.remove('analytics-open')
+  if (analyticsHashRange() !== null) {
+    history.replaceState(null, '', location.pathname + location.search)
+  }
 }

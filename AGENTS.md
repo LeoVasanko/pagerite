@@ -15,8 +15,9 @@ Pagerite is a CMS. See `docs` for the full design and implementation details. Ke
   - `markdown.py` — markdown-it-py renderer.
   - `views.py` — shared page layout and rendering.
   - `seed.py` — demo content, written only on first database creation.
+  - `analytics.py` — visit analytics collection (see `docs/analytics.md`).
 - `frontend/src/` — Vue editor and public-page JS entries.
-  - `main.js` — Vue editor app entry.
+  - `main.js` — Vue editor app entry (also mounts the full-screen AnalyticsView).
   - `pagerite.js` — public page entry.
   - `assets/` — base CSS, Pygments styles, fonts.
 - `scripts/devserver.py` — dev server with auto reload (the user mostly uses this; avoid running the server yourself, ask the user to test).

@@ -596,7 +596,7 @@ blockquote p {
   background: color-mix(in srgb, var(--admonition-color, var(--accent)) 7%, transparent);
 }
 
-.admonition > :last-child {
+.admonition> :last-child {
   margin-bottom: 0;
 }
 
@@ -696,12 +696,6 @@ td {
   background: linear-gradient(160deg,
       color-mix(in srgb, var(--table-tint, var(--accent)) 5%, transparent),
       transparent 75%);
-}
-
-tbody tr:nth-child(even) td {
-  background: linear-gradient(160deg,
-      color-mix(in srgb, var(--table-tint, var(--accent)) 9%, transparent),
-      color-mix(in srgb, var(--table-tint, var(--accent)) 3%, transparent) 75%);
 }
 
 tbody tr+tr td {

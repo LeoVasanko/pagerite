@@ -20,15 +20,17 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from email.utils import format_datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 import blake3
+import msgspec
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi_vue import Frontend
 from kanta import Kanta
 from pydantic import BaseModel
 
-from pagerite import seed, views
+from pagerite import analytics, seed, views
 from pagerite.__main__ import DEVMODE
 from pagerite.data import (
     Data,
@@ -42,6 +44,12 @@ from pagerite.data import (
 from pagerite.markdown import has_h1, render, toggle_task
 
 DB_PATH = os.getenv("PAGERITE_DB", "pagerite.kantadb")
+
+# Visit analytics go to their own JSON file, not the kanta database.
+ANALYTICS_PATH = Path(
+    os.getenv("PAGERITE_ANALYTICS", DB_PATH.replace(".kantadb", "") + ".analytics.json")
+)
+analytics_store = analytics.Store(ANALYTICS_PATH)
 
 # Our own data root; kanta edits it in place, reads are plain attribute access.
 data = Data()
@@ -495,6 +503,41 @@ async def delete_page(path: str) -> None:
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 
+def _client_ip(request: Request) -> str:
+    """Client IP: first X-Forwarded-For hop (we sit behind a proxy), else
+    the direct peer."""
+    forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    return forwarded or (request.client.host if request.client else "")
+
+
+class AnalyticsPing(BaseModel):
+    """Navigation ping from pagerite.js (see docs/analytics.md)."""
+
+    fr: str = ""
+    to: str
+
+
+@app.post("/_a", status_code=204)
+async def analytics_ping(ping: AnalyticsPing, request: Request) -> None:
+    """Record a navigation ping ({fr, to}); fire-and-forget, never fails."""
+    analytics_store.ping(
+        ping.fr, ping.to, _client_ip(request),
+        request.headers.get("user-agent", ""),
+    )
+
+
+def _track_entry(path: str, request: Request) -> None:
+    """Stash the referer of the document GET for the initial ping.
+
+    Nothing is counted on the GET itself — the client's /_a ping starts the
+    visit, so bots and admin browsing never register.
+    """
+    own_origin = f"https://{urlparse(str(request.base_url)).netloc}"
+    analytics_store.entry_referer(
+        request.headers.get("referer", ""), own_origin, _client_ip(request)
+    )
+
+
 def _http_date(dt: datetime) -> str:
     """RFC 7231 date for the Last-Modified header."""
     return format_datetime(dt.astimezone(UTC), usegmt=True)
@@ -517,6 +560,18 @@ def _check_reserved(path: str) -> None:
             400,
             'slugs may only use a-z, 0-9, "-" and "_" (not as the first character), and no dots',
         )
+
+
+@app.get("/_api/analytics")
+async def get_analytics() -> Response:
+    """The collected visit analytics as JSON (see docs/analytics.md).
+
+    Admin-only via the /_api forward-auth gate, like every management
+    endpoint. Powers the full-screen analytics viewer in the frontend.
+    """
+    return Response(
+        msgspec.json.encode(analytics_store.data), media_type="application/json"
+    )
 
 
 @app.websocket("/_api/ws/editor")
@@ -699,6 +754,7 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
         etag = f'"{path}@{node.modified.timestamp()}v{data.version}"'
         if request.headers.get("if-none-match") == etag:
             return Response(status_code=304)
+        _track_entry(path, request)
         return HTMLResponse(
             views.render_page(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html, str(request.base_url).rstrip("/")),
             headers={
@@ -710,6 +766,7 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
     if node is not None and node.published and node.content is None:
         # Category label without a landing page: placeholder with the pen
         # to create it (404 — no page here, but the node is real).
+        _track_entry(path, request)
         return HTMLResponse(
             views.render_category(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html),
             404,
@@ -724,4 +781,5 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
         for slug, item in sorted_nodes(data.menu):
             if item.published:
                 return RedirectResponse(f"/{slug}")
+    _track_entry(path, request)
     return HTMLResponse(views.render_not_found(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html), 404)

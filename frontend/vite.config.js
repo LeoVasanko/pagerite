@@ -9,13 +9,14 @@ const backendUrl = process.env.PAGERITE_BACKEND_URL || 'http://localhost:3200'
 
 // Proxy content pages (/slug, /path/to/slug) to the FastAPI backend in dev.
 // Excludes Vite internals (/@..., /src, /node_modules, /__...) and the
-// backend's /_ prefix. /_api and /_f are handled by the fastapi-vue plugin.
+// backend's /_ prefix. /_api, /_f, /_themes and the /_a analytics ping are
+// handled by the fastapi-vue plugin.
 const CONTENT_PROXY = '^\\/(?!_|@|src|node_modules|__)(?:[^./?]+(?:\\/[^./?]+)*)?(?:\\?.*)?$'
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
-    fastapiVue({ paths: ["/_api", "/_f", "/_themes"] }),
+    fastapiVue({ paths: ["/_api", "/_f", "/_themes", "/_a"] }),
     vue(),
     vueDevTools(),
   ],
