@@ -32,9 +32,11 @@ The client (`pagerite.js`) POSTs fire-and-forget pings to `/_a` with
 - **Internal fetch-navigations**: `to` is the target path, sent only after
   the swap actually happened (a failed swap falls back to a full load,
   whose initial ping counts the view instead — no gap, no double count).
-- **External links** (`https` only): `to` is the link's origin. This is the
+- **External links** (`https` only): `to` is the link's full URL. This is the
   exit-link record; the user may continue navigating afterwards (new tab,
-  back), so the exit origin is not necessarily the last trail entry.
+  back), so the exit URL is not necessarily the last trail entry. Outbound
+  links are stored by full URL so several links to the same domain remain
+  distinct.
 - **Excluded**: back/forward (popstate) navigations, navigation involving
   the analytics page itself (`/_a`), and everything while the user is known to
   be an admin *and SSO is actually in use* — with no auth proxy (dev/test)
@@ -83,7 +85,7 @@ Each `Visit` record:
 - `ip` — visitor IP address (first `X-Forwarded-For` hop, or direct peer),
 - `host` — reverse-DNS host name for `ip` when resolvable, else `""`,
 - `trail` — everything seen afterwards in first-seen order: page paths and
-  external exit origins. Re-visiting an already seen page (incl. the entry)
+  external exit URLs. Re-visiting an already seen page (incl. the entry)
   does not append.
 - `lang` — first `Accept-Language` tag, lowercased (e.g. `en-us`),
 - `country` — two-letter country code.  Initially derived from the

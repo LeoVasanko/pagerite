@@ -146,7 +146,10 @@ function countryName(code) {
                   <td class="when" :title="v.whenTooltip">{{ v.when }}</td>
                   <td class="trail">
                     <a v-for="(s, si) in v.trail" :key="si"
-                       :href="s.path" :title="s.title" @click="$emit('close')">
+                       :href="s.path" :title="s.title"
+                       :target="s.external ? '_blank' : undefined"
+                       :rel="s.external ? 'noopener' : undefined"
+                       @click="(e) => { if (!s.external) $emit('close') }">
                       {{ s.slug }}
                     </a>
                   </td>

@@ -52,7 +52,7 @@ def _compact_user_agent(ua: str) -> str:
 class Visit(msgspec.Struct, omit_defaults=True):
     """One visit: the initial-load data plus everything seen afterwards.
 
-    ``trail`` holds page paths and external exit origins in first-seen
+    ``trail`` holds page paths and external exit URLs in first-seen
     order; re-visiting an already seen page does not append. The entry
     page itself is in ``entry``, not in the trail.
     """
@@ -127,6 +127,17 @@ def _origin(url: str) -> str | None:
     if parsed.scheme != "https" or not parsed.netloc:
         return None
     return f"https://{parsed.netloc}"
+
+
+def _external_target(url: str) -> str | None:
+    """A valid https URL (origin or full page), else None."""
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return None
+    if parsed.scheme != "https" or not parsed.netloc:
+        return None
+    return url
 
 
 _SEGMENT = re.compile(r"[a-z0-9][a-z0-9_-]*")
@@ -364,9 +375,9 @@ class Store:
     ) -> int | None:
         """Record a client navigation ping ({from, to} from pagerite.js).
 
-        ``to`` is an internal path ("/...") or an https origin for exit
-        links; anything else is ignored. The transition is always counted;
-        the trail only grows on first sight of a page within the visit.
+        ``to`` is an internal path ("/...") or an https URL for exit links;
+        anything else is ignored. The transition is always counted; the trail
+        only grows on first sight of a page within the visit.
         A ping with no known session starts a fresh visit, consuming the
         referer and UTM tags stashed by the document GET if there are any.
 
@@ -382,8 +393,8 @@ class Store:
         if to.startswith("/") and not to.startswith("//"):
             target = _internal_path(to) or ""
         else:
-            target = _origin(to) or ""
-        if not target or (not to.startswith("/") and target != to):
+            target = _external_target(to) or ""
+        if not target:
             return None
         key = (ip, ua)
         index = self.sessions.get(key)

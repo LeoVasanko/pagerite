@@ -62,6 +62,31 @@ function slugOf(path) {
   return path === '/' ? '🏠' : path.split('/').pop()
 }
 
+/** Host name of an external https origin, with scheme stripped. */
+function externalSlug(origin) {
+  try {
+    return new URL(origin).host
+  } catch {
+    return origin.replace(/^https?:\/\//, '')
+  }
+}
+
+/** Format one trail step: an internal page or an external https origin. */
+function stepOf(path, titles) {
+  if (path?.startsWith('/')) {
+    return { path, slug: slugOf(path), title: titles.get(path) || '', external: false }
+  }
+  if (path?.startsWith('https://')) {
+    return {
+      path,
+      slug: externalSlug(path),
+      title: 'External site',
+      external: true,
+    }
+  }
+  return null
+}
+
 /**
  * Human-readable relative timestamp.  Adapted from cista-storage: uses
  * ``Intl.RelativeTimeFormat`` for short intervals and a compact date for
@@ -117,8 +142,9 @@ export function formatWhenTooltip(ts) {
 
 /**
  * Format recent visits for display, newest first. Each step is a linked slug
- * pointing to its article; external referers/origins and direct entries are
- * omitted. The link title shows the article heading when known.
+ * pointing to its article; external referers/origins are shown as their
+ * domain name with the full origin as the link href. The link title shows the
+ * article heading when known, or "External site" for origins.
  */
 export function formatRecentVisits(visits, pageTree, limit = 50) {
   const titles = buildTitleMap(pageTree)
@@ -126,13 +152,9 @@ export function formatRecentVisits(visits, pageTree, limit = 50) {
     .reverse()
     .map((v) => ({
       when: new Date(v.start).toLocaleString(),
-      steps: [v.entry, ...(v.trail || [])]
-        .filter((p) => p?.startsWith('/'))
-        .map((p) => ({
-          path: p,
-          slug: slugOf(p),
-          title: titles.get(p) || '',
-        })),
+      steps: [v.referer, v.entry, ...(v.trail || [])]
+        .map((p) => stepOf(p, titles))
+        .filter(Boolean),
     }))
     .filter((v) => v.steps.length)
     .slice(0, limit)
@@ -239,19 +261,16 @@ export function formatCrawlerRows(crawlers, pageTree, now = Date.now()) {
 
 /**
  * Format raw visit records as rows for a technical table.  Returns objects
- * with display strings; missing values become "—".  ``trail`` joins page
- * titles (when known) with " -> ". Only the 20 most recent visits are shown.
+ * with display strings; missing values become "—".  ``trail`` starts with the
+ * external referer (when present), then the entry page and any further internal
+ * pages or external exit origins. Only the 20 most recent visits are shown.
  */
 export function formatVisitRows(visits, pageTree, now = Date.now()) {
   const titles = buildTitleMap(pageTree)
   return [...(visits || [])].reverse().slice(0, 20).map((v) => {
-    const trail = [v.entry, ...(v.trail || [])]
-      .filter((p) => p?.startsWith('/'))
-      .map((p) => ({
-        path: p,
-        slug: slugOf(p),
-        title: titles.get(p) || '',
-      }))
+    const trail = [v.referer, v.entry, ...(v.trail || [])]
+      .map((p) => stepOf(p, titles))
+      .filter(Boolean)
     const utm = Object.entries(v.utm || {})
       .map(([k, value]) => `${k}=${value}`)
       .join(', ')

@@ -109,10 +109,12 @@ onBeforeUnmount(() => cancelAnimationFrame(rafId))
       <circle v-for="(b, i) in beads" :key="'b' + i"
               :cx="b.x" :cy="b.y" :r="BEAD_R" class="tbead" />
       <g v-for="(x, i) in graph.extNodes" :key="'x' + i">
-        <circle :cx="x.x" :cy="x.y" :r="x.r" class="txnode">
-          <title>{{ x.path }}</title>
-        </circle>
-        <text :x="x.x" :y="x.y + x.r + 11" class="txlabel">{{ x.label }}</text>
+        <a :href="x.path" target="_blank" rel="noopener" :title="x.path">
+          <circle :cx="x.x" :cy="x.y" :r="x.r"
+                  :class="['txnode', x.kind === 'source' ? 'txnode-source' : 'txnode-exit']" />
+          <text :x="x.x" :y="x.y - 2" class="tnodeslug">{{ x.label }}</text>
+          <text :x="x.x" :y="x.y + 12" class="tnodecount">{{ x.count }}</text>
+        </a>
       </g>
       <g v-for="n in graph.nodes" :key="n.path">
         <a :href="n.path" :title="n.title">
@@ -144,14 +146,10 @@ onBeforeUnmount(() => cancelAnimationFrame(rafId))
 }
 .tmap .txnode {
   fill: var(--bg, Canvas);
-  stroke: var(--muted);
-  stroke-width: 1;
+  stroke-width: 1.5;
 }
-.tmap .txlabel {
-  fill: var(--muted);
-  font-size: 9px;
-  text-anchor: middle;
-}
+.tmap .txnode-source { stroke: var(--text); }
+.tmap .txnode-exit { stroke: var(--muted); }
 .tmap .tarc {
   fill: none;
   stroke: var(--line);

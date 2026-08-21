@@ -536,9 +536,9 @@ import "overlayscrollbars/overlayscrollbars.css";
     if (!a || a.target || a.hasAttribute("download")) return;
     const url = new URL(a.href, location.href);
     if (url.origin !== location.origin) {
-      // External link: the browser navigates; just record the exit (https
-      // origins only, stripped to the origin part server-side anyway).
-      if (url.protocol === "https:") ping(url.origin);
+      // External link: the browser navigates; record the full https URL so
+      // different links to the same domain stay distinct in analytics.
+      if (url.protocol === "https:") ping(url.href);
       return;
     }
     // Same-page anchor links (footnotes etc.): let the browser handle them

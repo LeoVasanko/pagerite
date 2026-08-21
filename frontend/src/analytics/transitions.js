@@ -14,12 +14,13 @@
  * emitted at time intervals inversely proportional (linear) to the
  * directional count.
  * External referers appear as nodes in a row above the map, external exits
- * as small nodes just outside their source page, angled away from the
- * center. Self-loops (reload pings) are skipped.
+ * as full-size nodes just outside their source page, angled away from the
+ * center. Each distinct full exit URL is its own node. Self-loops (reload
+ * pings) are skipped.
  */
 
 export const TNODE_R = 34 // node circles hold the slug and the view count
-export const EXT_R = 16 // external referer/exit nodes
+export const EXT_R = 34 // external referer/exit nodes use the same full size
 
 // Edge width (half-width of the thin middle) grows logarithmically with
 // the count, anchored so a single recorded transition renders as a ~1 px
@@ -86,7 +87,7 @@ function collectInternalTransitions(transitions) {
 /** Short display label for an external origin (protocol stripped). */
 function extLabel(ext) {
   const s = ext.replace(/^https?:\/\//, '')
-  return s.length > 18 ? `${s.slice(0, 17)}…` : s
+  return s.length > 11 ? `${s.slice(0, 10)}…` : s
 }
 
 /**
@@ -541,7 +542,8 @@ function buildExternal(external, byPath, radius, innerBounds) {
     const spacing = 2 * EXT_R + 44
     const x0 = cx - ((origins.length - 1) * spacing) / 2
     origins.forEach(({ ext, ps }, i) => {
-      const xn = { path: ext, label: extLabel(ext), x: x0 + i * spacing, y, r: EXT_R }
+      const total = ps.reduce((s, p) => s + p.in, 0)
+      const xn = { path: ext, label: extLabel(ext), x: x0 + i * spacing, y, r: EXT_R, count: total, kind: 'source' }
       extNodes.push(xn)
       for (const p of ps) {
         const page = byPath.get(p.page)
@@ -551,30 +553,46 @@ function buildExternal(external, byPath, radius, innerBounds) {
     })
   }
 
-  // Outgoing: small exit nodes fanned outwards from the source page.
+  // Outgoing: group by full URL so several links to the same domain stay
+  // distinct. Each exit node is placed one ring-gap outside its source page
+  // (same radial spacing internal rings use), fanned around the source angle,
+  // and shows the total count across all pages that link to that URL.
+  const GAP = radius(1) - radius(0)
   const outgoing = live.filter((p) => p.out >= minCount)
-    .sort((a, b) => b.out - a.out).slice(0, MAX_EXT_OUT)
+    .sort((a, b) => b.out - a.out)
   const perPage = new Map()
+  const selected = []
   for (const p of outgoing) {
     const used = perPage.get(p.page) || 0
     if (used >= MAX_EXT_OUT_PER_PAGE) continue
     perPage.set(p.page, used + 1)
+    selected.push(p)
+    if (selected.length >= MAX_EXT_OUT) break
+  }
+
+  const exitNodes = new Map() // full URL -> node
+  const placedPerPage = new Map() // for angle fanning of the placement anchor
+  for (const p of selected) {
     const page = byPath.get(p.page)
-    // Fan multiple exits of one page symmetrically around the outward
-    // direction; the center page has no angle, so its exits point down
-    // (the top row above the map belongs to referers).
-    const base = page.depth ? page.angle : Math.PI / 2
-    const ang = base + [0, 0.4, -0.4][used]
-    let dist = TNODE_R + 40
-    let x = page.x + Math.cos(ang) * dist
-    let y = page.y + Math.sin(ang) * dist
-    for (let tries = 0; tries < 5 && overlaps(x, y, EXT_R); tries++) {
-      dist += 24
-      x = page.x + Math.cos(ang) * dist
-      y = page.y + Math.sin(ang) * dist
+    let xn = exitNodes.get(p.ext)
+    if (!xn) {
+      const used = placedPerPage.get(p.page) || 0
+      placedPerPage.set(p.page, used + 1)
+      const base = page.depth ? page.angle : Math.PI / 2
+      const ang = base + [0, 0.4, -0.4][used]
+      let dist = GAP
+      let x = page.x + Math.cos(ang) * dist
+      let y = page.y + Math.sin(ang) * dist
+      for (let tries = 0; tries < 5 && overlaps(x, y, EXT_R); tries++) {
+        dist += GAP * 0.3
+        x = page.x + Math.cos(ang) * dist
+        y = page.y + Math.sin(ang) * dist
+      }
+      xn = { path: p.ext, label: extLabel(p.ext), x, y, r: EXT_R, count: 0, kind: 'exit' }
+      exitNodes.set(p.ext, xn)
+      extNodes.push(xn)
     }
-    const xn = { path: p.ext, label: extLabel(p.ext), x, y, r: EXT_R }
-    extNodes.push(xn)
+    xn.count += p.out
     edges.push(buildRibbon(page, xn, p.out, 0, width(p.out), TNODE_R, EXT_R))
     flows.push(...buildFlows(page, xn, TNODE_R, EXT_R, p.out, 0))
   }
