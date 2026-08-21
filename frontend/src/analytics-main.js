@@ -9,7 +9,7 @@ let app = null
 export function mount(container) {
   if (app) return
   app = createApp(AnalyticsView, {
-    initialRange: new URLSearchParams(location.search).get('range') || 'week',
+    initialRange: location.hash.slice(1) || 'week',
   })
   app.mount(container)
 }

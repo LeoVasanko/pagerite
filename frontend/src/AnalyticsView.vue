@@ -87,7 +87,7 @@ const range = ref(RANGES[props.initialRange] ? props.initialRange : 'week')
 // Keep the URL shareable when the range changes.
 watch(range, (r) => {
   const url = new URL(location.href)
-  url.searchParams.set('range', r)
+  url.hash = r
   history.replaceState(null, '', url)
 })
 
