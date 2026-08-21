@@ -6,7 +6,7 @@ import os
 
 from fastapi_vue import server
 
-DEFAULT_PORT = 3100
+DEFAULT_PORT = 8100
 DEVMODE = os.getenv("PAGERITE_DEV") == "1"
 
 

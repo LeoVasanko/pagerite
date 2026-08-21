@@ -11,7 +11,7 @@
  */
 
 export default function fastapiVue({ paths = ["/api"] } = {}) {
-  const backendUrl = process.env.PAGERITE_BACKEND_URL || "http://localhost:3200"
+  const backendUrl = process.env.PAGERITE_BACKEND_URL || "http://localhost:8210"
 
   // Build proxy configuration for each path
   const proxy = {}

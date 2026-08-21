@@ -19,8 +19,8 @@ from devutil import (
     setup_vite,
 )
 
-DEFAULT_VITE_PORT = 3100
-DEFAULT_DEV_PORT = 3200
+DEFAULT_VITE_PORT = 8200
+DEFAULT_DEV_PORT = 8210
 HEALTH = "/?from=devserver.py"
 
 
