@@ -425,7 +425,11 @@ import "overlayscrollbars/overlayscrollbars.css";
         if (!res.ok || !type.includes("text/html")) throw new Error("not a page");
         // Reflect any redirect the server issued.
         if (res.redirected) finalUrl = res.url;
-        doc = new DOMParser().parseFromString(await res.text(), "text/html");
+        const html = await res.text();
+        // Populate the cache too, or the post-swap preload (which includes
+        // location.pathname) would fetch the very page we just loaded again.
+        pageCache.set(new URL(finalUrl, location.href).pathname, html);
+        doc = new DOMParser().parseFromString(html, "text/html");
       } catch {
         location.href = url; // fall back to a normal navigation
         return false;
@@ -471,7 +475,9 @@ import "overlayscrollbars/overlayscrollbars.css";
       runScripts(document.getElementById("page-banner"));
       runScripts(document.getElementById("main"));
       applyEffects();
-      mountAnalytics(document);
+      // The fetched doc carries the analytics meta; the live document's
+      // <head> is never swapped, so querying it would never find the entry.
+      mountAnalytics(doc);
     };
     // Rotating cube page transition (see the FRAGILE block in pagerite.css);
     // mirrored when navigating back through history. Navigation within the
