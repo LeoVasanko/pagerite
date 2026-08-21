@@ -10,9 +10,12 @@
 
 The script drives a real Chromium browser with Playwright, clicking visible
 internal links so the site's own analytics JavaScript records normal visits
-(POST /_a).  Browser sessions and crawler GETs send a small rotating pool of
-real public IPs in X-Forwarded-For, so the backend can reverse-DNS and GeoIP
-them instead of seeing every hit as 127.0.0.1.
+(POST /_a).  Most browser sessions enter the site with a cross-origin
+``Referer: https://somedomain.com/`` header, and outbound links found on the
+page are followed to real external sites (ending the session).  Browser
+sessions and crawler GETs send a small rotating pool of real public IPs in
+X-Forwarded-For, so the backend can reverse-DNS and GeoIP them instead of seeing
+every hit as 127.0.0.1.
 
 Sessions start with a Poisson inter-arrival delay (``--arrival-rate``) to
 spread traffic out a little, while still keeping the overall run fast.
@@ -125,6 +128,30 @@ def _source_ip(index: int) -> str:
     return SOURCE_IPS[index % len(SOURCE_IPS)]
 
 
+def _normalize_url(url: str) -> str:
+    """Return a usable base URL, adding missing scheme/host/port parts.
+
+    - bare ``:PORT`` becomes ``http://localhost:PORT``
+    - missing scheme becomes ``http://``
+    - otherwise returned as-is
+
+    Raises ``ValueError`` when the result is not a valid http(s) URL.
+    """
+    raw = url.strip()
+    if not raw:
+        raise ValueError("empty URL")
+    if raw.startswith(":"):
+        raw = f"http://localhost{raw}"
+    elif raw.isdigit():
+        raw = f"http://localhost:{raw}"
+    elif not raw.startswith(("http://", "https://")):
+        raw = f"http://{raw}"
+    parsed = urlparse(raw)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise ValueError(f"invalid URL: {url!r}")
+    return raw
+
+
 def _poisson_wait(rate: float) -> float:
     """Return an exponential inter-arrival time for the given Poisson rate."""
     if rate <= 0:
@@ -132,31 +159,39 @@ def _poisson_wait(rate: float) -> float:
     return random.expovariate(rate)
 
 
-def _collect_links(page: Any) -> list[dict[str, Any]]:
-    """Return internal links from the current page, excluding the current page."""
+def _collect_links(page: Any, include_external: bool = False) -> list[dict[str, Any]]:
+    """Return links from the current page, excluding the current page.
+
+    Internal links stay on the site; external links are real https URLs found
+    in the page content and are marked with ``external: true``.
+    """
     return page.evaluate(
-        """() => {
+        """(includeExternal) => {
             const loc = new URL(location.href);
-            return Array.from(document.querySelectorAll('a[href]'))
-                .filter(a => {
-                    try {
-                        const u = new URL(a.href);
-                        return u.origin === loc.origin
-                            && !u.pathname.startsWith('/_')
-                            && !u.pathname.startsWith('/auth')
-                            && u.pathname !== '/favicon.ico'
-                            && u.pathname !== loc.pathname;
-                    } catch { return false; }
-                })
-                .map(a => {
+            const out = [];
+            for (const a of document.querySelectorAll('a[href]')) {
+                try {
+                    const u = new URL(a.href);
                     const rect = a.getBoundingClientRect();
-                    return {
+                    const item = {
                         href: a.href,
                         text: (a.innerText || a.title || '').trim().slice(0, 60),
                         visible: !!(rect.width && rect.height && rect.top < window.innerHeight && rect.bottom > 0),
                     };
-                });
-        }"""
+                    if (u.origin === loc.origin
+                            && !u.pathname.startsWith('/_')
+                            && !u.pathname.startsWith('/auth')
+                            && u.pathname !== '/favicon.ico'
+                            && u.pathname !== loc.pathname) {
+                        out.push(item);
+                    } else if (includeExternal && u.protocol === 'https:' && u.origin !== loc.origin) {
+                        out.push({ ...item, external: true });
+                    }
+                } catch { /* ignore malformed hrefs */ }
+            }
+            return out;
+        }""",
+        include_external,
     )
 
 
@@ -201,6 +236,8 @@ def _run_browser_session(
     stay: tuple[float, float],
     headless: bool,
     fake_ip: str,
+    referer_rate: float,
+    include_external: bool = True,
 ) -> dict[str, Any]:
     from playwright.sync_api import sync_playwright
 
@@ -212,13 +249,17 @@ def _run_browser_session(
                 headless=headless,
                 args=["--no-sandbox", "--disable-dev-shm-usage"],
             )
+            extra_headers = {
+                "X-Forwarded-For": fake_ip,
+                "Accept-Language": profile.accept_language,
+            }
+            # Most sessions arrive from an external origin; some are direct.
+            if random.random() < referer_rate:
+                extra_headers["Referer"] = "https://somedomain.com/"
             context = browser.new_context(
                 user_agent=profile.user_agent,
                 viewport={"width": profile.viewport[0], "height": profile.viewport[1]},
-                extra_http_headers={
-                    "X-Forwarded-For": fake_ip,
-                    "Accept-Language": profile.accept_language,
-                },
+                extra_http_headers=extra_headers,
             )
             page = context.new_page()
             entry = random.choice(paths) if paths else "/"
@@ -227,7 +268,7 @@ def _run_browser_session(
 
             for _ in range(max_clicks):
                 _sleep(random.uniform(*stay) / 2, 0.3)
-                links = _collect_links(page)
+                links = _collect_links(page, include_external)
                 visible = [item for item in links if item.get("visible")]
                 if not visible:
                     visible = links
@@ -242,6 +283,12 @@ def _run_browser_session(
                         ok = _click_link(page, alt)
                     if not ok:
                         break
+                if link.get("external"):
+                    # Outbound navigation: the analytics exit ping is already
+                    # in flight. Record the external URL and end the session.
+                    trail.append(page.url)
+                    _sleep(0.5, 0.2)
+                    break
                 page.wait_for_load_state("networkidle")
                 trail.append(page.url)
                 _sleep(random.uniform(*stay), 0.5)
@@ -295,7 +342,14 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         description="Generate fake traffic for a Pagerite site.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("url", help="Base URL of the Pagerite site")
+    parser.add_argument(
+        "url",
+        nargs="?",
+        default="http://localhost:8200",
+        help="Base URL of the Pagerite site (default: http://localhost:8200). "
+             "A bare :PORT or PORT is treated as http://localhost:PORT; a "
+             "missing scheme defaults to http://.",
+    )
     parser.add_argument(
         "-b",
         "--browsers",
@@ -332,6 +386,18 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         default=1.0,
         help="Average arrivals per second (Poisson). 0 disables inter-arrival waits",
     )
+    parser.add_argument(
+        "--referer-rate",
+        type=float,
+        default=0.75,
+        help="Share of browser sessions that arrive with a cross-origin Referer",
+    )
+    parser.add_argument(
+        "--external-links",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Include real outbound links in random navigation",
+    )
     parser.add_argument("--seed", type=int, default=None, help="Random seed")
     parser.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
     return parser.parse_args(argv)
@@ -342,8 +408,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.verbose:
         logger.setLevel(logging.DEBUG)
 
+    try:
+        base = _normalize_url(args.url).rstrip("/")
+    except ValueError as exc:
+        logger.error("%s", exc)
+        return 2
+
     random.seed(args.seed)
-    base = args.url.rstrip("/")
 
     # Discover content paths from the public page tree if we can.
     paths: list[str] = []
@@ -389,6 +460,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             (args.stay[0], args.stay[1]),
             args.headless,
             fake_ip,
+            args.referer_rate,
+            args.external_links,
         )
         results.append(result)
         logger.debug("  trail: %s", result.get("trail", []))
