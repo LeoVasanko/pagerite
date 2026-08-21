@@ -29,6 +29,7 @@ Where to go next:
 - The [docs](/docs/editing) section explains how to edit this site and shows every supported Markdown feature, source and result side by side.
 - The [showcase](/showcase/gallery) section shows what finished pages can look like: image positioning, banners, a long read.
 - Click the 🖊️ pen on any page to open the editor, and the ⚙️ pen for site settings and the structure tree.
+- Elsewhere on the web: [![xkcd 927: Standards](https://imgs.xkcd.com/comics/standards.png "xkcd 927: Standards"){width=240}](https://xkcd.com/927/) — a cautionary tale about adding one more standard.
 
 ![Abstract waves](waves.svg "Generated SVG artwork, attached to this page"){width=420}
 
@@ -68,15 +69,15 @@ Every feature below is shown twice: first the Markdown source, then how it rende
 ### A subsection
 
 *Emphasis*, **strong**, ~~strikethrough~~, `inline code`, and a
-[link to the front page](/). Plain URLs become links automatically:
-https://example.com — and a hard line break
+[link to the front page](/). An image that links to its page:
+[![xkcd 1179: ISO 8601](https://imgs.xkcd.com/comics/iso_8601.png "xkcd 1179: ISO 8601"){width=240}](https://xkcd.com/1179/) — and a hard line break
 is just a newline.
 ```
 
 ## A section heading
 ### A subsection
 
-*Emphasis*, **strong**, ~~strikethrough~~, `inline code`, and a [link to the front page](/). Plain URLs become links automatically: https://example.com — and a hard line break
+*Emphasis*, **strong**, ~~strikethrough~~, `inline code`, and a [link to the front page](/). An image that links to its page: [![xkcd 1179: ISO 8601](https://imgs.xkcd.com/comics/iso_8601.png "xkcd 1179: ISO 8601"){width=240}](https://xkcd.com/1179/) — and a hard line break
 is just a newline.
 
 ## Lists and quotes
@@ -354,6 +355,7 @@ This site runs on **Pagerite**: FastAPI + html5tagger + kanta, with content writ
 - [How to edit this site](/docs/editing)
 - [Markdown features](/docs/markdown/basics)
 - [The showcase](/showcase/gallery)
+- [![xkcd 2347: Dependency](https://imgs.xkcd.com/comics/dependency.png "xkcd 2347: Dependency"){width=240}](https://xkcd.com/2347/) — a small comic about small dependencies
 
 *Replace this page with whatever your site is about.*
 """
