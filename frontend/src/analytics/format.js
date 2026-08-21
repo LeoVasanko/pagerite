@@ -63,6 +63,59 @@ function slugOf(path) {
 }
 
 /**
+ * Human-readable relative timestamp.  Adapted from cista-storage: uses
+ * ``Intl.RelativeTimeFormat`` for short intervals and a compact date for
+ * anything older than a week.
+ */
+export function formatWhen(ts, now = Date.now()) {
+  const date = new Date(ts)
+  const diff = date.getTime() - now
+  const adiff = Math.abs(diff)
+  const formatter = new Intl.RelativeTimeFormat('en', { numeric: 'auto' })
+  if (adiff <= 5000) return 'now'
+  if (adiff <= 60000) {
+    return formatter
+      .format(Math.round(diff / 1000), 'second')
+      .replace(' ago', '')
+      .replaceAll(' ', '\u202F')
+  }
+  if (adiff <= 3600000) {
+    return formatter
+      .format(Math.round(diff / 60000), 'minute')
+      .replace('utes', '')
+      .replace('ute', '')
+      .replaceAll(' ', '\u202F')
+  }
+  if (adiff <= 86400000) {
+    return formatter
+      .format(Math.round(diff / 3600000), 'hour')
+      .replaceAll(' ', '\u202F')
+  }
+  if (adiff <= 604800000) {
+    return formatter
+      .format(Math.round(diff / 86400000), 'day')
+      .replaceAll(' ', '\u202F')
+  }
+  let d = date
+    .toLocaleDateString('en-ie', {
+      weekday: 'short',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    })
+    .replace('Sept', 'Sep')
+  if (d.length === 14) d = d.replace(' ', ' \u2007')
+  d = d.replaceAll(' ', '\u202F').replace('\u202F', '\u00A0')
+  d = d.slice(0, -4) + d.slice(-2)
+  return d
+}
+
+/** Full UTC timestamp for tooltips, e.g. "2026-08-21 00:20:48 UTC". */
+export function formatWhenTooltip(ts) {
+  return new Date(ts).toISOString().replace('T', ' ').replace('Z', ' UTC')
+}
+
+/**
  * Format recent visits for display, newest first. Each step is a linked slug
  * pointing to its article; external referers/origins and direct entries are
  * omitted. The link title shows the article heading when known.
@@ -133,31 +186,65 @@ export function countCrawlerUas(crawlers) {
 }
 
 /**
- * Format raw crawler hit records as rows for a technical table.  Missing
- * values become "—".
+ * Group raw crawler hits by the same (ip, ua) pair we use to tell a real
+ * visitor from a crawler, and format each group as a row showing every
+ * internal page that crawler visited.  Rows are sorted by total hits,
+ * most active crawler first, rather than by most recent hit.
  */
-export function formatCrawlerRows(crawlers) {
-  const dash = (s) => (s || '—')
-  return [...(crawlers || [])].reverse().map((c) => ({
-    when: new Date(c.start).toLocaleString(),
-    entry: dash(c.entry),
-    ip: c.ip || '',
-    ipDisplay: c.host || hostIP(c.ip) || c.ip || '—',
-    ua: c.ua_pretty || c.ua || '—',
-    uaRaw: c.ua || '',
-    referer: dash(c.referer),
-    query: dash(c.query),
-  }))
+export function formatCrawlerRows(crawlers, pageTree, now = Date.now()) {
+  const titles = buildTitleMap(pageTree)
+  const groups = new Map()
+  for (const c of crawlers || []) {
+    const key = `${c.ip}\0${c.ua}`
+    const g = groups.get(key) || {
+      ip: c.ip || '',
+      ua: c.ua_pretty || c.ua || '—',
+      uaRaw: c.ua || '',
+      lastStart: 0,
+      pages: new Map(),
+    }
+    const start = new Date(c.start).getTime()
+    if (start > g.lastStart) g.lastStart = start
+    if (c.entry?.startsWith('/')) {
+      g.pages.set(c.entry, (g.pages.get(c.entry) || 0) + 1)
+    }
+    groups.set(key, g)
+  }
+  const totalHits = (g) => {
+    let n = 0
+    for (const c of g.pages.values()) n += c
+    return n
+  }
+  return [...groups.values()]
+    .sort((a, b) => totalHits(b) - totalHits(a) || b.lastStart - a.lastStart)
+    .slice(0, 10)
+    .map((g) => ({
+      when: formatWhen(g.lastStart, now),
+      whenTooltip: formatWhenTooltip(g.lastStart),
+      pages: [...g.pages.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([path, count]) => ({
+          path,
+          slug: slugOf(path),
+          title: titles.get(path) || '',
+          count,
+        })),
+      ip: g.ip,
+      ipDisplay: hostIP(g.ip) || g.ip || '—',
+      ua: g.ua,
+      uaRaw: g.uaRaw,
+      total: totalHits(g),
+    }))
 }
 
 /**
  * Format raw visit records as rows for a technical table.  Returns objects
  * with display strings; missing values become "—".  ``trail`` joins page
- * titles (when known) with " -> ".
+ * titles (when known) with " -> ". Only the 20 most recent visits are shown.
  */
-export function formatVisitRows(visits, pageTree) {
+export function formatVisitRows(visits, pageTree, now = Date.now()) {
   const titles = buildTitleMap(pageTree)
-  return [...(visits || [])].reverse().map((v) => {
+  return [...(visits || [])].reverse().slice(0, 20).map((v) => {
     const trail = [v.entry, ...(v.trail || [])]
       .filter((p) => p?.startsWith('/'))
       .map((p) => ({
@@ -170,7 +257,8 @@ export function formatVisitRows(visits, pageTree) {
       .join(', ')
     const dash = (s) => (s || '—')
     return {
-      when: new Date(v.start).toLocaleString(),
+      when: formatWhen(v.start, now),
+      whenTooltip: formatWhenTooltip(v.start),
       trail,
       referer: dash(v.referer),
       ip: v.ip || '',
@@ -178,6 +266,7 @@ export function formatVisitRows(visits, pageTree) {
       host: dash(v.host),
       lang: dash(v.lang),
       country: dash(v.country),
+      city: dash(v.city),
       ua: v.ua_pretty || v.ua || '—',
       uaRaw: v.ua || '',
       utm: utm || '—',

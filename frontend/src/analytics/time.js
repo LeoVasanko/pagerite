@@ -16,7 +16,7 @@ export const RANGES = {
   week: { label: 'week' },
   month: { label: 'month', span: 30 * DAY, bucket: 6 * HOUR },
   year: { label: 'year', span: 365 * DAY, bucket: DAY },
-  all: { label: 'all', span: null, bucket: DAY },
+  all: { label: 'all', span: null, bucket: DAY, minSpan: 30 * DAY },
 }
 
 /** Monday 00:00 UTC of the week containing t (epoch day 0 was a Thursday). */
@@ -89,16 +89,19 @@ export function weeklySeries(buckets) {
 /**
  * Rolling window for the non-week ranges (x max = now), counts converted
  * to per-day rates (the unit the month+ charts are read in).
+ * Ranges without a fixed span use the full data reach, but never less than
+ * their configured minSpan so the chart keeps a readable minimum x scale.
  */
 export function rollingSeries(buckets, rangeKey) {
   const raw = rawTimes(buckets)
   const times = Object.keys(raw).map(Number)
   if (!times.length) return null
-  const { span, bucket } = RANGES[rangeKey]
+  const { span, bucket, minSpan = 0 } = RANGES[rangeKey]
   const t1 = Math.floor(Date.now() / bucket) * bucket + bucket
+  const earliest = Math.floor(Math.min(...times) / bucket) * bucket
   const t0 = span != null
     ? t1 - span
-    : Math.floor(Math.min(...times) / bucket) * bucket
+    : Math.min(earliest, t1 - minSpan)
   const points = []
   for (let t = t0; t < t1; t += bucket) {
     points.push({ t, count: sumRange(raw, t, t + bucket) })

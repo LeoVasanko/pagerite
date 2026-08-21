@@ -231,9 +231,31 @@ function buildFamilyArcs(nodes, radius) {
     arcs.push({
       d: `M ${Math.cos(a0) * r} ${Math.sin(a0) * r} `
        + `A ${r} ${r} 0 ${large} 1 ${Math.cos(a1) * r} ${Math.sin(a1) * r}`,
+      r,
+      a0,
+      a1,
     })
   }
   return arcs
+}
+
+/** Bounding box of a circular arc centred at the origin, sampled. */
+function arcBounds(r, a0, a1) {
+  let x0 = Infinity
+  let y0 = Infinity
+  let x1 = -Infinity
+  let y1 = -Infinity
+  const steps = 36
+  for (let i = 0; i <= steps; i++) {
+    const t = a0 + (a1 - a0) * (i / steps)
+    const x = Math.cos(t) * r
+    const y = Math.sin(t) * r
+    if (x < x0) x0 = x
+    if (y < y0) y0 = y
+    if (x > x1) x1 = x
+    if (y > y1) y1 = y
+  }
+  return { x0, y0, x1, y1 }
 }
 
 /** Collapse opposite transition directions into one unordered pair per page pair. */
@@ -584,8 +606,9 @@ export function buildTransitionGraph(data, pageTree) {
   const pairs = aggregatePairs(internal)
   const { edges, flows } = buildInternalEdges(pairs, byPath)
 
-  // Tight bounding box of the actual page nodes; internal edges and arcs
-  // stay within the node circles, so node bounds plus radius suffice.
+  // Tight bounding box of the actual page nodes; family ring arcs can sweep
+  // outside the node circle (e.g. a large arc between two siblings on the
+  // left side reaching around the right), so their geometry is included too.
   // External nodes extend the box below.
   const pad = 16
   const xs = nodes.map((n) => n.x)
@@ -595,6 +618,14 @@ export function buildTransitionGraph(data, pageTree) {
     y0: Math.min(...ys) - TNODE_R - pad,
     x1: Math.max(...xs) + TNODE_R + pad,
     y1: Math.max(...ys) + TNODE_R + pad,
+  }
+  for (const arc of arcs) {
+    if (arc.a0 == null) continue
+    const b = arcBounds(arc.r, arc.a0, arc.a1)
+    bounds.x0 = Math.min(bounds.x0, b.x0)
+    bounds.y0 = Math.min(bounds.y0, b.y0)
+    bounds.x1 = Math.max(bounds.x1, b.x1)
+    bounds.y1 = Math.max(bounds.y1, b.y1)
   }
 
   const ext = buildExternal(external, byPath, radius, bounds)

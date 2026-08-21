@@ -57,6 +57,10 @@ ANALYTICS_PATH = Path(
 )
 analytics_store = analytics.Store(ANALYTICS_PATH)
 
+# Live WebSocket clients for the analytics stream.
+_analytics_ws_clients: set[WebSocket] = set()
+_analytics_broadcast_task: asyncio.Task | None = None
+
 
 # Repository root from this file's location (pagerite/app.py -> ..).
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -117,6 +121,18 @@ class GeoIP:
             rec = self._reader.get(ip)
             if rec:
                 return (rec.get("country") or {}).get("iso_code", "")
+        except Exception:
+            pass
+        return ""
+
+    def city(self, ip: str) -> str:
+        """City name for ``ip``, or "" when unavailable."""
+        if not ip or self._reader is None:
+            return ""
+        try:
+            rec = self._reader.get(ip)
+            if rec:
+                return (rec.get("city") or {}).get("names", {}).get("en", "")
         except Exception:
             pass
         return ""
@@ -231,7 +247,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # Decompress/open the DB-IP MMDB once at startup.  Lookups are then
     # read-only and safe to run in background ``to_thread`` workers.
     await asyncio.to_thread(_geoip._load)
+    analytics_store.subscribe(_schedule_analytics_broadcast)
     yield
+    analytics_store.unsubscribe(_schedule_analytics_broadcast)
     await kanta.close()
 
 
@@ -615,13 +633,50 @@ async def _geoip_country(ip: str) -> str:
     return await asyncio.to_thread(_geoip.country, ip)
 
 
+async def _geoip_city(ip: str) -> str:
+    """Async wrapper around the DB-IP MMDB city lookup."""
+    return await asyncio.to_thread(_geoip.city, ip)
+
+
 async def _enrich_visit(index: int, ip: str) -> None:
     """Run non-blocking reverse-DNS and geoip enrichment for a new visit."""
     if not ip:
         return
     host = await _lookup_host(ip)
     country = await _geoip_country(ip)
-    analytics_store.enrich_visit(index, host=host, country=country)
+    city = await _geoip_city(ip)
+    analytics_store.enrich_visit(index, host=host, country=country, city=city)
+
+
+async def _broadcast_analytics() -> None:
+    """Send the current analytics snapshot to every connected WS client."""
+    if not _analytics_ws_clients:
+        return
+    payload = msgspec.json.encode(analytics_store.data).decode()
+    closed = set()
+    for ws in _analytics_ws_clients:
+        try:
+            await ws.send_text(payload)
+        except Exception:
+            closed.add(ws)
+    for ws in closed:
+        _analytics_ws_clients.discard(ws)
+
+
+async def _debounced_analytics_broadcast() -> None:
+    """Wait briefly, then broadcast the latest snapshot once."""
+    await asyncio.sleep(0.2)
+    await _broadcast_analytics()
+
+
+def _schedule_analytics_broadcast() -> None:
+    """Schedule a single debounced broadcast, ignoring duplicate triggers."""
+    global _analytics_broadcast_task
+    if _analytics_broadcast_task is not None and not _analytics_broadcast_task.done():
+        return
+    _analytics_broadcast_task = asyncio.get_running_loop().create_task(
+        _debounced_analytics_broadcast()
+    )
 
 
 class AnalyticsPing(BaseModel):
@@ -635,7 +690,7 @@ class AnalyticsPing(BaseModel):
 async def analytics_page(request: Request) -> HTMLResponse:
     """Render the analytics viewer as a normal site page at /_a.
 
-    The page itself is public, but the data endpoint (/_api/analytics) stays
+    The page itself is public, but the data stream (/_api/ws/analytics) stays
     admin-gated like the rest of /_api, so only authorized users see the
     statistics; others get the viewer with a "could not be loaded" message.
     """
@@ -727,16 +782,23 @@ def _check_reserved(path: str) -> None:
         )
 
 
-@app.get("/_api/analytics")
-async def get_analytics() -> Response:
-    """The collected visit analytics as JSON (see docs/analytics.md).
+@app.websocket("/_api/ws/analytics")
+async def analytics_websocket(ws: WebSocket) -> None:
+    """Stream the analytics snapshot, then push updates as they happen.
 
     Admin-only via the /_api forward-auth gate, like every management
     endpoint. Powers the analytics viewer rendered at /_a.
     """
-    return Response(
-        msgspec.json.encode(analytics_store.data), media_type="application/json"
-    )
+    await ws.accept()
+    await ws.send_text(msgspec.json.encode(analytics_store.data).decode())
+    _analytics_ws_clients.add(ws)
+    try:
+        while True:
+            await ws.receive_text()
+    except Exception:
+        pass
+    finally:
+        _analytics_ws_clients.discard(ws)
 
 
 @app.websocket("/_api/ws/editor")

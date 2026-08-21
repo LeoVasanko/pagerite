@@ -8,8 +8,8 @@ Struct dumped to disk — separate from the kanta content database, path from
 - `pagerite/analytics.py` — data model (`Analytics`, `Visit`) and the `Store`
   (in-memory data + session map, atomic JSON persistence).
 - `pagerite/app.py` — entry-referer stashing in `show_page` (`_track_entry`),
-  the `POST /_a` ping endpoint, and `GET /_api/analytics` (admin-gated like
-  every `/_api` endpoint).
+  the `POST /_a` ping endpoint, and `WebSocket /_api/ws/analytics`
+  (admin-gated like every `/_api` endpoint).
 - `frontend/src/pagerite.js` — client navigation pings and the 📊 pen.
 - `frontend/src/AnalyticsView.vue` — viewer component rendered inside the
   normal site layout on the `/_a` analytics page.
@@ -59,7 +59,10 @@ The client (`pagerite.js`) POSTs fire-and-forget pings to `/_a` with
 - **Crawler hits**: every document GET is queued in RAM as a pending crawler
   hit.  If a ping from the same (IP, User-Agent) pair arrives within 10
   seconds the hit is discarded; otherwise it is written to `crawlers`.
-  Crawlers do not count as visits or views.
+  Crawlers do not count as visits or views.  In the analytics viewer, crawler
+  hits are grouped by the same (IP, User-Agent) pair and shown as a trail of
+  internal pages that crawler visited; the crawler table lists the most active
+  crawlers first rather than the most recent hits.
 
 ## Visits and sessions
 
@@ -86,6 +89,7 @@ Each `Visit` record:
 - `country` — two-letter country code.  Initially derived from the
   `Accept-Language` region subtag, but overwritten by the DB-IP MMDB result
   when a database is available,
+- `city` — city name from the DB-IP MMDB lookup, when available,
 - `ua` — raw `User-Agent` string from the initial ping,
 - `ua_pretty` — compact display form of the UA (browser/OS/device) when
   parsable, otherwise the raw string,
@@ -131,9 +135,9 @@ The 📊 pen in the banner corner (admins only, injected by pagerite.js next to
 the edit pens) links to `/_a`, the analytics page. It is a normal site page:
 the standard banner, navigation and footer stay in place, and the analytics
 content is rendered inside `#main`. The page itself is public, but the data
-still comes from `GET /_api/analytics`, which remains admin-gated like the
-rest of the management API; visitors without access see the viewer with a
-"could not be loaded" message.
+stream comes from `WebSocket /_api/ws/analytics`, which remains admin-gated
+like the rest of the management API; visitors without access see the viewer
+with a "could not be loaded" message.
 
 Because it is a real page, fetch-navigation handles it like any other internal
 link: clicking the 📊 pen (or any link to `/_a`) fetches the server-rendered
@@ -156,16 +160,19 @@ the smoothing time scale follows the unit: the month+ sigmas are 24× the
 hourly ones. The y max is derived from the smoothed curves so single-bucket
 spikes don't blow up the scale, and raw spikes are clamped into the plot.
 Axes always start at 0 and end at a multiple of a 1-2-5 major step (max 5
-labeled intervals, minor lines at fifths when integral; the floor is 1/h).
+labeled intervals, minor lines at fifths when integral; the minimum y-axis
+range is 10 so tiny values such as a single visit are not stretched to a
+fractional scale).
 The week range is aligned to Monday 00:00 UTC and overlays up to 8 previous
 weeks in the same accent color at decreasing opacity (the current week is
 truncated at the current bucket, never drawing fake zeroes for the future);
 its x labels are weekday names centered at midday UTC, without vertical grid
 lines (day boundaries would be misleading in the viewer's timezone). The
 month view labels days the same lineless way — day numbers at noon UTC,
-with the month name substituted for the 1st. Year and all are rolling
-windows ending at now, re-bucketed to daily points, with boundary lines at
-months/years. Below the charts: a radial **transition map** (all pages from
+with the month name substituted for the 1st. Year is a rolling 365-day window ending at now, re-bucketed to daily points,
+with boundary lines at months/years.  All uses the full data reach, but keeps
+at least the past 30 days so the chart never collapses to a tiny sliver when
+the site is young. Below the charts: a radial **transition map** (all pages from
 `/_api/pages` — front page at the center, each slug level on its own ring,
 siblings clockwise in navigation order from the top, radial gap equal to
 the arc spacing — opposite transition directions joined into organic
@@ -178,5 +185,7 @@ to the directional count with no in-flight limit, opposing directions
 offset onto parallel lanes. External referers show as a node row above the
 map, external exits as small nodes fanned outwards from their source
 page), per-page view
-counts, the top transitions and the 50 most recent visit trails. Data comes from `GET /_api/analytics`, which
-returns the raw JSON file contents.
+counts, the top transitions and the 50 most recent visit trails. Data is
+streamed live over `WebSocket /_api/ws/analytics`, which pushes the latest
+JSON snapshot on connect and again whenever the analytics file is updated
+(with a small server-side debounce to avoid flooding under high traffic).

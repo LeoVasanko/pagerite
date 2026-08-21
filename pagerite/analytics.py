@@ -17,6 +17,8 @@ rewritten atomically on every recorded event.
 import os
 import re
 import tempfile
+from collections.abc import Callable
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -67,7 +69,10 @@ class Visit(msgspec.Struct, omit_defaults=True):
     #: First Accept-Language tag, lowercased (e.g. "en-us").
     lang: str = ""
     #: Two-letter region subtag derived from ``lang`` (e.g. "US"), or "".
+    #: Overwritten by the DB-IP geoip lookup when a database is available.
     country: str = ""
+    #: City name from the DB-IP geoip lookup, or "".
+    city: str = ""
     #: Raw User-Agent header from the initial ping.
     ua: str = ""
     #: Compact display form of ``ua`` (browser/OS/device) when parsable.
@@ -196,6 +201,23 @@ class Store:
         #: Document GETs that have not yet been matched by a ping.  Kept
         #: in RAM only; expired entries are written to ``data.crawlers``.
         self.pending_crawlers: list[CrawlerHit] = []
+        #: Callables to notify when persisted data changes.  Registered by the
+        #: analytics WebSocket broadcaster.
+        self._on_change: list[Callable[[], None]] = []
+
+    def subscribe(self, callback: Callable[[], None]) -> None:
+        """Register a callback to be called after every persisted change."""
+        if callback not in self._on_change:
+            self._on_change.append(callback)
+
+    def unsubscribe(self, callback: Callable[[], None]) -> None:
+        """Remove a previously registered change callback."""
+        with suppress(ValueError):
+            self._on_change.remove(callback)
+
+    def _notify(self) -> None:
+        for callback in self._on_change:
+            callback()
 
     def _save(self) -> None:
         """Rewrite the JSON file atomically (temp file + rename)."""
@@ -208,6 +230,8 @@ class Store:
             os.replace(tmp, self.path)
         except OSError:
             pass  # analytics must never break page serving
+        else:
+            self._notify()
 
     def _flush_crawlers(self, now: datetime | None = None) -> None:
         """Move expired pending crawler hits into persistent ``data.crawlers``."""
@@ -268,6 +292,7 @@ class Store:
         *,
         host: str = "",
         country: str = "",
+        city: str = "",
     ) -> None:
         """Fill in host/geoip fields on an existing visit after async lookups."""
         if index < 0 or index >= len(self.data.visits):
@@ -279,6 +304,9 @@ class Store:
             changed = True
         if country:
             visit.country = country
+            changed = True
+        if city:
+            visit.city = city
             changed = True
         if changed:
             self._save()

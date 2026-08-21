@@ -14,9 +14,9 @@ export const PAD_TOP = 14 // room above the highest point
 /**
  * Y always starts at 0; the max is a multiple of a 1-2-5 major step with at
  * most 5 intervals, so labeled ticks are always round and evenly divided.
- * Values are per-unit rates, so small scales are legitimate (a lone visit
- * smoothes to well under 1/unit) — the floor is 1, not 10. Minor lines
- * subdivide each major step in five when that yields integers.
+ * A minimum range of 10 keeps tiny near-zero values (e.g. a single visit)
+ * from being enlarged to a fractional scale; minor lines subdivide each
+ * major step in five when that yields integers.
  */
 export function yScale(maxValue) {
   let step = 1
@@ -27,9 +27,9 @@ export function yScale(maxValue) {
     }
   }
   let max = Math.ceil(maxValue / step) * step
-  if (max < 1) {
-    max = 1
-    step = 0.5
+  if (max < 10) {
+    max = 10
+    step = 2
   }
   const minor = step >= 5 && step % 5 === 0 ? step / 5 : null
   return { max, step, minor }

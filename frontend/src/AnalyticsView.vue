@@ -1,16 +1,14 @@
 <script setup>
-// Analytics viewer rendered as a normal page inside #main. Fetches the raw
-// collected data from /_api/analytics (admin-gated by the auth proxy) and
+// Analytics viewer rendered as a normal page inside #main. Receives live
+// analytics data over /_api/ws/analytics (admin-gated by the auth proxy) and
 // renders totals, smoothed visit/views curves, a transition map, and recent
 // visit/crawler tables. Read-only.
 // See docs/analytics.md for the data format.
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RANGES } from './analytics/time.js'
 import {
   calcTotalViews,
   copyIp,
-  countCrawlerUas,
-  formatCounts,
   formatCrawlerRows,
   formatVisitRows,
 } from './analytics/format.js'
@@ -25,21 +23,52 @@ const props = defineProps({
 const data = ref(null)
 const pageTree = ref(null)
 const error = ref('')
+const now = ref(Date.now())
+let ws = null
+let reconnectTimeout = null
+let timeInterval = null
 
-onMounted(async () => {
-  try {
-    const res = await fetch('/_api/analytics')
-    if (!res.ok) throw new Error(res.statusText)
-    data.value = await res.json()
-  } catch {
+function connectAnalytics() {
+  if (ws) return
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  ws = new WebSocket(`${proto}//${location.host}/_api/ws/analytics`)
+  ws.onopen = () => { error.value = '' }
+  ws.onmessage = (event) => {
+    try {
+      data.value = JSON.parse(event.data)
+    } catch {
+      error.value = 'analytics data could not be loaded'
+    }
+  }
+  ws.onerror = () => {
     error.value = 'analytics data could not be loaded'
   }
+  ws.onclose = () => {
+    ws = null
+    reconnectTimeout = setTimeout(connectAnalytics, 2000)
+  }
+}
+
+onMounted(async () => {
+  connectAnalytics()
+  now.value = Date.now()
+  timeInterval = setInterval(() => { now.value = Date.now() }, 30000)
   // The site tree for the transition map (all pages in menu order). Not
-  // fatal: without it the map falls back to transition endpoints only.
+  // fatal: without it the map just narrows to pages seen in transitions.
   try {
     const res = await fetch('/_api/pages')
     if (res.ok) pageTree.value = await res.json()
   } catch { /* map just narrows to pages seen in transitions */ }
+})
+
+onUnmounted(() => {
+  if (reconnectTimeout) clearTimeout(reconnectTimeout)
+  if (timeInterval) clearInterval(timeInterval)
+  if (ws) {
+    ws.onclose = null
+    ws.close()
+    ws = null
+  }
 })
 
 const visits = computed(() => data.value?.visits || [])
@@ -54,10 +83,9 @@ watch(range, (r) => {
   history.replaceState(null, '', url)
 })
 
-const visitRows = computed(() => formatVisitRows(visits.value, pageTree.value))
+const visitRows = computed(() => formatVisitRows(visits.value, pageTree.value, now.value))
 const crawlers = computed(() => data.value?.crawlers || [])
-const crawlerRows = computed(() => formatCrawlerRows(crawlers.value))
-const topCrawlerUas = computed(() => countCrawlerUas(crawlers.value).slice(0, 10))
+const crawlerRows = computed(() => formatCrawlerRows(crawlers.value, pageTree.value, now.value))
 
 function flagSvg(code) {
   return flagSvgs[code?.toUpperCase()] || ''
@@ -115,10 +143,10 @@ function countryName(code) {
               </thead>
               <tbody>
                 <tr v-for="(v, i) in visitRows" :key="i">
-                  <td class="when">{{ v.when }}</td>
+                  <td class="when" :title="v.whenTooltip">{{ v.when }}</td>
                   <td class="trail">
                     <a v-for="(s, si) in v.trail" :key="si"
-                       :href="s.path" :title="s.title" @click="emit('close')">
+                       :href="s.path" :title="s.title" @click="$emit('close')">
                       {{ s.slug }}
                     </a>
                   </td>
@@ -131,6 +159,8 @@ function countryName(code) {
                   <td>{{ v.lang }}</td>
                   <td class="country">
                     <span v-if="flagSvg(v.country)" class="flag" v-html="flagSvg(v.country)" :title="countryName(v.country) || v.country"></span>
+                    <template v-if="v.city !== '—'">{{ countryName(v.country) || v.country }}<br><small class="muted">{{ v.city }}</small></template>
+                    <template v-else-if="v.country !== '—'">{{ countryName(v.country) || v.country }}</template>
                     <template v-else>—</template>
                   </td>
                   <td class="ua" :title="v.uaRaw">{{ v.ua }}</td>
@@ -144,33 +174,32 @@ function countryName(code) {
 
         <section>
           <h2>Crawlers</h2>
-          <div v-if="topCrawlerUas.length" class="crawler-top-uas">
-            <p><strong>top UAs:</strong> {{ formatCounts(topCrawlerUas) }}</p>
-          </div>
           <div v-if="crawlerRows.length" class="visit-table-wrap">
             <table class="visit-table">
               <thead>
                 <tr>
                   <th>when</th>
-                  <th>entry</th>
+                  <th>pages</th>
                   <th>ip</th>
                   <th>ua</th>
-                  <th>referer</th>
-                  <th>query</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="(c, i) in crawlerRows" :key="i">
-                  <td class="when">{{ c.when }}</td>
-                  <td>{{ c.entry }}</td>
+                  <td class="when" :title="c.whenTooltip">{{ c.when }}</td>
+                  <td class="trail">
+                    <a v-for="(s, si) in c.pages" :key="si"
+                       :href="s.path" :title="`${s.title}${s.count > 1 ? ` (${s.count} hits)` : ''}`"
+                       @click="$emit('close')">
+                      <small v-if="s.count > 1" class="muted">{{ s.count }}×</small>{{ s.slug }}
+                    </a>
+                  </td>
                   <td>
                     <span class="clickable-ip"
                           :title="`Click to copy full IP: ${c.ip}`"
                           @click="copyIp(c.ip)">{{ c.ipDisplay }}</span>
                   </td>
                   <td class="ua" :title="c.uaRaw">{{ c.ua }}</td>
-                  <td>{{ c.referer }}</td>
-                  <td>{{ c.query }}</td>
                 </tr>
               </tbody>
             </table>
@@ -305,6 +334,12 @@ function countryName(code) {
 
 .visit-table .trail a + a {
   margin-left: 0.5rem;
+}
+
+.visit-table .trail small,
+.visit-table small.muted {
+  color: var(--muted);
+  font-size: 0.75em;
 }
 
 .visit-table .clickable-ip {
