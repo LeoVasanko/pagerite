@@ -6,6 +6,7 @@
  */
 
 import { DAY, HOUR, MIN5, WEEK, mondayUTC } from './time.js'
+import { formatCount } from './format.js'
 
 export const CHART_W = 720
 export const CHART_H = 180
@@ -412,7 +413,7 @@ export function fmtTick(t, span) {
   return d.toLocaleDateString(undefined, { year: 'numeric', timeZone: 'UTC' })
 }
 
-/** Y labels: integers when the step allows, one decimal for fractional steps. */
+/** Y labels use the same compact formatter as text labels. */
 export function fmtY(v) {
-  return Number.isInteger(v) ? String(v) : v.toFixed(1)
+  return formatCount(v)
 }

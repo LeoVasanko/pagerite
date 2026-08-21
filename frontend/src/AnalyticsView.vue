@@ -10,6 +10,7 @@ import {
   calcTotalViews,
   copyIp,
   copyList,
+  formatCount,
   formatAbuseRows,
   formatCrawlerRows,
   formatVisitRows,
@@ -123,8 +124,8 @@ function countryName(code) {
       <p v-else-if="!data" class="loading">loading…</p>
       <template v-else>
         <section class="totals">
-          <div><strong>{{ visits.length }}</strong> visits</div>
-          <div><strong>{{ totalViews }}</strong> page views</div>
+          <div><strong :title="String(visits.length)">{{ formatCount(visits.length) }}</strong> visits</div>
+          <div><strong :title="String(totalViews)">{{ formatCount(totalViews) }}</strong> page views</div>
         </section>
 
         <VisitorCharts :data="data" :range="range" />
@@ -207,7 +208,7 @@ function countryName(code) {
                     <a v-for="(s, si) in c.pages" :key="si"
                        :href="s.path" :title="`${s.title}${s.count > 1 ? ` (${s.count} hits)` : ''}`"
                        @click="$emit('close')">
-                      <small v-if="s.count > 1" class="muted">{{ s.count }}×</small>{{ s.slug }}
+                      <small v-if="s.count > 1" class="muted">{{ formatCount(s.count) }}×</small>{{ s.slug }}
                     </a>
                   </td>
                   <td class="ip-ua-cell">
@@ -257,7 +258,7 @@ function countryName(code) {
                          @click="copyList(a.allUas, $event)">
                       <div v-for="(u, ui) in a.uas.slice(0, ABUSE_MAX_LINES)" :key="ui"
                            class="list-line">
-                        <small v-if="u.count > 1" class="muted">{{ u.count }}×</small>{{ u.ua }}
+                        <small v-if="u.count > 1" class="muted">{{ formatCount(u.count) }}×</small>{{ u.ua }}
                       </div>
                       <div v-if="a.uas.length > ABUSE_MAX_LINES" class="list-line">
                         <small class="muted">+{{ a.uas.length - ABUSE_MAX_LINES }} more</small>

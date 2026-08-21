@@ -201,6 +201,17 @@ export function formatWhenIso(ts) {
 }
 
 /**
+ * Compact visitor counts: plain below 1k, then 1.2k / 10k / 1.2M.
+ * Truncated, not rounded.
+ */
+export function formatCount(n) {
+  if (n < 1000) return String(n)
+  if (n < 10000) return `${Math.trunc(n / 1000)}.${Math.trunc((n % 1000) / 100)}k`
+  if (n < 1_000_000) return `${Math.trunc(n / 1000)}k`
+  return `${Math.trunc(n / 1_000_000)}.${Math.trunc((n % 1_000_000) / 100_000)}M`
+}
+
+/**
  * Format recent visits for display, newest first. Each step is a linked slug
  * pointing to its article; external referers/origins are shown as their
  * domain name with the full origin as the link href. The link title shows the

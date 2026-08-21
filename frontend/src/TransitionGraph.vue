@@ -8,6 +8,7 @@
  */
 import { computed, onBeforeUnmount, shallowRef, watch } from 'vue'
 import { rangeWindow, WEEK } from './analytics/time.js'
+import { formatCount } from './analytics/format.js'
 import {
   TNODE_R,
   BEAD_R,
@@ -140,7 +141,7 @@ onBeforeUnmount(() => cancelAnimationFrame(rafId))
           <text :transform="`translate(${x.x}, ${x.y}) scale(${x.r - 4})`" class="tnodeslug" :style="{ '--node-r': x.r - 4 }">
             <textPath href="#tnode-label-arc" startOffset="50%" text-anchor="middle" side="right">{{ x.label }}</textPath>
           </text>
-          <text :x="x.x" :y="x.y + 4" class="tnodecount">{{ x.count }}</text>
+          <text :x="x.x" :y="x.y + 4" class="tnodecount">{{ formatCount(x.count) }}</text>
         </a>
       </g>
       <g v-for="n in graph.nodes" :key="n.path">
@@ -150,7 +151,7 @@ onBeforeUnmount(() => cancelAnimationFrame(rafId))
             <textPath href="#tnode-label-arc" startOffset="50%" text-anchor="middle" side="right">{{ n.label }}</textPath>
           </text>
           <text :x="n.x" :y="n.y + 4" class="tnodecount">
-            {{ n.readMin ? `${n.views}×${n.readMin}m` : n.views }}
+            {{ n.readMin ? `${formatCount(n.views)}×${n.readMin}m` : formatCount(n.views) }}
           </text>
         </a>
         <template v-else>
