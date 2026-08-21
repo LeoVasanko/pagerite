@@ -411,7 +411,10 @@ export function formatVisitRows(visits, pageTree, now = Date.now()) {
     const trail = [v.entry, ...(v.trail || [])]
       .map((p) => stepOf(p, titles))
       .filter(Boolean)
-    const utm = Object.entries(v.utm || {})
+    const utmKeys = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content']
+    const utmValues = utmKeys.map((k) => (v.utm || {})[k]).filter(Boolean)
+    const utm = utmValues.length ? utmValues.join(' · ') : ''
+    const utmTitle = Object.entries(v.utm || {})
       .map(([k, value]) => `${k}=${value}`)
       .join(', ')
     const dash = (s) => (s || '—')
@@ -434,6 +437,7 @@ export function formatVisitRows(visits, pageTree, now = Date.now()) {
       ua: v.ua_pretty || v.ua || '—',
       uaRaw: v.ua || '',
       utm: utm || '—',
+      utmTitle,
     }
   })
 }

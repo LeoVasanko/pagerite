@@ -153,7 +153,7 @@ function countryName(code) {
                         {{ v.refererStep.slug }}
                       </a>
                     </template>
-                    <span v-if="v.utm && v.utm !== '—'" class="utm-tag"><small class="muted">{{ v.utm }}</small></span>
+                    <span v-if="v.utm && v.utm !== '—'" class="utm-tag" :title="v.utmTitle">{{ v.utm }}</span>
                     <a v-for="(s, si) in v.trail" :key="si"
                        :href="s.path" :title="s.title"
                        :target="s.external ? '_blank' : undefined"
@@ -418,7 +418,16 @@ function countryName(code) {
 
 .visit-table .utm-tag {
   display: inline-block;
+  max-width: 100%;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 0.25rem;
+  font-size: 0.75em;
   color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
 }
 
 .visit-table .clickable-list {
