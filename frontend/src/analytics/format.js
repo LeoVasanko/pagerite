@@ -77,6 +77,44 @@ export function calcTotalViews(views) {
   return n
 }
 
+// Very short reads are navigation/skims, not real reading time.
+export const MIN_READ_SECONDS = 10
+
+/** Average minutes per visit and average of per-article median read minutes. */
+export function calcReadStats(visits) {
+  const perArticle = {}
+  let totalVisitSeconds = 0
+  let visitCount = 0
+  for (const v of visits || []) {
+    const secs = Object.values(v.read || {}).filter((s) => s >= MIN_READ_SECONDS)
+    if (!secs.length) continue
+    visitCount++
+    totalVisitSeconds += secs.reduce((a, b) => a + b, 0)
+    for (const [path, s] of Object.entries(v.read || {})) {
+      if (s >= MIN_READ_SECONDS) {
+        ;(perArticle[path] || (perArticle[path] = [])).push(s)
+      }
+    }
+  }
+  const avgMinPerVisit = visitCount
+    ? Math.max(1, Math.round(totalVisitSeconds / visitCount / 60))
+    : 0
+
+  let articleMedianSum = 0
+  const articleCount = Object.keys(perArticle).length
+  for (const arr of Object.values(perArticle)) {
+    arr.sort((a, b) => a - b)
+    const mid = Math.floor(arr.length / 2)
+    const median = arr.length % 2 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2
+    articleMedianSum += Math.max(MIN_READ_SECONDS, median)
+  }
+  const avgArticleMedianMin = articleCount
+    ? Math.max(1, Math.round(articleMedianSum / articleCount / 60))
+    : 0
+
+  return { avgMinPerVisit, avgArticleMedianMin }
+}
+
 /** Build a path -> page title lookup from the site tree. */
 function buildTitleMap(pageTree) {
   const titles = new Map()
@@ -95,19 +133,19 @@ function slugOf(path) {
   return path === '/' ? '🏠' : path.split('/').pop()
 }
 
-/** Host name of an external https origin, with scheme stripped. */
+/** Host name of an external https origin, with scheme and www. stripped. */
 function externalSlug(origin) {
   try {
-    return new URL(origin).host
+    return new URL(origin).host.replace(/^www\./, '')
   } catch {
-    return origin.replace(/^https?:\/\//, '')
+    return origin.replace(/^https?:\/\//, '').replace(/^www\./, '')
   }
 }
 
 /** Format one trail step: an internal page or an external https origin. */
 function stepOf(path, titles) {
   if (path?.startsWith('/')) {
-    return { path, slug: slugOf(path), title: titles.get(path) || '', external: false }
+    return { path, slug: slugOf(path), title: titles.get(path) || '', external: false, home: path === '/' }
   }
   if (path?.startsWith('https://')) {
     return {
@@ -317,12 +355,7 @@ export function formatCrawlerRows(crawlers, pageTree, now = Date.now()) {
       lastSeenLocal: formatWhenLocal(g.lastStart),
       pages: [...g.pages.entries()]
         .sort((a, b) => b[1] - a[1])
-        .map(([path, count]) => ({
-          path,
-          slug: slugOf(path),
-          title: titles.get(path) || '',
-          count,
-        })),
+        .map(([path, count]) => ({ ...stepOf(path, titles), count })),
       ip: g.ip,
       ipDisplay: hostIP(g.ip) || g.ip || '—',
       ua: g.ua,

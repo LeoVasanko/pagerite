@@ -19,6 +19,8 @@
  * pings) are skipped.
  */
 
+import { MIN_READ_SECONDS } from './format.js'
+
 export const TNODE_R = 34 // node circles hold the slug and the view count
 export const EXT_R = 34 // external referer/exit nodes use the same full size
 
@@ -85,13 +87,13 @@ function collectInternalTransitions(transitions) {
   return internal
 }
 
-/** Domain-only label for an external origin (path removed). */
+/** Domain-only label for an external origin (path and www. removed). */
 function extLabel(ext) {
   try {
-    const host = new URL(ext).hostname
+    const host = new URL(ext).hostname.replace(/^www\./, '')
     return host.length > 25 ? `${host.slice(0, 24)}…` : host
   } catch {
-    const s = ext.replace(/^https?:\/\//, '').split('/')[0]
+    const s = ext.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0]
     return s.length > 25 ? `${s.slice(0, 24)}…` : s
   }
 }
@@ -186,7 +188,9 @@ function buildReadMinutes(visits) {
   const times = {}
   for (const v of visits || []) {
     for (const [path, sec] of Object.entries(v.read || {})) {
-      ;(times[path] || (times[path] = [])).push(sec)
+      if (sec >= MIN_READ_SECONDS) {
+        ;(times[path] || (times[path] = [])).push(sec)
+      }
     }
   }
   const minutes = {}

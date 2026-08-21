@@ -209,6 +209,7 @@ onBeforeUnmount(() => cancelAnimationFrame(rafId))
   fill: var(--text);
   font-size: calc(11px / var(--node-r, 34));
   text-anchor: middle;
+  filter: saturate(0);
 }
 .tmap a { cursor: pointer; }
 .tmap a:hover .tnodeslug { fill: var(--accent); }

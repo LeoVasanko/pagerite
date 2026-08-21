@@ -7,6 +7,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RANGES } from './analytics/time.js'
 import {
+  calcReadStats,
   calcTotalViews,
   copyIp,
   copyList,
@@ -16,6 +17,7 @@ import {
   formatVisitRows,
 } from './analytics/format.js'
 import * as flagSvgs from 'country-flag-icons/string/3x2'
+import TrailLink from './TrailLink.vue'
 import TransitionGraph from './TransitionGraph.vue'
 import VisitorCharts from './VisitorCharts.vue'
 
@@ -78,6 +80,7 @@ onUnmounted(() => {
 
 const visits = computed(() => data.value?.visits || [])
 const totalViews = computed(() => calcTotalViews(data.value?.views))
+const readStats = computed(() => calcReadStats(visits.value))
 
 const range = ref(RANGES[props.initialRange] ? props.initialRange : 'week')
 
@@ -126,6 +129,8 @@ function countryName(code) {
         <section class="totals">
           <div><strong :title="String(visits.length)">{{ formatCount(visits.length) }}</strong> visits</div>
           <div><strong :title="String(totalViews)">{{ formatCount(totalViews) }}</strong> page views</div>
+          <div><strong>{{ readStats.avgMinPerVisit }}</strong> min/visit</div>
+          <div><strong>{{ readStats.avgArticleMedianMin }}</strong> min article read</div>
         </section>
 
         <VisitorCharts :data="data" :range="range" />
@@ -145,23 +150,9 @@ function countryName(code) {
               <tbody>
                 <tr v-for="(v, i) in visitRows" :key="i">
                   <td class="trail">
-                    <template v-if="v.refererStep">
-                      <a class="trail-link"
-                         :href="v.refererStep.path"
-                         :title="v.refererStep.title"
-                         :target="v.refererStep.external ? '_blank' : undefined"
-                         :rel="v.refererStep.external ? 'noopener' : undefined">
-                        {{ v.refererStep.slug }}
-                      </a>
-                    </template>
+                    <TrailLink v-if="v.refererStep" :step="v.refererStep" @close="$emit('close')" />
                     <span v-if="v.utm && v.utm !== '—'" class="utm-tag" :title="v.utmTitle">{{ v.utm }}</span>
-                    <a v-for="(s, si) in v.trail" :key="si"
-                       :href="s.path" :title="s.title"
-                       :target="s.external ? '_blank' : undefined"
-                       :rel="s.external ? 'noopener' : undefined"
-                       @click="(e) => { if (!s.external) $emit('close') }">
-                      {{ s.slug }}
-                    </a>
+                    <TrailLink v-for="(s, si) in v.trail" :key="si" :step="s" @close="$emit('close')" />
                   </td>
                   <td class="ip-locale-cell" :class="{ 'host-cell': v.isHost }">
                     <div class="ip-locale-rows">
@@ -205,11 +196,7 @@ function countryName(code) {
               <tbody>
                 <tr v-for="(c, i) in crawlerRows" :key="i">
                   <td class="trail">
-                    <a v-for="(s, si) in c.pages" :key="si"
-                       :href="s.path" :title="`${s.title}${s.count > 1 ? ` (${s.count} hits)` : ''}`"
-                       @click="$emit('close')">
-                      <small v-if="s.count > 1" class="muted">{{ formatCount(s.count) }}×</small>{{ s.slug }}
-                    </a>
+                    <TrailLink v-for="(s, si) in c.pages" :key="si" :step="s" :count="s.count" @close="$emit('close')" />
                   </td>
                   <td class="ip-ua-cell">
                     <div><span class="clickable-ip"
@@ -547,8 +534,6 @@ function countryName(code) {
 
 .visit-table .city-name {
   display: inline-block;
-  max-width: 10ch;
-  font-size: 0.75em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
