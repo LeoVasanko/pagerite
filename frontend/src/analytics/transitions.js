@@ -13,10 +13,14 @@
  * connections. Animated beads flow along every edge in each direction,
  * emitted at time intervals inversely proportional (linear) to the
  * directional count.
- * External referers appear as nodes in a row above the map, external exits
- * as full-size nodes just outside their source page, angled away from the
- * center. Each distinct full exit URL is its own node. Self-loops (reload
- * pings) are skipped.
+ * External sources appear as nodes in a row above the map. Sources are
+ * identified from visit records in this order: utm_campaign, utm_source,
+ * referer, then other utm_* tags. Visits with a UTM tag are grouped under
+ * that tag's value, not under the referer domain. A UTM source node only
+ * becomes a clickable link when every visit carrying that UTM tag came
+ * from the same referer. External exits are full-size nodes just outside
+ * their source page, angled away from the center. Each distinct full exit
+ * URL is its own node. Self-loops (reload pings) are skipped.
  */
 
 import { MIN_READ_SECONDS } from './format.js'
@@ -99,23 +103,19 @@ function extLabel(ext) {
 }
 
 /**
- * Collect external transitions: referer origin -> entry page (incoming) and
- * page -> exit origin (outgoing). Aggregated per (origin, page) pair, with
- * separate directional counts. "(direct)" entries are not links and skipped.
+ * Collect outgoing external transitions: page path -> full exit URL.
+ * Aggregated per (URL, page) pair. Incoming external links are now derived
+ * from visit records (which carry UTM tags), so only exits remain here.
  */
-function collectExternalPairs(transitions) {
-  const pairs = new Map() // `${ext} ${page}` -> {ext, page, in, out}
+function collectExitPairs(transitions) {
+  const pairs = new Map() // `${ext} ${page}` -> {ext, page, out}
   for (const [fr, tos] of Object.entries(transitions || {})) {
+    if (!fr.startsWith('/')) continue // ignore external -> anything
     for (const [to, count] of Object.entries(tos)) {
-      const frExt = !fr.startsWith('/')
-      const toExt = !to.startsWith('/')
-      if (frExt === toExt) continue // internal-internal or ext-ext
-      const ext = frExt ? fr : to
-      const page = frExt ? to : fr
-      if (!ext.startsWith('http')) continue
-      const k = `${ext} ${page}`
-      const p = pairs.get(k) || { ext, page, in: 0, out: 0 }
-      p[frExt ? 'in' : 'out'] += count
+      if (!to.startsWith('http')) continue
+      const k = `${to} ${fr}`
+      const p = pairs.get(k) || { ext: to, page: fr, out: 0 }
+      p.out += count
       pairs.set(k, p)
     }
   }
@@ -227,7 +227,7 @@ function positionNodes(nodes, maxDepth, unit, viewsData, titles, readMinutes) {
     n.views = viewCount(n.path)
     n.readMin = readMinutes[n.path] || 0
     // Slug inside the circle; full title goes on the link title attribute.
-    const slug = n.path === '/' ? '🏠' : n.path.split('/').pop()
+    const slug = n.path === '/' ? '🏠︎' : n.path.split('/').pop()
     n.label = slug.length > 16 ? `${slug.slice(0, 15)}…` : slug
     n.title = titles.get(n.path) || ''
     // Category (non-leaf) pages with no views in this window are left
@@ -537,24 +537,96 @@ export function filterViewsByRange(views, t0, t1) {
   return filtered
 }
 
+/** Keep only visits whose start time falls inside [t0, t1). */
+export function filterVisitsByRange(visits, t0, t1) {
+  const out = []
+  for (const v of visits || []) {
+    const t = Date.parse(v.start)
+    if ((t0 == null || t >= t0) && (t1 == null || t < t1)) out.push(v)
+  }
+  return out
+}
+
+const UTM_PRIORITY = ['utm_campaign', 'utm_source']
+const UTM_FALLBACK = ['utm_medium', 'utm_content', 'utm_term', 'utm_id']
+
+/** Identify the source of a visit according to the requested priority. */
+function identifySource(visit) {
+  const utm = visit.utm || {}
+  for (const k of UTM_PRIORITY) {
+    const v = utm[k]
+    if (v) return { value: v, isUtm: true }
+  }
+  if (visit.referer?.startsWith('http')) {
+    return { value: visit.referer, isUtm: false }
+  }
+  for (const k of UTM_FALLBACK) {
+    const v = utm[k]
+    if (v) return { value: v, isUtm: true }
+  }
+  return null
+}
+
 /**
- * Place external referer and exit nodes and build their edges and bead
+ * Collect source -> entry page pairs from visit records. Sources are
+ * identified by UTM campaign/source (then referer, then other UTM tags).
+ * A UTM source only gets a link href when every visit using that source
+ * came from the same referer; referer sources always link to their origin.
+ */
+function collectSourcePairs(visits) {
+  const groups = new Map() // `${source}\0${page}` -> pair
+  for (const v of visits || []) {
+    const src = identifySource(v)
+    if (!src) continue
+    const k = `${src.value}\0${v.entry}`
+    const p = groups.get(k) || {
+      source: src.value,
+      page: v.entry,
+      in: 0,
+      refs: new Set(),
+      missingRef: false,
+      href: null,
+      isUtm: src.isUtm,
+    }
+    p.in += 1
+    if (v.referer?.startsWith('http')) {
+      p.refs.add(v.referer)
+    } else {
+      p.missingRef = true
+    }
+    groups.set(k, p)
+  }
+  for (const p of groups.values()) {
+    if (p.isUtm && !p.missingRef && p.refs.size === 1) {
+      const ref = [...p.refs][0]
+      if (ref.startsWith('http')) p.href = ref
+    } else if (!p.isUtm && p.source.startsWith('http')) {
+      p.href = p.source
+    }
+  }
+  return [...groups.values()]
+}
+
+/**
+ * Place external source and exit nodes and build their edges and bead
  * flows.
- * Referers (incoming links) form a row centered above the map, hottest
- * first; exits sit just outside their source page, fanned away from the
- * center and nudged outwards until they no longer overlap any node.
+ * Sources (incoming links) are derived from visit UTM/referer data and form
+ * a row centered above the map, hottest first; exits come from the
+ * transition matrix and sit just outside their source page.
  * Widths and pruning use the same log scale and traffic-share rule as
  * internal connections.
  */
-function buildExternal(external, byPath, radius, innerBounds, visualScale = 1) {
+function buildExternal({ sources, exits }, byPath, radius, innerBounds, visualScale = 1) {
   const extNodes = []
   const edges = []
   const flows = []
   let extTotal = 0
-  for (const p of external) extTotal += p.in + p.out
+  for (const p of sources) extTotal += p.in
+  for (const p of exits) extTotal += p.out
   const minCount = extTotal * PRUNE_FRACTION
-  const live = external.filter((p) => byPath.has(p.page))
-  if (!live.length) return { extNodes, edges, flows }
+  const liveSources = sources.filter((p) => byPath.has(p.page))
+  const liveExits = exits.filter((p) => byPath.has(p.page))
+  if (!liveSources.length && !liveExits.length) return { extNodes, edges, flows }
 
   const width = (count) => scaledWidth(count * visualScale)
 
@@ -563,16 +635,22 @@ function buildExternal(external, byPath, radius, innerBounds, visualScale = 1) {
       (n) => Math.hypot(n.x - x, n.y - y) < (n.r ?? TNODE_R) + r + 10,
     )
 
-  // Incoming: one referer node per origin, in a row centered above the
-  // map, with an edge to each page that origin led to.
-  const byExt = new Map() // ext -> pairs, sorted by total incoming count
-  for (const p of live.filter((p) => p.in >= minCount)) {
-    const g = byExt.get(p.ext) || []
+  // Incoming: one source node per identified source, in a row centered
+  // above the map, with an edge to each page that source led to.
+  const bySource = new Map() // source -> pairs, sorted by total incoming count
+  for (const p of liveSources.filter((p) => p.in >= minCount)) {
+    const g = bySource.get(p.source) || []
     g.push(p)
-    byExt.set(p.ext, g)
+    bySource.set(p.source, g)
   }
-  const origins = [...byExt]
-    .map(([ext, ps]) => ({ ext, ps, total: ps.reduce((s, p) => s + p.in, 0) }))
+  const origins = [...bySource]
+    .map(([source, ps]) => ({
+      source,
+      ps,
+      total: ps.reduce((s, p) => s + p.in, 0),
+      href: ps[0].href,
+      isUtm: ps[0].isUtm,
+    }))
     .sort((a, b) => b.total - a.total)
     .slice(0, MAX_EXT_IN)
   if (origins.length) {
@@ -580,9 +658,18 @@ function buildExternal(external, byPath, radius, innerBounds, visualScale = 1) {
     const y = innerBounds.y0 - TNODE_R - 64
     const spacing = 2 * EXT_R + 44
     const x0 = cx - ((origins.length - 1) * spacing) / 2
-    origins.forEach(({ ext, ps }, i) => {
-      const total = ps.reduce((s, p) => s + p.in, 0)
-      const xn = { path: ext, label: extLabel(ext), x: x0 + i * spacing, y, r: EXT_R, count: total, kind: 'source' }
+    origins.forEach(({ source, ps, total, href, isUtm }, i) => {
+      const label = isUtm ? source : extLabel(source)
+      const xn = {
+        path: source,
+        href,
+        label: label.length > 25 ? `${label.slice(0, 24)}…` : label,
+        x: x0 + i * spacing,
+        y,
+        r: EXT_R,
+        count: total,
+        kind: 'source',
+      }
       extNodes.push(xn)
       for (const p of ps) {
         const page = byPath.get(p.page)
@@ -599,7 +686,7 @@ function buildExternal(external, byPath, radius, innerBounds, visualScale = 1) {
   // (same radial spacing internal rings use), fanned around the source angle,
   // and shows the total count across all pages that link to that URL.
   const GAP = radius(1) - radius(0)
-  const outgoing = live.filter((p) => p.out >= minCount)
+  const outgoing = liveExits.filter((p) => p.out >= minCount)
     .sort((a, b) => b.out - a.out)
   const perPage = new Map()
   const selected = []
@@ -629,7 +716,16 @@ function buildExternal(external, byPath, radius, innerBounds, visualScale = 1) {
         x = page.x + Math.cos(ang) * dist
         y = page.y + Math.sin(ang) * dist
       }
-      xn = { path: p.ext, label: extLabel(p.ext), x, y, r: EXT_R, count: 0, kind: 'exit' }
+      xn = {
+        path: p.ext,
+        href: p.ext,
+        label: extLabel(p.ext),
+        x,
+        y,
+        r: EXT_R,
+        count: 0,
+        kind: 'exit',
+      }
       exitNodes.set(p.ext, xn)
       extNodes.push(xn)
     }
@@ -650,7 +746,8 @@ function buildExternal(external, byPath, radius, innerBounds, visualScale = 1) {
  */
 export function buildTransitionGraph(data, pageTree, visits = [], visualScale = 1) {
   const internal = collectInternalTransitions(data?.transitions)
-  const external = collectExternalPairs(data?.transitions)
+  const sources = collectSourcePairs(visits)
+  const exits = collectExitPairs(data?.transitions)
   const navOrder = buildNavigationOrder(pageTree)
   const titles = buildTitleMap(pageTree)
   const readMinutes = buildReadMinutes(visits)
@@ -690,7 +787,7 @@ export function buildTransitionGraph(data, pageTree, visits = [], visualScale = 
     bounds.y1 = Math.max(bounds.y1, b.y1)
   }
 
-  const ext = buildExternal(external, byPath, radius, bounds, visualScale)
+  const ext = buildExternal({ sources, exits }, byPath, radius, bounds, visualScale)
   for (const xn of ext.extNodes) {
     bounds.x0 = Math.min(bounds.x0, xn.x - xn.r - pad)
     bounds.y0 = Math.min(bounds.y0, xn.y - xn.r - pad)

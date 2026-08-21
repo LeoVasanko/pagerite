@@ -17,12 +17,6 @@ defineEmits(['close'])
      :rel="step.external ? 'noopener' : undefined"
      @click="(e) => { if (!step.external) $emit('close') }">
     <small v-if="count > 1" class="muted">{{ formatCount(count) }}×</small>
-    <span :class="{ desat: step.home }">{{ step.slug }}</span>
+    <span>{{ step.slug }}</span>
   </a>
 </template>
-
-<style scoped>
-.desat {
-  filter: saturate(0);
-}
-</style>

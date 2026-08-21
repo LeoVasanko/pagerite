@@ -16,6 +16,7 @@ import {
   buildTransitionGraph,
   filterTransitionsByRange,
   filterViewsByRange,
+  filterVisitsByRange,
 } from './analytics/transitions.js'
 
 const props = defineProps({
@@ -48,9 +49,13 @@ const filteredData = computed(() => {
   }
 })
 
+const filteredVisits = computed(() =>
+  filterVisitsByRange(props.data?.visits, window.value.t0, window.value.t1),
+)
+
 const graph = computed(() =>
   filteredData.value
-    ? buildTransitionGraph(filteredData.value, props.pageTree, props.data?.visits, visualScale.value)
+    ? buildTransitionGraph(filteredData.value, props.pageTree, filteredVisits.value, visualScale.value)
     : null,
 )
 
@@ -135,7 +140,7 @@ onBeforeUnmount(() => cancelAnimationFrame(rafId))
       <circle v-for="(b, i) in beads" :key="'b' + i"
               :cx="b.x" :cy="b.y" :r="BEAD_R" class="tbead" />
       <g v-for="(x, i) in graph.extNodes" :key="'x' + i">
-        <a :href="x.path" target="_blank" rel="noopener" :title="x.path">
+        <a v-if="x.href" :href="x.href" target="_blank" rel="noopener" :title="x.path">
           <circle :cx="x.x" :cy="x.y" :r="x.r"
                   :class="['txnode', x.kind === 'source' ? 'txnode-source' : 'txnode-exit']" />
           <text :transform="`translate(${x.x}, ${x.y}) scale(${x.r - 4})`" class="tnodeslug" :style="{ '--node-r': x.r - 4 }">
@@ -143,6 +148,14 @@ onBeforeUnmount(() => cancelAnimationFrame(rafId))
           </text>
           <text :x="x.x" :y="x.y + 4" class="tnodecount">{{ formatCount(x.count) }}</text>
         </a>
+        <g v-else :title="x.path">
+          <circle :cx="x.x" :cy="x.y" :r="x.r"
+                  :class="['txnode', x.kind === 'source' ? 'txnode-source' : 'txnode-exit']" />
+          <text :transform="`translate(${x.x}, ${x.y}) scale(${x.r - 4})`" class="tnodeslug" :style="{ '--node-r': x.r - 4 }">
+            <textPath href="#tnode-label-arc" startOffset="50%" text-anchor="middle" side="right">{{ x.label }}</textPath>
+          </text>
+          <text :x="x.x" :y="x.y + 4" class="tnodecount">{{ formatCount(x.count) }}</text>
+        </g>
       </g>
       <g v-for="n in graph.nodes" :key="n.path">
         <a v-if="!n.hidden" :href="n.path" :title="n.title">
@@ -209,7 +222,6 @@ onBeforeUnmount(() => cancelAnimationFrame(rafId))
   fill: var(--text);
   font-size: calc(11px / var(--node-r, 34));
   text-anchor: middle;
-  filter: saturate(0);
 }
 .tmap a { cursor: pointer; }
 .tmap a:hover .tnodeslug { fill: var(--accent); }

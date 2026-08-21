@@ -236,9 +236,13 @@ carrying less than 1% of the total traffic
 pruned; beads are simulated one by one in JS (requestAnimationFrame) and
 flow along each edge, emitted at a rate linearly proportional
 to the directional count with no in-flight limit, opposing directions
-offset onto parallel lanes. External referers show as a node row above the
-map, external exits as small nodes fanned outwards from their source
-page), per-page view
+offset onto parallel lanes. External sources show as a node row above the
+map: each visit is attributed to `utm_campaign`, then `utm_source`, then the
+referer origin, then any other `utm_*` tag, so UTM-tagged visits are grouped
+under their campaign/source value rather than the referer domain. A UTM
+source node only links to its referer when every visit carrying that tag
+came from the same origin. External exits are small nodes fanned outwards
+from their source page), per-page view
 counts, the top transitions and the 50 most recent visit trails. Data is
 streamed live over `WebSocket /_api/ws/analytics`, which pushes the latest
 JSON snapshot on connect and again whenever the analytics file is updated

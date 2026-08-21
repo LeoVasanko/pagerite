@@ -130,7 +130,7 @@ function buildTitleMap(pageTree) {
 
 /** Last path segment for display; front page becomes a house icon. */
 function slugOf(path) {
-  return path === '/' ? '🏠' : path.split('/').pop()
+  return path === '/' ? '🏠︎' : path.split('/').pop()
 }
 
 /** Host name of an external https origin, with scheme and www. stripped. */
