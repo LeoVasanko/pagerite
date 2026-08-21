@@ -57,7 +57,11 @@ The client (`pagerite.js`) POSTs fire-and-forget pings to `/_a` with
   `country`.  The MMDB lookup and the reverse-DNS lookup run in background
   tasks after the visit is stored, so the `/ _a` response is never delayed.
   The decompressed `dbip-*.mmdb` file is kept in the repository root and
-  ignored by git.
+  ignored by git.  The CLI flag `--dbip` (`uv run pagerite --dbip`) downloads
+  the latest `dbip-city-lite-YYYY-MM.mmdb.gz` from DB-IP before the server
+  starts, skipping the download when the local database is already current and
+  removing older versions after an update; without the flag only an existing
+  file is used.
 - **Crawler hits**: every document GET is queued in RAM as a pending crawler
   hit.  If a ping from the same (IP, User-Agent) pair arrives within 10
   seconds the hit is discarded; otherwise it is written to `crawlers`.
