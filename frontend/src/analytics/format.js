@@ -367,43 +367,59 @@ export function formatCrawlerRows(crawlers, pageTree, now = Date.now()) {
 /**
  * Group abuse hits by IP (never by UA — scanners randomize theirs to
  * masquerade as legitimate crawlers) and format each group as a row with
- * the full paths probed, in access order.  Flagged paths (the ones that
- * triggered abuse classification) are lifted to the top, followed by
- * other 404s, then document GETs from the abuser.  UAs are shown raw,
- * one per line, with their occurrence counts.  Paths are shown verbatim
- * (query string included), not resolved against the page tree.
+ * the full paths probed.  Identical paths are collapsed into one entry
+ * with their hit count.  Flagged paths (the ones that triggered abuse
+ * classification) are lifted to the top, followed by other 404s, then
+ * document GETs from the abuser.  Within each category paths are sorted by
+ * count descending, then earliest first.  UAs are shown raw, one per line,
+ * with their occurrence counts.  Paths are shown verbatim (query string
+ * included), not resolved against the page tree.
  */
 export function formatAbuseRows(abuse, now = Date.now()) {
   const groups = new Map()
   for (const a of abuse || []) {
     const g = groups.get(a.ip) || {
       ip: a.ip || '',
-      pathHits: [],
+      pathCounts: new Map(),
       rawUas: [],
       uaCounts: new Map(),
       lastStart: 0,
     }
     const start = new Date(a.start).getTime()
     if (start > g.lastStart) g.lastStart = start
-    g.pathHits.push({
-      path: a.path || '',
-      start,
+    const path = a.path || ''
+    const existing = g.pathCounts.get(path) || {
+      path,
+      count: 0,
+      firstStart: start,
       flag: a.flag || false,
       is_404: a.is_404 || false,
-    })
+    }
+    existing.count += 1
+    if (start < existing.firstStart) existing.firstStart = start
+    if (a.flag) existing.flag = true
+    if (!a.is_404) existing.is_404 = false
+    g.pathCounts.set(path, existing)
     const ua = a.ua || '(no UA)'
     g.rawUas.push(ua)
     g.uaCounts.set(ua, (g.uaCounts.get(ua) || 0) + 1)
     groups.set(a.ip, g)
   }
-  const totalHits = (g) => g.pathHits.length
+  const totalHits = (g) => {
+    let n = 0
+    for (const p of g.pathCounts.values()) n += p.count
+    return n
+  }
   return [...groups.values()]
     .sort((a, b) => totalHits(b) - totalHits(a) || b.lastStart - a.lastStart)
     .slice(0, 10)
     .map((g) => {
       const pathCategory = (p) => (p.flag ? 0 : p.is_404 ? 1 : 2)
-      const paths = [...g.pathHits].sort(
-        (a, b) => pathCategory(a) - pathCategory(b) || a.start - b.start,
+      const paths = [...g.pathCounts.values()].sort(
+        (a, b) =>
+          pathCategory(a) - pathCategory(b) ||
+          b.count - a.count ||
+          a.firstStart - b.firstStart,
       )
       const uas = [...g.uaCounts.entries()]
         .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
@@ -411,8 +427,15 @@ export function formatAbuseRows(abuse, now = Date.now()) {
         lastSeen: formatWhen(g.lastStart, now),
         lastSeenIso: formatWhenIso(g.lastStart),
         lastSeenLocal: formatWhenLocal(g.lastStart),
-        paths: paths.map((p) => ({ path: p.path, flag: p.flag, is_404: p.is_404 })),
-        allPaths: paths.map((p) => p.path).join('\n'),
+        paths: paths.map((p) => ({
+          path: p.path,
+          count: p.count,
+          flag: p.flag,
+          is_404: p.is_404,
+        })),
+        allPaths: paths
+          .map((p) => (p.count > 1 ? `${p.count}× ${p.path}` : p.path))
+          .join('\n'),
         uas: uas.map(([ua, count]) => ({ ua, count })),
         allUas: uas
           .map(([ua, count]) => (count > 1 ? `${count}× ${ua}` : ua))

@@ -87,8 +87,11 @@ The client (`pagerite.js`) POSTs fire-and-forget pings to `/_a` with
   included), and its pings are ignored.  The classified IP set (`abuse_ips`)
   is persisted in the JSON file; the plain-404 counters are RAM-only.  In the
   viewer, abuse hits are grouped by IP (never by UA — scanners randomize
-  theirs) in a separate "Abuse" table listing the full paths probed and the
-  raw User-Agent strings, one per line, with click-to-copy full lists.
+  theirs) in a separate "Abuse" table.  Identical paths are collapsed into
+  one entry with their hit count; flagged paths that triggered classification
+  are lifted to the top, followed by other 404s and then document GETs from
+  the abuser.  Raw User-Agent strings are shown one per line with their
+  occurrence counts, and the full lists are click-to-copy.
 
 ## Visits and sessions
 
@@ -144,9 +147,11 @@ Each `AbuseHit` record:
   abuser.
 
 Crawler hits are grouped by (IP, User-Agent) in the analytics viewer; abuse
-hits are grouped by IP alone.  In the Abuse table paths are listed in access
-order, oldest first, with flagged paths lifted to the top, followed by other
-404s and then document GETs.
+hits are grouped by IP alone.  In the Abuse table identical paths are
+collapsed with their counts; flagged paths that triggered classification are
+lifted to the top, followed by other 404s and then document GETs from the
+abuser.  Within each category paths are sorted by count descending, then by
+their earliest hit.
 
 ## Aggregates
 

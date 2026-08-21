@@ -151,7 +151,7 @@ function countryName(code) {
                 <tr v-for="(v, i) in visitRows" :key="i">
                   <td class="trail">
                     <TrailLink v-if="v.refererStep" :step="v.refererStep" @close="$emit('close')" />
-                    <span v-if="v.utm && v.utm !== '—'" class="utm-tag" :title="v.utmTitle">{{ v.utm }}</span>
+                    <span v-if="v.utm && v.utm !== '—'" class="utm-tag small muted" :title="v.utmTitle">{{ v.utm }}</span>
                     <TrailLink v-for="(s, si) in v.trail" :key="si" :step="s" @close="$emit('close')" />
                   </td>
                   <td class="ip-locale-cell" :class="{ 'host-cell': v.isHost }">
@@ -159,10 +159,10 @@ function countryName(code) {
                       <div class="ip-locale-row">
                         <div class="locale-line">
                           <span v-if="flagSvg(v.country)" class="flag" v-html="flagSvg(v.country)" :title="countryName(v.country) || v.country"></span>
-                          <template v-if="v.city && v.city !== '—'"><small class="city-name">{{ v.city }}</small></template>
+                          <template v-if="v.city && v.city !== '—'"><small class="city-name muted">{{ v.city }}</small></template>
                           <template v-else-if="!flagSvg(v.country)">—</template>
                         </div>
-                        <div class="ip-line"><span class="clickable-ip"
+                        <div class="ip-line"><span class="clickable-ip small muted"
                                    :title="v.ip"
                                    @click="copyIp(v.ip, $event)">{{ v.ipDisplay }}</span></div>
                       </div>
@@ -172,7 +172,7 @@ function countryName(code) {
                       </div>
                     </div>
                   </td>
-                  <td class="last-seen"
+                  <td class="last-seen muted"
                       :title="v.lastSeenLocal"
                       @click="copyList(v.lastSeenIso, $event)">{{ v.lastSeen }}</td>
                 </tr>
@@ -199,12 +199,12 @@ function countryName(code) {
                     <TrailLink v-for="(s, si) in c.pages" :key="si" :step="s" :count="s.count" @close="$emit('close')" />
                   </td>
                   <td class="ip-ua-cell">
-                    <div><span class="clickable-ip"
+                    <div><span class="clickable-ip small muted"
                                :title="c.ip"
                                @click="copyIp(c.ip, $event)">{{ c.ipDisplay }}</span></div>
                     <div class="ua-line"><small class="muted" :title="c.uaRaw">{{ c.ua }}</small></div>
                   </td>
-                  <td class="last-seen"
+                  <td class="last-seen muted"
                       :title="c.lastSeenLocal"
                       @click="copyList(c.lastSeenIso, $event)">{{ c.lastSeen }}</td>
                 </tr>
@@ -229,30 +229,28 @@ function countryName(code) {
                 <tr v-for="(a, i) in abuseRows" :key="i">
                   <td class="trail abuse-list clickable-list"
                       @click="copyList(a.allPaths, $event)">
-                    <div v-for="(p, pi) in a.paths.slice(0, ABUSE_MAX_LINES)" :key="pi"
-                         class="list-line">
-                      {{ p.path }}
-                    </div>
-                    <div v-if="a.paths.length > ABUSE_MAX_LINES" class="list-line">
-                      <small class="muted">+{{ a.paths.length - ABUSE_MAX_LINES }} more</small>
+                    <div class="abuse-items">
+                      <span v-for="(p, pi) in a.paths.slice(0, ABUSE_MAX_LINES)" :key="pi"
+                            class="inline-item">
+                        <small v-if="p.count > 1" class="muted">{{ formatCount(p.count) }}×</small>{{ p.path }}
+                      </span>
+                      <small v-if="a.paths.length > ABUSE_MAX_LINES" class="muted">+{{ a.paths.length - ABUSE_MAX_LINES }} more</small>
                     </div>
                   </td>
                   <td class="ip-ua-cell">
-                    <div><span class="clickable-ip"
+                    <div><span class="clickable-ip small muted"
                                :title="a.ip"
                                @click="copyIp(a.ip, $event)">{{ a.ipDisplay }}</span></div>
                     <div class="abuse-uas-list clickable-list"
                          @click="copyList(a.allUas, $event)">
-                      <div v-for="(u, ui) in a.uas.slice(0, ABUSE_MAX_LINES)" :key="ui"
-                           class="list-line">
+                      <span v-for="(u, ui) in a.uas.slice(0, ABUSE_MAX_LINES)" :key="ui"
+                            class="inline-item">
                         <small v-if="u.count > 1" class="muted">{{ formatCount(u.count) }}×</small>{{ u.ua }}
-                      </div>
-                      <div v-if="a.uas.length > ABUSE_MAX_LINES" class="list-line">
-                        <small class="muted">+{{ a.uas.length - ABUSE_MAX_LINES }} more</small>
-                      </div>
+                      </span>
+                      <small v-if="a.uas.length > ABUSE_MAX_LINES" class="muted">+{{ a.uas.length - ABUSE_MAX_LINES }} more</small>
                     </div>
                   </td>
-                  <td class="last-seen"
+                  <td class="last-seen muted"
                       :title="a.lastSeenLocal"
                       @click="copyList(a.lastSeenIso, $event)">{{ a.lastSeen }}</td>
                 </tr>
@@ -333,6 +331,15 @@ function countryName(code) {
   margin-top: 1.8rem;
 }
 
+.analytics-view a {
+  color: var(--text);
+  text-decoration: none;
+}
+.analytics-view a:hover { color: var(--accent); }
+
+.analytics-view :deep(.muted) { color: var(--muted); }
+.analytics-view :deep(.small) { font-size: 0.75em; }
+
 .totals {
   display: flex;
   gap: 2rem;
@@ -372,12 +379,7 @@ function countryName(code) {
   width: 7.5rem;
   text-align: right;
   white-space: nowrap;
-  color: var(--muted);
   cursor: pointer;
-}
-
-.visit-table .last-seen:hover {
-  color: var(--accent);
 }
 
 .visit-table .trail {
@@ -392,13 +394,8 @@ function countryName(code) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--text);
-  text-decoration: none;
   vertical-align: bottom;
 }
-
-.visit-table .trail a:hover,
-.visit-table .trail-link:hover { color: var(--accent); }
 
 .visit-table .trail > * + * {
   margin-left: 0.5rem;
@@ -410,8 +407,6 @@ function countryName(code) {
   padding: 0.05rem 0.4rem;
   border: 1px solid var(--line);
   border-radius: 0.25rem;
-  font-size: 0.75em;
-  color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -423,29 +418,26 @@ function countryName(code) {
   max-width: 22rem;
 }
 
-.visit-table .clickable-list .list-line {
+.visit-table .abuse-items,
+.visit-table .abuse-uas-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.5rem;
+  align-items: baseline;
+}
+
+.visit-table .abuse-uas-list {
+  justify-content: flex-end;
+}
+
+.visit-table .inline-item {
+  max-width: 18rem;
+  min-width: 0;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  line-height: 1.35;
-}
-
-.visit-table .clickable-list .list-line + .list-line {
-  margin-top: 0.15rem;
-}
-
-.visit-table .ua.abuse-uas {
-  max-width: 24rem;
-}
-
-.visit-table .trail small,
-.visit-table small.muted {
-  color: var(--muted);
-  font-size: 0.75em;
-}
-
-.visit-table .clickable-ip {
-  font-size: 0.75em;
+  word-break: keep-all;
+  hyphens: none;
 }
 
 .visit-table .clickable-ip,
@@ -453,12 +445,6 @@ function countryName(code) {
 .visit-table .last-seen {
   cursor: pointer;
   position: relative;
-}
-
-.visit-table .clickable-ip:hover,
-.visit-table .clickable-list:hover,
-.visit-table .last-seen:hover {
-  color: var(--accent);
 }
 
 .visit-table .ip-locale-cell {
@@ -547,9 +533,6 @@ function countryName(code) {
   white-space: nowrap;
 }
 
-.visit-table .abuse-uas-list {
-  text-align: right;
-}
 
 .visit-table .copy-popup {
   position: absolute;
