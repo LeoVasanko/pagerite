@@ -162,15 +162,12 @@ const abuseRows = computed(() => formatAbuseRows(data.value?.abuse || [], client
             </table>
           </div>
           <p v-else class="empty">no visits recorded yet</p>
-        </section>
 
-        <section>
-          <h2>Crawlers</h2>
           <div v-if="crawlerRows.length" class="visit-table-wrap">
             <table class="visit-table">
               <thead>
                 <tr>
-                  <th>pages</th>
+                  <th>pages crawled</th>
                   <th>visitor</th>
                   <th class="last-seen">last seen</th>
                 </tr>
@@ -199,15 +196,12 @@ const abuseRows = computed(() => formatAbuseRows(data.value?.abuse || [], client
             </table>
           </div>
           <p v-else class="empty">no crawler hits recorded yet</p>
-        </section>
 
-        <section v-if="abuseRows.length">
-          <h2>Abuse</h2>
-          <div class="visit-table-wrap">
+          <div v-if="abuseRows.length" class="visit-table-wrap">
             <table class="visit-table">
               <thead>
                 <tr>
-                  <th>paths</th>
+                  <th>paths abused</th>
                   <th>visitor</th>
                   <th class="last-seen">last seen</th>
                 </tr>
@@ -224,19 +218,18 @@ const abuseRows = computed(() => formatAbuseRows(data.value?.abuse || [], client
                       <small v-if="a.paths.length > ABUSE_MAX_LINES" class="muted">+{{ a.paths.length - ABUSE_MAX_LINES }} more</small>
                     </div>
                   </td>
-                  <td class="ip-ua-cell">
-                    <div><span class="clickable-ip small muted"
-                               :title="a.ip"
-                               @click="copyIp(a.ip, $event)">{{ a.ipDisplay }}</span></div>
-                    <div class="abuse-uas-list clickable-list"
-                         @click="copyList(a.allUas, $event)">
-                      <span v-for="(u, ui) in a.uas.slice(0, ABUSE_MAX_LINES)" :key="ui"
-                            class="inline-item">
-                        <small v-if="u.count > 1" class="muted">{{ formatCount(u.count) }}×</small>{{ u.ua }}
-                      </span>
-                      <small v-if="a.uas.length > ABUSE_MAX_LINES" class="muted">+{{ a.uas.length - ABUSE_MAX_LINES }} more</small>
-                    </div>
-                  </td>
+                  <VisitorCell
+                    :ip="a.ip"
+                    :ip-display="a.ipDisplay"
+                    :ua="a.ua"
+                    :ua-raw="a.uaRaw"
+                    :country="a.country"
+                    :city="a.city"
+                    :lang="a.lang"
+                    :lang-display="a.langDisplay"
+                    :is-host="a.isHost"
+                    :variant-count="a.clientCount"
+                  />
                   <td class="last-seen muted"
                       :title="a.lastSeenLocal"
                       @click="copyList(a.lastSeenIso, $event)">{{ a.lastSeen }}</td>
@@ -363,7 +356,7 @@ const abuseRows = computed(() => formatAbuseRows(data.value?.abuse || [], client
 }
 
 .visit-table .last-seen {
-  width: 7.5rem;
+  width: 5rem;
   text-align: right;
   white-space: nowrap;
   cursor: pointer;
@@ -405,16 +398,11 @@ const abuseRows = computed(() => formatAbuseRows(data.value?.abuse || [], client
   max-width: 22rem;
 }
 
-.visit-table .abuse-items,
-.visit-table .abuse-uas-list {
+.visit-table .abuse-items {
   display: flex;
   flex-wrap: wrap;
   gap: 0.15rem 0.5rem;
   align-items: baseline;
-}
-
-.visit-table .abuse-uas-list {
-  justify-content: flex-end;
 }
 
 .visit-table .inline-item {
@@ -432,14 +420,6 @@ const abuseRows = computed(() => formatAbuseRows(data.value?.abuse || [], client
 .visit-table .last-seen {
   cursor: pointer;
   position: relative;
-}
-
-.visit-table .ip-ua-cell {
-  width: 22ch;
-  max-width: 22ch;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .visit-table :deep(.copy-popup) {

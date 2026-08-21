@@ -1,7 +1,9 @@
 <script setup>
-// Visitor metadata cell shared by the recent-visits and crawlers tables.
+// Visitor metadata cell shared by the recent-visits, crawlers, and abuse tables.
 // Displays IP/network/host, country flag/city, UA, and language when available.
 // Clicking the IP copies the full address to the clipboard.
+// ``variantCount`` overrides the UA line to warn when multiple client
+// fingerprints share the same IP (e.g. a scanner rotating UAs).
 import { computed } from 'vue'
 import * as flagSvgs from 'country-flag-icons/string/3x2'
 import { copyIp, formatLang } from './analytics/format.js'
@@ -16,6 +18,7 @@ const props = defineProps({
   lang: { type: String, default: '' },
   langDisplay: { type: String, default: '' },
   isHost: { type: Boolean, default: false },
+  variantCount: { type: Number, default: 1 },
 })
 
 const hasCountry = computed(() => !!(props.country && props.country !== '—'))
@@ -54,8 +57,11 @@ function countryName(code) {
         </div>
       </div>
       <div class="visitor-row">
-        <div class="ua-line"><small class="muted" :title="uaRaw">{{ ua || '—' }}</small></div>
-        <div v-if="showLang" class="locale-lang"><small class="muted">{{ langValue }}</small></div>
+        <div class="ua-line">
+          <small v-if="variantCount > 1" class="muted variant-hint">{{ variantCount }} client variations</small>
+          <small v-else class="muted" :title="uaRaw">{{ ua || '—' }}</small>
+        </div>
+        <div v-if="showLang && variantCount <= 1" class="locale-lang"><small class="muted">{{ langValue }}</small></div>
       </div>
     </div>
   </td>

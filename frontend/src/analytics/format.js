@@ -395,15 +395,15 @@ export function formatCrawlerRows(crawlers, clients, pageTree, now = Date.now())
 }
 
 /**
- * Group abuse hits by IP (never by UA — scanners randomize theirs to
- * masquerade as legitimate crawlers) and format each group as a row with
- * the full paths probed.  Identical paths are collapsed into one entry
- * with their hit count.  Flagged paths (the ones that triggered abuse
- * classification) are lifted to the top, followed by other 404s, then
- * document GETs from the abuser.  Within each category paths are sorted by
- * count descending, then earliest first.  UAs are shown raw, one per line,
- * with their occurrence counts.  Paths are shown verbatim (query string
- * included), not resolved against the page tree.
+ * Group abuse hits by IP and format each group as a row with the full paths
+ * probed.  Identical paths are collapsed into one entry with their hit count.
+ * Flagged paths (the ones that triggered abuse classification) are lifted to
+ * the top, followed by other 404s, then document GETs from the abuser.  Within
+ * each category paths are sorted by count descending, then earliest first.
+ * Rows are sorted by most recent hit first.  Visitor metadata comes from the
+ * latest client hash seen for the IP; ``clientCount`` tells the visitor cell
+ * how many distinct client variations the IP produced.  Paths are shown
+ * verbatim (query string included), not resolved against the page tree.
  * ``clients`` maps client hashes to client records.
  */
 export function formatAbuseRows(abuse, clients, now = Date.now()) {
@@ -414,12 +414,15 @@ export function formatAbuseRows(abuse, clients, now = Date.now()) {
     const g = groups.get(ip) || {
       ip,
       pathCounts: new Map(),
-      rawUas: [],
-      uaCounts: new Map(),
+      clientHashes: new Set(),
       lastStart: 0,
+      lastClient: a.client,
     }
     const start = new Date(a.start).getTime()
-    if (start > g.lastStart) g.lastStart = start
+    if (start > g.lastStart) {
+      g.lastStart = start
+      g.lastClient = a.client
+    }
     const path = a.path || ''
     const existing = g.pathCounts.get(path) || {
       path,
@@ -433,9 +436,7 @@ export function formatAbuseRows(abuse, clients, now = Date.now()) {
     if (a.flag) existing.flag = true
     if (!a.is_404) existing.is_404 = false
     g.pathCounts.set(path, existing)
-    const ua = client.ua || '(no UA)'
-    g.rawUas.push(ua)
-    g.uaCounts.set(ua, (g.uaCounts.get(ua) || 0) + 1)
+    g.clientHashes.add(a.client)
     groups.set(ip, g)
   }
   const totalHits = (g) => {
@@ -444,7 +445,7 @@ export function formatAbuseRows(abuse, clients, now = Date.now()) {
     return n
   }
   return [...groups.values()]
-    .sort((a, b) => totalHits(b) - totalHits(a) || b.lastStart - a.lastStart)
+    .sort((a, b) => b.lastStart - a.lastStart)
     .slice(0, 10)
     .map((g) => {
       const pathCategory = (p) => (p.flag ? 0 : p.is_404 ? 1 : 2)
@@ -454,8 +455,9 @@ export function formatAbuseRows(abuse, clients, now = Date.now()) {
           b.count - a.count ||
           a.firstStart - b.firstStart,
       )
-      const uas = [...g.uaCounts.entries()]
-        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      const client = (clients || {})[g.lastClient] || {}
+      const host = client.host || ''
+      const isHost = !!host
       return {
         lastSeen: formatWhen(g.lastStart, now),
         lastSeenIso: formatWhenIso(g.lastStart),
@@ -469,12 +471,16 @@ export function formatAbuseRows(abuse, clients, now = Date.now()) {
         allPaths: paths
           .map((p) => (p.count > 1 ? `${p.count}× ${p.path}` : p.path))
           .join('\n'),
-        uas: uas.map(([ua, count]) => ({ ua, count })),
-        allUas: uas
-          .map(([ua, count]) => (count > 1 ? `${count}× ${ua}` : ua))
-          .join('\n'),
-        ip: g.ip,
-        ipDisplay: hostIP(g.ip) || g.ip || '—',
+        clientCount: g.clientHashes.size,
+        ip: client.ip || g.ip,
+        ipDisplay: isHost ? mainDomain(host) : hostIP(client.ip || g.ip) || client.ip || g.ip || '—',
+        isHost,
+        ua: client.ua_pretty || client.ua || '—',
+        uaRaw: client.ua || '',
+        lang: client.lang || '—',
+        langDisplay: formatLang(client.lang),
+        country: client.country || '—',
+        city: client.city || '—',
         total: totalHits(g),
       }
     })
