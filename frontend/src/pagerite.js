@@ -338,28 +338,106 @@ import "overlayscrollbars/overlayscrollbars.css";
   }
 
   // --- Analytics pings ---------------------------------------------------
-  // Fire-and-forget POST /_a {fr, to}: on the initial page load (starts the
-  // visit — the server counts nothing from the document GET alone), for
-  // internal fetch-navigations and for external https exits. Excluded:
-  // back/forward (popstate never pings) and everything while we know the
-  // user is an admin — but only when SSO is actually in use; with no auth
-  // (dev/test) "admin" is everyone's state and nothing would be recorded —
-  // or has the editor open (admin noise, not visits). The analytics page
-  // itself (/_a) is also excluded even though fetch-navigation treats it like
-  // a normal article.
+  // Fire-and-forget POST /_a {fr, to, read}: on the initial page load
+  // (starts the visit — the server counts nothing from the document GET
+  // alone), for internal fetch-navigations, for external https exits, and
+  // on window close. ``read`` is the active time (ms) spent on ``fr``.
+  // Reading time pauses after 1 minute of inactivity and resumes on the
+  // next mouse/touch/scroll/keyboard event.
+  // Excluded: back/forward (popstate never pings), everything while the
+  // editor is open (body.editing — admin noise, not visits), and the
+  // analytics page itself (/_a), even though fetch-navigation treats it
+  // like a normal article.
+  // Admins (when SSO is actually in use — with no auth proxy "admin" is
+  // everyone's state) ping normally but with hide=1: the server then
+  // records nothing and scrubs any session the same browser accumulated
+  // before logging in, so admins never show up as visits or crawlers.
   // See docs/analytics.md.
-  function ping(to, fr = currentPath) {
-    if ((ssoAvailable && isAdmin) || document.body.classList.contains("editing")
-        || to === "/_a" || fr === "/_a") return;
+  function ping(to, fr = currentPath, read = 0) {
+    if (document.body.classList.contains("editing")) return;
+    if ((to && to === "/_a") || fr === "/_a") return;
+    const hide = ssoAvailable && isAdmin ? 1 : 0;
+    const body = JSON.stringify({
+      fr, to, hide,
+      read: Math.max(0, Math.round(read / 1000)),
+    });
     try {
       fetch("/_a", {
         method: "POST",
         keepalive: true,
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ fr, to }),
+        body,
       });
     } catch { /* analytics must never break navigation */ }
   }
+
+  // Active reading time for the current page. The clock stops after 1 minute
+  // without activity and restarts on the next mouse/touch/scroll/keyboard
+  // event.
+  const INACTIVE_MS = 60_000;
+  let readStart = performance.now();
+  let readElapsed = 0;
+  let reading = true;
+  let readInactivityTimer = null;
+  let closePingedFor = null;
+
+  function markReadActivity() {
+    if (!reading) {
+      reading = true;
+      readStart = performance.now();
+    }
+    clearTimeout(readInactivityTimer);
+    readInactivityTimer = setTimeout(() => {
+      if (reading) {
+        readElapsed += performance.now() - readStart;
+        reading = false;
+      }
+    }, INACTIVE_MS);
+  }
+
+  function takeReadTime() {
+    if (reading) {
+      readElapsed += performance.now() - readStart;
+      readStart = performance.now();
+    }
+    const ms = Math.max(0, Math.round(readElapsed));
+    readElapsed = 0;
+    return ms;
+  }
+
+  function resetReadTime() {
+    readElapsed = 0;
+    reading = true;
+    readStart = performance.now();
+    clearTimeout(readInactivityTimer);
+  }
+
+  function sendClosePing() {
+    if (closePingedFor === currentPath) return;
+    const read = Math.max(0, Math.round(takeReadTime() / 1000));
+    if (read <= 0) return;
+    const hide = ssoAvailable && isAdmin ? 1 : 0;
+    const body = JSON.stringify({ fr: currentPath, hide, read });
+    const blob = new Blob([body], { type: "application/json" });
+    try {
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon("/_a", blob);
+      } else {
+        fetch("/_a", {
+          method: "POST",
+          keepalive: true,
+          headers: { "content-type": "application/json" },
+          body,
+        });
+      }
+    } catch { /* analytics must never break navigation */ }
+    closePingedFor = currentPath;
+  }
+
+  for (const ev of ["mousemove", "mousedown", "touchstart", "touchmove", "scroll", "keydown"]) {
+    addEventListener(ev, markReadActivity, { passive: true });
+  }
+  addEventListener("pagehide", sendClosePing);
 
   // The initial page load pings too — it is what starts the visit and
   // counts the entry page view (the document GET alone records nothing).
@@ -538,7 +616,10 @@ import "overlayscrollbars/overlayscrollbars.css";
     if (url.origin !== location.origin) {
       // External link: the browser navigates; record the full https URL so
       // different links to the same domain stay distinct in analytics.
-      if (url.protocol === "https:") ping(url.href);
+      if (url.protocol === "https:") {
+        closePingedFor = currentPath;
+        ping(url.href, currentPath, takeReadTime());
+      }
       return;
     }
     // Same-page anchor links (footnotes etc.): let the browser handle them
@@ -550,7 +631,12 @@ import "overlayscrollbars/overlayscrollbars.css";
     ev.preventDefault();
     // Capture the source now: load() updates currentPath before pinging.
     const from = currentPath;
-    load(url).then((ok) => { if (ok) ping(url.pathname, from); });
+    load(url).then((ok) => {
+      if (!ok) return;
+      closePingedFor = null;
+      ping(url.pathname, from, takeReadTime());
+      resetReadTime();
+    });
   });
 
   addEventListener("popstate", () => {

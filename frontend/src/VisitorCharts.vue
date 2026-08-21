@@ -2,9 +2,11 @@
 /**
  * Visitor and page-view smoothed curves for a single shared time range.
  */
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { makeSeries } from './analytics/time.js'
 import { CHART_H, CHART_W, buildChart, fmtY } from './analytics/chart.js'
+
+const DAY_REFRESH_MS = 15000
 
 const props = defineProps({
   data: { type: Object, default: null },
@@ -22,33 +24,52 @@ const allViews = computed(() => {
 
 const visitSeries = computed(() => makeSeries(props.data?.site_visits, props.range))
 const viewSeries = computed(() => makeSeries(allViews.value, props.range))
-const unit = computed(() => (props.range === 'week' ? 'h' : 'day'))
 
-const visitChart = computed(() => buildChart(visitSeries.value))
-const viewChart = computed(() => buildChart(viewSeries.value))
+function freqLabel(unit) {
+  return unit === '5min' ? '5 min' : unit === 'hour' ? 'hourly' : 'daily'
+}
+
+const now = ref(Date.now())
+let refreshInterval = null
+onMounted(() => {
+  refreshInterval = setInterval(() => { now.value = Date.now() }, DAY_REFRESH_MS)
+})
+onUnmounted(() => {
+  if (refreshInterval) clearInterval(refreshInterval)
+})
+
+const visitChart = computed(() => buildChart(visitSeries.value, now.value))
+const viewChart = computed(() => buildChart(viewSeries.value, now.value))
 </script>
 
 <template>
   <section v-for="c in [
-      { ylabel: 'visitors', chart: visitChart, empty: 'no visits recorded yet' },
+      { ylabel: 'visits', chart: visitChart, empty: 'no visits recorded yet' },
       { ylabel: 'views', chart: viewChart, empty: 'no views recorded yet' },
     ]" :key="c.ylabel">
     <template v-if="c.chart">
       <div class="chartwrap">
         <div class="plot">
           <div class="plotarea">
-            <span class="yaxis-label">{{ c.ylabel }}/{{ unit }}</span>
+            <span class="yaxis-label">{{ freqLabel(c.chart.unit) }} {{ c.ylabel }}</span>
             <svg class="chart" :viewBox="`0 0 ${CHART_W} ${CHART_H}`"
-                 preserveAspectRatio="none" role="img" :aria-label="`${c.ylabel} per ${unit}`">
+                 preserveAspectRatio="none" role="img" :aria-label="`${freqLabel(c.chart.unit)} ${c.ylabel}`">
               <line v-for="g in c.chart.majors.slice(1)" :key="'j' + g.value"
                     :x1="0" :x2="CHART_W" :y1="g.y" :y2="g.y" class="major" />
               <template v-for="t in c.chart.xticks" :key="'t' + t.x">
                 <line v-if="t.line" :x1="t.x" :x2="t.x" :y1="0" :y2="CHART_H"
                       class="minor vertical" />
               </template>
-              <template v-for="(s, i) in c.chart.series" :key="i">
-                <path v-if="s.area" :d="s.area" class="area" />
-                <path :d="s.line" class="line" :style="{ opacity: s.opacity }" />
+              <template v-if="c.chart.bars">
+                <rect v-for="(b, i) in c.chart.bars" :key="'b' + i"
+                      :x="b.x" :y="b.y" :width="b.width" :height="b.height" class="bar" />
+                <path :d="c.chart.skyline" class="line" />
+              </template>
+              <template v-else>
+                <template v-for="(s, i) in c.chart.series" :key="i">
+                  <path v-if="s.area" :d="s.area" class="area" />
+                  <path :d="s.line" class="line" :style="{ opacity: s.opacity }" />
+                </template>
               </template>
               <line :x1="0" :x2="CHART_W" :y1="CHART_H - 0.5" :y2="CHART_H - 0.5"
                     class="axis" />
@@ -62,7 +83,7 @@ const viewChart = computed(() => buildChart(viewSeries.value))
           </div>
         </div>
       </div>
-      <div v-if="c.chart.series.length > 1" class="legend">
+      <div v-if="c.chart.series && c.chart.series.length > 1" class="legend">
         <span v-for="(s, i) in c.chart.series" :key="i" :style="{ opacity: s.opacity }">
           ● {{ s.label }}
         </span>
@@ -76,7 +97,7 @@ const viewChart = computed(() => buildChart(viewSeries.value))
 /* The svg is stretched (preserveAspectRatio none), so all text lives in
    HTML overlays positioned by the same fractions the geometry uses. */
 .chartwrap {
-  padding-left: 2.2rem; /* y labels */
+  padding-left: 2.8rem; /* y labels */
 }
 
 .plot {
@@ -103,8 +124,8 @@ const viewChart = computed(() => buildChart(viewSeries.value))
 
 .ylab {
   position: absolute;
-  left: -2.2rem;
-  width: 1.9rem;
+  left: -2.8rem;
+  width: 2.6rem;
   text-align: right;
   transform: translateY(50%);
   font-size: 0.7rem;
@@ -154,6 +175,11 @@ const viewChart = computed(() => buildChart(viewSeries.value))
   opacity: 0.15;
 }
 
+.chart .bar {
+  fill: var(--accent);
+  opacity: 0.15;
+}
+
 .chart .line {
   fill: none;
   stroke: var(--accent);
@@ -176,10 +202,11 @@ const viewChart = computed(() => buildChart(viewSeries.value))
 .yaxis-label {
   position: absolute;
   top: 50%;
-  left: -2.2rem;
+  left: -2.8rem;
   font-size: 0.7rem;
   color: var(--muted);
   writing-mode: vertical-rl;
+  white-space: nowrap;
   transform: translateY(-50%) rotate(180deg);
 }
 

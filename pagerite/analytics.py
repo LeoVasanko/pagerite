@@ -5,10 +5,14 @@ ping on page load starts a visit, later pings extend it, and pings with no
 known session start a fresh one (missing data, not dropped). The document
 GET handler stashes the entry referer (external https origin) and any
 utm_* query parameters in in-memory IP tables, consumed when the ping
-starts the visit; nothing is counted without a ping (bots and admin
-browsing stay invisible). The session map is in-memory only.  The visitor
-IP and, when available, its reverse-DNS host name are stored on the visit
-record itself.
+starts the visit; nothing is counted without a ping (bots stay invisible).
+Admin clients ping with ``hide=1``, which records nothing and removes any
+visit the session accumulated before logging in.  Scanner telltale 404s
+(dotpaths, *.php) classify the source IP as abuse; its hits — including
+earlier crawler hits — are moved to the abuse list, which the viewer
+groups by IP with full request paths.  The session map is in-memory only.
+The visitor IP and, when available, its reverse-DNS host name are stored
+on the visit record itself.
 
 Data is a msgspec Struct JSON-dumped to its own file (not the kanta db),
 rewritten atomically on every recorded event.
@@ -41,7 +45,10 @@ def _compact_user_agent(ua: str) -> str:
     dev = r.device.family if r.device else None
     if browser in (None, "Other") and os_name in (None, "Other"):
         return ua
-    browser = browser if browser and browser != "Other" else ""
+    if browser and browser != "Other":
+        browser = browser.split()[0]
+    else:
+        browser = ""
     os_name = os_name if os_name and os_name != "Other" else ""
     if dev in (None, "Other") or dev == browser:
         dev = ""
@@ -79,6 +86,8 @@ class Visit(msgspec.Struct, omit_defaults=True):
     ua_pretty: str = ""
     #: UTM query parameters from the landing URL, keyed by parameter name.
     utm: dict[str, str] = {}
+    #: Active reading time per path (seconds), keyed by path.
+    read: dict[str, int] = {}
 
 
 class CrawlerHit(msgspec.Struct, omit_defaults=True):
@@ -96,6 +105,29 @@ class CrawlerHit(msgspec.Struct, omit_defaults=True):
     query: str = ""
 
 
+class AbuseHit(msgspec.Struct, omit_defaults=True):
+    """A request from an IP classified as a scanner/abuser.
+
+    Unlike crawler hits the full request path (query string included) is
+    kept: the interesting part is exactly which paths were probed.
+    ``flag`` marks the path that triggered classification; ``is_404``
+    distinguishes 404 responses from document GETs made by the abuser.
+    """
+
+    start: datetime
+    #: Full request path including the query string (e.g. "/.env?x=1").
+    path: str
+    ip: str = ""
+    ua: str = ""
+    #: Compact display form of ``ua`` when parsable.
+    ua_pretty: str = ""
+    #: True when this path triggered abuse classification (telltale path
+    #: or the 404 that crossed the threshold).
+    flag: bool = False
+    #: True for 404 responses; false for document GETs from the abuser.
+    is_404: bool = False
+
+
 class Analytics(msgspec.Struct, omit_defaults=True):
     """Root of the analytics JSON file. Append-only by design: old data is
     dropped by deleting list entries / bucket keys."""
@@ -103,6 +135,10 @@ class Analytics(msgspec.Struct, omit_defaults=True):
     visits: list[Visit] = []
     #: Document GETs that never produced a ping, treated as crawler/bot hits.
     crawlers: list[CrawlerHit] = []
+    #: Requests from abusive IPs (see AbuseHit), grouped by IP in the viewer.
+    abuse: list[AbuseHit] = []
+    #: IPs classified as scanners/abusers (keys; values always True).
+    abuse_ips: dict[str, bool] = {}
     #: Page transitions per 5-minute bucket (sparse):
     #: from -> to -> bucket ISO -> count. ``from`` is the referer origin or
     #: "(direct)" for initial loads, a page path for pings.
@@ -186,6 +222,19 @@ def _utm_tags(query: str) -> dict[str, str]:
 
 _CRAWLER_TIMEOUT = timedelta(seconds=10)
 
+#: Plain-404 count per IP that classifies it as abuse even without a
+#: telltale path hit.
+_ABUSE_404_THRESHOLD = 10
+
+#: Paths that instantly classify an IP as abuse when they 404: any segment
+#: starting with a dot ("/.env", "/.git/config") or ending in ".php".
+_ABUSE_PATH = re.compile(r"(^|/)\.|\.php$", re.IGNORECASE)
+
+
+def _is_abuse_path(path: str) -> bool:
+    """Telltale scanner path: dot segment or *.php."""
+    return bool(_ABUSE_PATH.search(path.split("?")[0]))
+
 
 class Store:
     """In-memory analytics data plus the (IP, UA) -> visit session map."""
@@ -212,6 +261,9 @@ class Store:
         #: Document GETs that have not yet been matched by a ping.  Kept
         #: in RAM only; expired entries are written to ``data.crawlers``.
         self.pending_crawlers: list[CrawlerHit] = []
+        #: ip -> number of plain (non-telltale) 404s seen, in RAM only;
+        #: reaching ``_ABUSE_404_THRESHOLD`` classifies the IP as abuse.
+        self.not_found_counts: dict[str, int] = {}
         #: Callables to notify when persisted data changes.  Registered by the
         #: analytics WebSocket broadcaster.
         self._on_change: list[Callable[[], None]] = []
@@ -266,6 +318,123 @@ class Store:
         """Count one transition in its 5-minute bucket (sparse matrix)."""
         buckets = self.data.transitions.setdefault(fr, {}).setdefault(to, {})
         self._count(buckets, _bucket(now))
+
+    def _uncount(self, table: dict[str, int], key: str) -> None:
+        """Reverse one ``_count``: decrement and drop empty keys."""
+        if key in table:
+            table[key] -= 1
+            if table[key] <= 0:
+                del table[key]
+
+    def _remove_visit(self, index: int) -> None:
+        """Delete a visit and reverse the counts its creation recorded.
+
+        Used when a known visitor turns out to be an admin (hide=1 ping):
+        the session is scrubbed from the stats.  Views/transitions logged
+        by later pings inside the visit lack per-event timestamps and are
+        left as-is.
+        """
+        visit = self.data.visits[index]
+        bucket = _bucket(visit.start)
+        self._uncount(self.data.site_visits, bucket)
+        views = self.data.views.get(visit.entry)
+        if views is not None:
+            self._uncount(views, bucket)
+            if not views:
+                del self.data.views[visit.entry]
+        fr_map = self.data.transitions.get(visit.referer or "(direct)")
+        if fr_map is not None:
+            buckets = fr_map.get(visit.entry)
+            if buckets is not None:
+                self._uncount(buckets, bucket)
+                if not buckets:
+                    del fr_map[visit.entry]
+            if not fr_map:
+                del self.data.transitions[visit.referer or "(direct)"]
+        del self.data.visits[index]
+        # Sessions store list indices; shift the ones past the removed visit.
+        for key, i in list(self.sessions.items()):
+            if i > index:
+                self.sessions[key] = i - 1
+
+    def _abuse_hit(
+        self,
+        ip: str,
+        ua: str,
+        path: str,
+        start: datetime | None = None,
+        *,
+        flag: bool = False,
+        is_404: bool = False,
+    ) -> None:
+        """Append one abuse hit with the full request path."""
+        self.data.abuse.append(
+            AbuseHit(
+                start=start or datetime.now(UTC),
+                path=path,
+                ip=ip,
+                ua=ua,
+                ua_pretty=_compact_user_agent(ua),
+                flag=flag,
+                is_404=is_404,
+            )
+        )
+
+    def classify_abuse(
+        self,
+        ip: str,
+        ua: str,
+        path: str,
+        *,
+        flag: bool = False,
+        is_404: bool = False,
+    ) -> None:
+        """Classify an IP as a scanner/abuser and record the triggering hit.
+
+        All earlier crawler hits from the same IP (persisted and pending)
+        are moved to the abuse list — a random-UA scanner must not pollute
+        the crawler stats of the legitimate bots it impersonates.
+        """
+        if ip not in self.data.abuse_ips:
+            self.data.abuse_ips[ip] = True
+            moved = [h for h in self.data.crawlers if h.ip == ip]
+            if moved:
+                self.data.crawlers = [h for h in self.data.crawlers if h.ip != ip]
+                for h in moved:
+                    self._abuse_hit(
+                        h.ip, h.ua,
+                        h.entry + (f"?{h.query}" if h.query else ""),
+                        start=h.start,
+                    )
+            pending = [h for h in self.pending_crawlers if h.ip == ip]
+            if pending:
+                self.pending_crawlers = [h for h in self.pending_crawlers if h.ip != ip]
+                for h in pending:
+                    self._abuse_hit(
+                        h.ip, h.ua,
+                        h.entry + (f"?{h.query}" if h.query else ""),
+                        start=h.start,
+                    )
+        self._abuse_hit(ip, ua, path, flag=flag, is_404=is_404)
+        self._save()
+
+    def track_404(self, ip: str, ua: str, path: str) -> None:
+        """Record a 404 response for ``path`` (full path, query included).
+
+        A telltale path (dot segment or *.php) classifies the IP as abuse
+        immediately; enough plain 404s from one IP do too.  Hits from
+        already-classified IPs go straight to the abuse list.
+        """
+        if ip in self.data.abuse_ips:
+            self._abuse_hit(ip, ua, path, flag=_is_abuse_path(path), is_404=True)
+            self._save()
+            return
+        if _is_abuse_path(path):
+            self.classify_abuse(ip, ua, path, flag=True, is_404=True)
+            return
+        self.not_found_counts[ip] = self.not_found_counts.get(ip, 0) + 1
+        if self.not_found_counts[ip] >= _ABUSE_404_THRESHOLD:
+            self.classify_abuse(ip, ua, path, flag=True, is_404=True)
 
     def _new_visit(
         self,
@@ -328,8 +497,7 @@ class Store:
         own_origin: str,
         ip: str,
         ua: str,
-        entry: str,
-        query: str = "",
+        full_path: str,
     ) -> None:
         """Stash the entry referer/UTM tags and queue a pending crawler hit.
 
@@ -343,7 +511,17 @@ class Store:
         Every document GET is also queued as a pending crawler hit.  If a ping
         from the same (IP, UA) pair arrives within ``_CRAWLER_TIMEOUT``, the
         hit is discarded; otherwise it is flushed to ``data.crawlers``.
+
+        GETs from IPs already classified as abuse are recorded as abuse hits
+        with the full request path (query string included).
         """
+        entry = full_path.split("?")[0]
+        query = full_path.split("?", 1)[1] if "?" in full_path else ""
+        if ip in self.data.abuse_ips:
+            self._flush_crawlers()
+            self._abuse_hit(ip, ua, full_path, is_404=False, flag=False)
+            self._save()
+            return
         now = datetime.now(UTC)
         self._flush_crawlers(now)
         if referer:
@@ -365,31 +543,73 @@ class Store:
             )
         )
 
+    def _add_read(self, ip: str, ua: str, path: str, seconds: int) -> None:
+        """Add ``seconds`` of reading time for ``path`` to the current visit."""
+        if seconds <= 0:
+            return
+        index = self.sessions.get((ip, ua))
+        if index is None or index >= len(self.data.visits):
+            return
+        visit = self.data.visits[index]
+        visit.read[path] = visit.read.get(path, 0) + seconds
+
     def ping(
         self,
         from_: str,
-        to: str,
+        to: str | None,
         ip: str,
         ua: str,
         accept_language: str = "",
+        hide: bool = False,
+        read: int = 0,
     ) -> int | None:
-        """Record a client navigation ping ({from, to} from pagerite.js).
+        """Record a client navigation ping ({from, to, read} from pagerite.js).
 
-        ``to`` is an internal path ("/...") or an https URL for exit links;
-        anything else is ignored. The transition is always counted; the trail
-        only grows on first sight of a page within the visit.
+        ``to`` is an internal path ("/...") or an https URL for exit links; a
+        missing/empty ``to`` means the page is being closed and only the
+        ``read`` time should be recorded. The transition is always counted when
+        ``to`` is present; the trail only grows on first sight of a page within
+        the visit. ``read`` is the active time (seconds) spent on ``from_``.
+
         A ping with no known session starts a fresh visit, consuming the
         referer and UTM tags stashed by the document GET if there are any.
+
+        ``hide`` is set by admin clients: the ping cancels pending crawler
+        hits as usual, and any existing visit for this (IP, UA) session is
+        removed from the stats (the admin browsed anonymously before logging
+        in).  Nothing new is recorded.
+
+        Pings from IPs classified as abuse are ignored entirely.
 
         Returns the index of the new visit when one is created, so callers
         can enrich it later with non-blocking lookups (host, geoip country).
         """
         self._flush_crawlers()
+        key = (ip, ua)
+        if hide:
+            # Admin ping: cancel pending crawler hits and scrub the session.
+            self.pending_crawlers = [
+                hit for hit in self.pending_crawlers if not (hit.ip == ip and hit.ua == ua)
+            ]
+            index = self.sessions.pop(key, None)
+            if index is not None and index < len(self.data.visits):
+                self._remove_visit(index)
+                self._save()
+            return None
+        if ip in self.data.abuse_ips:
+            return None
         # A real visitor ping cancels any pending crawler hits from this
         # (IP, UA) pair.
         self.pending_crawlers = [
             hit for hit in self.pending_crawlers if not (hit.ip == ip and hit.ua == ua)
         ]
+        fr_path = _internal_path(from_) if from_ else ""
+        if fr_path and read > 0:
+            self._add_read(ip, ua, fr_path, read)
+        if not to:
+            if read > 0:
+                self._save()
+            return None
         if to.startswith("/") and not to.startswith("//"):
             target = _internal_path(to) or ""
         else:
@@ -398,7 +618,7 @@ class Store:
             return None
         key = (ip, ua)
         index = self.sessions.get(key)
-        fr = (_internal_path(from_) or "(direct)") if from_ else "(direct)"
+        fr = fr_path or "(direct)"
         if index is None or index >= len(self.data.visits):
             # No known session: the initial ping of a fresh page load (or
             # missing data after a server restart) — start a visit.

@@ -25,11 +25,44 @@ export const hostIP = (ip) => {
   }
 }
 
-/** Copy the full IP to the clipboard, ignoring failures. */
-export async function copyIp(ip) {
+function showCopiedFeedback(el) {
+  if (!el || typeof document === 'undefined') return
+  const popup = document.createElement('span')
+  popup.textContent = 'Copied!'
+  popup.className = 'copy-popup'
+  popup.style.cssText =
+    'position:absolute;bottom:calc(100% + 0.25rem);left:50%;' +
+    'transform:translateX(-50%);padding:0.15rem 0.4rem;' +
+    'background:var(--text, CanvasText);color:var(--bg, Canvas);' +
+    'border-radius:0.25rem;font-size:0.75rem;white-space:nowrap;' +
+    'pointer-events:none;z-index:10;'
+  el.classList.add('has-copy-popup')
+  el.appendChild(popup)
+  setTimeout(() => {
+    popup.remove()
+    el.classList.remove('has-copy-popup')
+  }, 1200)
+}
+
+/** Copy the full IP to the clipboard and show a brief "Copied!" popup. */
+export async function copyIp(ip, event) {
   if (!ip) return
+  const el = event?.currentTarget
   try {
     await navigator.clipboard.writeText(ip)
+    showCopiedFeedback(el)
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Copy arbitrary text to the clipboard and show a brief "Copied!" popup. */
+export async function copyList(text, event) {
+  if (!text) return
+  const el = event?.currentTarget
+  try {
+    await navigator.clipboard.writeText(text)
+    showCopiedFeedback(el)
   } catch {
     /* ignore */
   }
@@ -140,6 +173,33 @@ export function formatWhenTooltip(ts) {
   return new Date(ts).toISOString().replace('T', ' ').replace('Z', ' UTC')
 }
 
+/** Full local timestamp for tooltips, e.g. "21 Aug 2026, 17:38:48". */
+export function formatWhenLocal(ts) {
+  return new Date(ts).toLocaleString('en-ie', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
+
+/** Preserve locale case with the region/country subtag upper-cased. */
+export function formatLang(value) {
+  if (!value || value === '—') return value
+  const parts = value.split('-')
+  if (parts.length > 1) {
+    parts[parts.length - 1] = parts[parts.length - 1].toUpperCase()
+  }
+  return parts.join('-')
+}
+
+/** ISO 8601 UTC timestamp without subseconds, e.g. "2026-08-21T00:20:48Z". */
+export function formatWhenIso(ts) {
+  return `${new Date(ts).toISOString().split('.')[0]}Z`
+}
+
 /**
  * Format recent visits for display, newest first. Each step is a linked slug
  * pointing to its article; external referers/origins are shown as their
@@ -241,8 +301,9 @@ export function formatCrawlerRows(crawlers, pageTree, now = Date.now()) {
     .sort((a, b) => totalHits(b) - totalHits(a) || b.lastStart - a.lastStart)
     .slice(0, 10)
     .map((g) => ({
-      when: formatWhen(g.lastStart, now),
-      whenTooltip: formatWhenTooltip(g.lastStart),
+      lastSeen: formatWhen(g.lastStart, now),
+      lastSeenIso: formatWhenIso(g.lastStart),
+      lastSeenLocal: formatWhenLocal(g.lastStart),
       pages: [...g.pages.entries()]
         .sort((a, b) => b[1] - a[1])
         .map(([path, count]) => ({
@@ -260,6 +321,85 @@ export function formatCrawlerRows(crawlers, pageTree, now = Date.now()) {
 }
 
 /**
+ * Group abuse hits by IP (never by UA — scanners randomize theirs to
+ * masquerade as legitimate crawlers) and format each group as a row with
+ * the full paths probed, in access order.  Flagged paths (the ones that
+ * triggered abuse classification) are lifted to the top, followed by
+ * other 404s, then document GETs from the abuser.  UAs are shown raw,
+ * one per line, with their occurrence counts.  Paths are shown verbatim
+ * (query string included), not resolved against the page tree.
+ */
+export function formatAbuseRows(abuse, now = Date.now()) {
+  const groups = new Map()
+  for (const a of abuse || []) {
+    const g = groups.get(a.ip) || {
+      ip: a.ip || '',
+      pathHits: [],
+      rawUas: [],
+      uaCounts: new Map(),
+      lastStart: 0,
+    }
+    const start = new Date(a.start).getTime()
+    if (start > g.lastStart) g.lastStart = start
+    g.pathHits.push({
+      path: a.path || '',
+      start,
+      flag: a.flag || false,
+      is_404: a.is_404 || false,
+    })
+    const ua = a.ua || '(no UA)'
+    g.rawUas.push(ua)
+    g.uaCounts.set(ua, (g.uaCounts.get(ua) || 0) + 1)
+    groups.set(a.ip, g)
+  }
+  const totalHits = (g) => g.pathHits.length
+  return [...groups.values()]
+    .sort((a, b) => totalHits(b) - totalHits(a) || b.lastStart - a.lastStart)
+    .slice(0, 10)
+    .map((g) => {
+      const pathCategory = (p) => (p.flag ? 0 : p.is_404 ? 1 : 2)
+      const paths = [...g.pathHits].sort(
+        (a, b) => pathCategory(a) - pathCategory(b) || a.start - b.start,
+      )
+      const uas = [...g.uaCounts.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      return {
+        lastSeen: formatWhen(g.lastStart, now),
+        lastSeenIso: formatWhenIso(g.lastStart),
+        lastSeenLocal: formatWhenLocal(g.lastStart),
+        paths: paths.map((p) => ({ path: p.path, flag: p.flag, is_404: p.is_404 })),
+        allPaths: paths.map((p) => p.path).join('\n'),
+        uas: uas.map(([ua, count]) => ({ ua, count })),
+        allUas: uas
+          .map(([ua, count]) => (count > 1 ? `${count}× ${ua}` : ua))
+          .join('\n'),
+        ip: g.ip,
+        ipDisplay: hostIP(g.ip) || g.ip || '—',
+        total: totalHits(g),
+      }
+    })
+}
+
+/**
+ * Reduce a reverse-DNS hostname to its right-most components that fit
+ * within ``limit`` characters.  This keeps the meaningful main domain
+ * while avoiding absurdly long subdomains like ``xxx.yyy.zzz...provider.net``.
+ */
+function mainDomain(host, limit = 24) {
+  if (!host) return host
+  const labels = host.split('.').filter(Boolean)
+  if (!labels.length) return host
+  const parts = [labels.pop()]
+  while (labels.length) {
+    const next = labels[labels.length - 1]
+    const candidate = `${next}.${parts.join('.')}`
+    if (candidate.length > limit) break
+    parts.unshift(labels.pop())
+  }
+  return parts.join('.')
+}
+
+/**
  * Format raw visit records as rows for a technical table.  Returns objects
  * with display strings; missing values become "—".  ``trail`` starts with the
  * external referer (when present), then the entry page and any further internal
@@ -268,21 +408,26 @@ export function formatCrawlerRows(crawlers, pageTree, now = Date.now()) {
 export function formatVisitRows(visits, pageTree, now = Date.now()) {
   const titles = buildTitleMap(pageTree)
   return [...(visits || [])].reverse().slice(0, 20).map((v) => {
-    const trail = [v.referer, v.entry, ...(v.trail || [])]
+    const trail = [v.entry, ...(v.trail || [])]
       .map((p) => stepOf(p, titles))
       .filter(Boolean)
     const utm = Object.entries(v.utm || {})
       .map(([k, value]) => `${k}=${value}`)
       .join(', ')
     const dash = (s) => (s || '—')
+    const host = v.host || ''
+    const isHost = !!host
     return {
-      when: formatWhen(v.start, now),
-      whenTooltip: formatWhenTooltip(v.start),
+      lastSeen: formatWhen(v.start, now),
+      lastSeenIso: formatWhenIso(v.start),
+      lastSeenLocal: formatWhenLocal(v.start),
+      langDisplay: formatLang(v.lang),
       trail,
+      refererStep: stepOf(v.referer, titles),
       referer: dash(v.referer),
       ip: v.ip || '',
-      ipDisplay: v.host || hostIP(v.ip) || v.ip || '—',
-      host: dash(v.host),
+      ipDisplay: isHost ? mainDomain(host) : hostIP(v.ip) || v.ip || '—',
+      isHost,
       lang: dash(v.lang),
       country: dash(v.country),
       city: dash(v.city),

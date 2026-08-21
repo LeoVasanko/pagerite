@@ -13,6 +13,7 @@ export const DAY = 86400e3
 export const WEEK = 7 * DAY
 
 export const RANGES = {
+  day: { label: 'day', span: DAY, bucket: MIN5 },
   week: { label: 'week' },
   month: { label: 'month', span: 30 * DAY, bucket: 6 * HOUR },
   year: { label: 'year', span: 365 * DAY, bucket: DAY },
@@ -117,11 +118,36 @@ export function rollingSeries(buckets, rangeKey) {
   }
 }
 
-/** Dispatch to weekly or rolling series based on the selected range. */
+/**
+ * Day view: raw 5-minute bucket counts for the current 24-hour window.
+ * No smoothing or rate conversion is applied; counts are used as-is.
+ */
+export function daySeries(buckets) {
+  const raw = rawTimes(buckets)
+  const now = Date.now()
+  const { span, bucket } = RANGES.day
+  const t1 = Math.floor(now / bucket) * bucket + bucket
+  const t0 = t1 - span
+  const points = []
+  for (let t = t0; t < t1; t += bucket) {
+    points.push({ t, count: raw[t] || 0 })
+  }
+  return {
+    series: [{ points, label: '', opacity: 1, area: false }],
+    t0,
+    t1,
+    rate: 1,
+    binMinutes: bucket / 60e3,
+    unitMinutes: bucket / 60e3,
+    unit: '5min',
+  }
+}
+
+/** Dispatch to daily, weekly or rolling series based on the selected range. */
 export function makeSeries(buckets, rangeKey) {
-  return rangeKey === 'week'
-    ? weeklySeries(buckets)
-    : rollingSeries(buckets, rangeKey)
+  if (rangeKey === 'day') return daySeries(buckets)
+  if (rangeKey === 'week') return weeklySeries(buckets)
+  return rollingSeries(buckets, rangeKey)
 }
 
 /**

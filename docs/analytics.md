@@ -38,10 +38,17 @@ The client (`pagerite.js`) POSTs fire-and-forget pings to `/_a` with
   links are stored by full URL so several links to the same domain remain
   distinct.
 - **Excluded**: back/forward (popstate) navigations, navigation involving
-  the analytics page itself (`/_a`), and everything while the user is known to
-  be an admin *and SSO is actually in use* — with no auth proxy (dev/test)
-  "admin" is everyone's state, so the gate is off and everything is recorded —
-  or has the editor open (`body.editing`). Admin noise, not visits.
+  the analytics page itself (`/_a`), and everything while the user has the
+  editor open (`body.editing`). Admin noise, not visits.
+- **Admins**: when SSO is in use and the session is known to be an admin,
+  the client still pings but adds `hide=1`. The server then records
+  nothing — and if the same (IP, UA) session already had a visit from
+  before logging in, that visit is removed from the JSON along with the
+  counts recorded when it was created (site visit, entry view, entry
+  transition). Views/transitions logged by later pings inside such a visit
+  lack per-event timestamps and are left as-is. With no auth proxy
+  (dev/test) "admin" is everyone's state, so `hide` stays 0 and everything
+  is recorded.
 - The server validates `to`: internal paths must be valid slug paths
   ("/" or `[a-z0-9_-]` segments), external ones are re-derived to the
   https origin and accepted only when the client sent exactly that.
@@ -69,6 +76,19 @@ The client (`pagerite.js`) POSTs fire-and-forget pings to `/_a` with
   hits are grouped by the same (IP, User-Agent) pair and shown as a trail of
   internal pages that crawler visited; the crawler table lists the most active
   crawlers first rather than the most recent hits.
+- **Abuse (scanner) hits**: a 404 for a telltale path — any URL segment
+  starting with a dot (`/.env`, `/.git/config`) or ending in `.php` —
+  classifies the source IP as abuse immediately, and ten plain 404s from one
+  IP do too.  Classification reclassifies history: all earlier crawler hits
+  from that IP (persisted and pending) move to the `abuse` list, so a
+  random-UA scanner no longer pollutes the crawler stats of the legitimate
+  bot it impersonates.  Once classified, every document GET and 404 from the
+  IP is recorded as an abuse hit with the full request path (query string
+  included), and its pings are ignored.  The classified IP set (`abuse_ips`)
+  is persisted in the JSON file; the plain-404 counters are RAM-only.  In the
+  viewer, abuse hits are grouped by IP (never by UA — scanners randomize
+  theirs) in a separate "Abuse" table listing the full paths probed and the
+  raw User-Agent strings, one per line, with click-to-copy full lists.
 
 ## Visits and sessions
 
@@ -111,7 +131,22 @@ Each `CrawlerHit` record:
 - `referer` — external https origin of the request, `""` for direct/none,
 - `query` — raw query string of the request.
 
-Crawler hits are grouped by User-Agent in the analytics viewer.
+Each `AbuseHit` record:
+
+- `start` — timestamp of the request,
+- `path` — full request path including the query string (e.g. `/.env?x=1`),
+- `ip` — IP address (the grouping key for abusers),
+- `ua` — raw `User-Agent` header,
+- `ua_pretty` — compact display form of the UA when parsable,
+- `flag` — true for the path that triggered abuse classification (telltale
+  path or the 404 that crossed the threshold),
+- `is_404` — true for 404 responses, false for document GETs from the
+  abuser.
+
+Crawler hits are grouped by (IP, User-Agent) in the analytics viewer; abuse
+hits are grouped by IP alone.  In the Abuse table paths are listed in access
+order, oldest first, with flagged paths lifted to the top, followed by other
+404s and then document GETs.
 
 ## Aggregates
 

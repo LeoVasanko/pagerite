@@ -5,7 +5,7 @@
  * rates (hour on the week view, day on month+).
  */
 
-import { DAY, HOUR, WEEK, mondayUTC } from './time.js'
+import { DAY, HOUR, MIN5, WEEK, mondayUTC } from './time.js'
 
 export const CHART_W = 720
 export const CHART_H = 180
@@ -206,9 +206,10 @@ export function spline(pts) {
 }
 
 /** Build a full chart model from a series descriptor produced by time.js. */
-export function buildChart(input) {
+export function buildChart(input, now = Date.now()) {
   if (!input || !input.series.length) return null
-  const { series, t0, t1, rate, binMinutes, unitMinutes } = input
+  if (input.unit === '5min') return buildDayChart(input, now)
+  const { series, t0, t1, rate, binMinutes, unitMinutes, unit } = input
   // Values are per-unit rates (hour on the week view, day on month+); the
   // y max is derived from the *smoothed* curves so random single-bucket
   // spikes don't blow up the scale. Smoothing works on raw counts (its edge
@@ -283,7 +284,91 @@ export function buildChart(input) {
           x: x(t), left: ((t - t0) / (t1 - t0)) * 100,
           label: fmtTick(t, t1 - t0), line: true,
         }))
-  return { max, majors, minors, series: drawn, xticks }
+  return { max, majors, minors, series: drawn, xticks, unit }
+}
+
+/**
+ * Day view: 5-minute bars for the last 24 hours. Bars are drawn at raw
+ * counts; the skyline uses a projected full-bucket value for the still-open
+ * final bucket. The y scale is derived from the projected skyline maximum.
+ */
+export function buildDayChart(input, now = Date.now()) {
+  const { series, t0, t1 } = input
+  const points = series[0]?.points || []
+  const n = points.length
+  if (!n) return null
+  const bucketMs = (t1 - t0) / n
+  const bucketWidth = CHART_W / n
+  const gap = 0.2
+  const barWidth = Math.max(0.2, bucketWidth - gap)
+
+  const x = (i) => i * bucketWidth + gap / 2
+  const prevRaw = n > 1 ? points[n - 2].count : 0
+  const projected = points.map((p, i) => {
+    if (i !== n - 1) return p.count
+    const bucketStart = t0 + i * bucketMs
+    const elapsed = Math.max(1, Math.min(bucketMs, now - bucketStart))
+    // Blend the observed partial bucket with the previous full bucket:
+    // the longer the current bucket has run, the less we borrow from it.
+    const share = elapsed / bucketMs
+    return p.count + prevRaw * (1 - share)
+  })
+  const highest = Math.max(0, ...projected)
+  const { max, step, minor } = yScale(highest)
+  const y = (v) => PAD_TOP + (1 - Math.max(0, v) / max) * (CHART_H - PAD_TOP)
+
+  const bars = points.map((p, i) => {
+    const bx = x(i)
+    const by = y(p.count)
+    return {
+      x: bx,
+      y: by,
+      width: barWidth,
+      height: CHART_H - by,
+      raw: p.count,
+      projected: projected[i],
+    }
+  })
+
+  let skyline = ''
+  for (let i = 0; i < bars.length; i++) {
+    const b = bars[i]
+    const top = y(b.projected)
+    if (i === 0) {
+      skyline += `M${b.x},${top} H${b.x + b.width}`
+    } else {
+      skyline += ` V${top} H${b.x + b.width}`
+    }
+  }
+
+  const majors = []
+  const minors = []
+  const nMajor = Math.round(max / step)
+  for (let k = 0; k <= nMajor; k++) {
+    const v = k * step
+    majors.push({ value: v, y: y(v), bottom: (1 - PAD_TOP / CHART_H) * (v / max) * 100 })
+  }
+  if (minor) {
+    for (let v = minor; v < max; v += minor) {
+      if (v % step !== 0) minors.push({ y: y(v) })
+    }
+  }
+
+  const xticks = []
+  const tickStep = 3 * HOUR
+  const firstTick = Math.ceil(t0 / tickStep) * tickStep
+  for (let t = firstTick; t < t1; t += tickStep) {
+    if (t < t0) continue
+    const d = new Date(t)
+    xticks.push({
+      x: ((t - t0) / (t1 - t0)) * CHART_W,
+      left: ((t - t0) / (t1 - t0)) * 100,
+      label: `${String(d.getUTCHours()).padStart(2, '0')}:00`,
+      line: false,
+    })
+  }
+
+  return { bars, skyline: skyline.trim(), max, majors, minors, xticks, unit: '5min', series: [] }
 }
 
 /** X ticks for year/all: Monday boundaries up to a quarter, UTC month

@@ -9,6 +9,8 @@ import { RANGES } from './analytics/time.js'
 import {
   calcTotalViews,
   copyIp,
+  copyList,
+  formatAbuseRows,
   formatCrawlerRows,
   formatVisitRows,
 } from './analytics/format.js'
@@ -19,6 +21,8 @@ import VisitorCharts from './VisitorCharts.vue'
 const props = defineProps({
   initialRange: { type: String, default: 'week' },
 })
+
+const ABUSE_MAX_LINES = 5
 
 const data = ref(null)
 const pageTree = ref(null)
@@ -52,7 +56,7 @@ function connectAnalytics() {
 onMounted(async () => {
   connectAnalytics()
   now.value = Date.now()
-  timeInterval = setInterval(() => { now.value = Date.now() }, 30000)
+  timeInterval = setInterval(() => { now.value = Date.now() }, 1000)
   // The site tree for the transition map (all pages in menu order). Not
   // fatal: without it the map just narrows to pages seen in transitions.
   try {
@@ -86,6 +90,7 @@ watch(range, (r) => {
 const visitRows = computed(() => formatVisitRows(visits.value, pageTree.value, now.value))
 const crawlers = computed(() => data.value?.crawlers || [])
 const crawlerRows = computed(() => formatCrawlerRows(crawlers.value, pageTree.value, now.value))
+const abuseRows = computed(() => formatAbuseRows(data.value?.abuse || [], now.value))
 
 function flagSvg(code) {
   return flagSvgs[code?.toUpperCase()] || ''
@@ -131,20 +136,24 @@ function countryName(code) {
             <table class="visit-table">
               <thead>
                 <tr>
-                  <th>when</th>
                   <th>trail</th>
-                  <th>referer</th>
-                  <th>ip</th>
-                  <th>lang</th>
-                  <th>country</th>
-                  <th>ua</th>
-                  <th>utm</th>
+                  <th>visitor</th>
+                  <th class="last-seen">last seen</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="(v, i) in visitRows" :key="i">
-                  <td class="when" :title="v.whenTooltip">{{ v.when }}</td>
                   <td class="trail">
+                    <template v-if="v.refererStep">
+                      <a class="trail-link"
+                         :href="v.refererStep.path"
+                         :title="v.refererStep.title"
+                         :target="v.refererStep.external ? '_blank' : undefined"
+                         :rel="v.refererStep.external ? 'noopener' : undefined">
+                        {{ v.refererStep.slug }}
+                      </a>
+                    </template>
+                    <span v-if="v.utm && v.utm !== '—'" class="utm-tag"><small class="muted">{{ v.utm }}</small></span>
                     <a v-for="(s, si) in v.trail" :key="si"
                        :href="s.path" :title="s.title"
                        :target="s.external ? '_blank' : undefined"
@@ -153,21 +162,27 @@ function countryName(code) {
                       {{ s.slug }}
                     </a>
                   </td>
-                  <td>{{ v.referer }}</td>
-                  <td>
-                    <span class="clickable-ip"
-                          :title="`Click to copy full IP: ${v.ip}`"
-                          @click="copyIp(v.ip)">{{ v.ipDisplay }}</span>
+                  <td class="ip-locale-cell" :class="{ 'host-cell': v.isHost }">
+                    <div class="ip-locale-rows">
+                      <div class="ip-locale-row">
+                        <div class="locale-line">
+                          <span v-if="flagSvg(v.country)" class="flag" v-html="flagSvg(v.country)" :title="countryName(v.country) || v.country"></span>
+                          <template v-if="v.city && v.city !== '—'"><small class="city-name">{{ v.city }}</small></template>
+                          <template v-else-if="!flagSvg(v.country)">—</template>
+                        </div>
+                        <div class="ip-line"><span class="clickable-ip"
+                                   :title="v.ip"
+                                   @click="copyIp(v.ip, $event)">{{ v.ipDisplay }}</span></div>
+                      </div>
+                      <div class="ip-locale-row">
+                        <div class="ua-line"><small class="muted" :title="v.uaRaw">{{ v.ua }}</small></div>
+                        <div v-if="v.lang && v.lang !== '—'" class="locale-lang"><small class="muted">{{ v.langDisplay }}</small></div>
+                      </div>
+                    </div>
                   </td>
-                  <td>{{ v.lang }}</td>
-                  <td class="country">
-                    <span v-if="flagSvg(v.country)" class="flag" v-html="flagSvg(v.country)" :title="countryName(v.country) || v.country"></span>
-                    <template v-if="v.city !== '—'">{{ countryName(v.country) || v.country }}<br><small class="muted">{{ v.city }}</small></template>
-                    <template v-else-if="v.country !== '—'">{{ countryName(v.country) || v.country }}</template>
-                    <template v-else>—</template>
-                  </td>
-                  <td class="ua" :title="v.uaRaw">{{ v.ua }}</td>
-                  <td>{{ v.utm }}</td>
+                  <td class="last-seen"
+                      :title="v.lastSeenLocal"
+                      @click="copyList(v.lastSeenIso, $event)">{{ v.lastSeen }}</td>
                 </tr>
               </tbody>
             </table>
@@ -181,15 +196,13 @@ function countryName(code) {
             <table class="visit-table">
               <thead>
                 <tr>
-                  <th>when</th>
                   <th>pages</th>
-                  <th>ip</th>
-                  <th>ua</th>
+                  <th>ip / ua</th>
+                  <th class="last-seen">last seen</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="(c, i) in crawlerRows" :key="i">
-                  <td class="when" :title="c.whenTooltip">{{ c.when }}</td>
                   <td class="trail">
                     <a v-for="(s, si) in c.pages" :key="si"
                        :href="s.path" :title="`${s.title}${s.count > 1 ? ` (${s.count} hits)` : ''}`"
@@ -197,17 +210,67 @@ function countryName(code) {
                       <small v-if="s.count > 1" class="muted">{{ s.count }}×</small>{{ s.slug }}
                     </a>
                   </td>
-                  <td>
-                    <span class="clickable-ip"
-                          :title="`Click to copy full IP: ${c.ip}`"
-                          @click="copyIp(c.ip)">{{ c.ipDisplay }}</span>
+                  <td class="ip-ua-cell">
+                    <div><span class="clickable-ip"
+                               :title="c.ip"
+                               @click="copyIp(c.ip, $event)">{{ c.ipDisplay }}</span></div>
+                    <div class="ua-line"><small class="muted" :title="c.uaRaw">{{ c.ua }}</small></div>
                   </td>
-                  <td class="ua" :title="c.uaRaw">{{ c.ua }}</td>
+                  <td class="last-seen"
+                      :title="c.lastSeenLocal"
+                      @click="copyList(c.lastSeenIso, $event)">{{ c.lastSeen }}</td>
                 </tr>
               </tbody>
             </table>
           </div>
           <p v-else class="empty">no crawler hits recorded yet</p>
+        </section>
+
+        <section v-if="abuseRows.length">
+          <h2>Abuse</h2>
+          <div class="visit-table-wrap">
+            <table class="visit-table">
+              <thead>
+                <tr>
+                  <th>paths</th>
+                  <th>ip / uas</th>
+                  <th class="last-seen">last seen</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(a, i) in abuseRows" :key="i">
+                  <td class="trail abuse-list clickable-list"
+                      @click="copyList(a.allPaths, $event)">
+                    <div v-for="(p, pi) in a.paths.slice(0, ABUSE_MAX_LINES)" :key="pi"
+                         class="list-line">
+                      {{ p.path }}
+                    </div>
+                    <div v-if="a.paths.length > ABUSE_MAX_LINES" class="list-line">
+                      <small class="muted">+{{ a.paths.length - ABUSE_MAX_LINES }} more</small>
+                    </div>
+                  </td>
+                  <td class="ip-ua-cell">
+                    <div><span class="clickable-ip"
+                               :title="a.ip"
+                               @click="copyIp(a.ip, $event)">{{ a.ipDisplay }}</span></div>
+                    <div class="abuse-uas-list clickable-list"
+                         @click="copyList(a.allUas, $event)">
+                      <div v-for="(u, ui) in a.uas.slice(0, ABUSE_MAX_LINES)" :key="ui"
+                           class="list-line">
+                        <small v-if="u.count > 1" class="muted">{{ u.count }}×</small>{{ u.ua }}
+                      </div>
+                      <div v-if="a.uas.length > ABUSE_MAX_LINES" class="list-line">
+                        <small class="muted">+{{ a.uas.length - ABUSE_MAX_LINES }} more</small>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="last-seen"
+                      :title="a.lastSeenLocal"
+                      @click="copyList(a.lastSeenIso, $event)">{{ a.lastSeen }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </section>
       </template>
     </div>
@@ -296,7 +359,6 @@ function countryName(code) {
 .visit-table {
   width: 100%;
   border-collapse: collapse;
-  font-family: monospace;
   font-size: 0.82rem;
   line-height: 1.3;
 }
@@ -318,9 +380,16 @@ function countryName(code) {
   background: var(--bg, Canvas);
 }
 
-.visit-table .when {
+.visit-table .last-seen {
+  width: 7.5rem;
+  text-align: right;
   white-space: nowrap;
   color: var(--muted);
+  cursor: pointer;
+}
+
+.visit-table .last-seen:hover {
+  color: var(--accent);
 }
 
 .visit-table .trail {
@@ -328,15 +397,48 @@ function countryName(code) {
   overflow-wrap: break-word;
 }
 
-.visit-table .trail a {
+.visit-table .trail a,
+.visit-table .trail-link {
+  display: inline-block;
+  max-width: 8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--text);
   text-decoration: none;
+  vertical-align: bottom;
 }
 
-.visit-table .trail a:hover { color: var(--accent); }
+.visit-table .trail a:hover,
+.visit-table .trail-link:hover { color: var(--accent); }
 
-.visit-table .trail a + a {
+.visit-table .trail > * + * {
   margin-left: 0.5rem;
+}
+
+.visit-table .utm-tag {
+  display: inline-block;
+  color: var(--muted);
+}
+
+.visit-table .clickable-list {
+  cursor: pointer;
+  max-width: 22rem;
+}
+
+.visit-table .clickable-list .list-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.35;
+}
+
+.visit-table .clickable-list .list-line + .list-line {
+  margin-top: 0.15rem;
+}
+
+.visit-table .ua.abuse-uas {
+  max-width: 24rem;
 }
 
 .visit-table .trail small,
@@ -346,23 +448,130 @@ function countryName(code) {
 }
 
 .visit-table .clickable-ip {
-  cursor: pointer;
-  text-decoration: underline;
-  text-decoration-style: dotted;
+  font-size: 0.75em;
 }
 
-.visit-table .clickable-ip:hover {
+.visit-table .clickable-ip,
+.visit-table .clickable-list,
+.visit-table .last-seen {
+  cursor: pointer;
+  position: relative;
+}
+
+.visit-table .clickable-ip:hover,
+.visit-table .clickable-list:hover,
+.visit-table .last-seen:hover {
   color: var(--accent);
 }
 
-.visit-table .ua {
-  max-width: 18rem;
+.visit-table .ip-locale-cell {
+  width: 36ch;
+  max-width: 36ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.visit-table .ip-ua-cell {
+  width: 22ch;
+  max-width: 22ch;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.visit-table .host-cell {
+  text-align: right;
+}
+
+.visit-table .ip-locale-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.visit-table .ip-locale-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.visit-table .ip-locale-row > * {
+  min-width: 0;
+}
+
+.visit-table .ip-locale-row .locale-line,
+.visit-table .ip-locale-row .ip-line,
+.visit-table .ip-locale-row .ua-line {
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.visit-table .country .flag {
+.visit-table .ip-locale-row .locale-lang {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.visit-table .ip-locale-row .locale-line {
+  text-align: left;
+}
+
+.visit-table .ip-locale-row .ip-line {
+  text-align: right;
+}
+
+.visit-table .ip-locale-row .ua-line {
+  text-align: left;
+}
+
+.visit-table .locale-line {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.visit-table .city-name {
+  display: inline-block;
+  max-width: 10ch;
+  font-size: 0.75em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.visit-table .ua-line {
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visit-table .abuse-uas-list {
+  text-align: right;
+}
+
+.visit-table .copy-popup {
+  position: absolute;
+  bottom: calc(100% + 0.25rem);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.15rem 0.4rem;
+  background: var(--text, CanvasText);
+  color: var(--bg, Canvas);
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.visit-table .locale-line .flag {
   display: inline-flex;
   width: 18px;
   height: 12px;
@@ -370,12 +579,18 @@ function countryName(code) {
   overflow: hidden;
   border: 1px solid var(--line);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2) inset;
+  vertical-align: middle;
 }
 
-.visit-table .country .flag :deep(svg) {
+.visit-table .locale-line .flag :deep(svg) {
   width: 100%;
   height: 100%;
   display: block;
+}
+
+.visit-table .locale-line .city-name {
+  margin-left: 0.3rem;
+  vertical-align: middle;
 }
 
 .crawler-top-uas {

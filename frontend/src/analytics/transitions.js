@@ -23,22 +23,23 @@ export const TNODE_R = 34 // node circles hold the slug and the view count
 export const EXT_R = 34 // external referer/exit nodes use the same full size
 
 // Edge width (half-width of the thin middle) grows logarithmically with
-// the count, anchored so a single recorded transition renders as a ~1 px
-// line. There is no cap — growth is slow enough that even very hot
-// connections stay reasonable. Connections carrying less than
-// PRUNE_FRACTION of the total traffic are not drawn at all (this also
-// keeps the number of drawn connections under ~100).
-const WMID_MIN = 0.5
-const WIDTH_GROWTH = 1.5
+// the count. The constants are scaled down by ~10× so busy ranges (day,
+// year) do not overwhelm the graph with fat connectors. A single recorded
+// transition still renders as a faint ~0.4 px line. Connections carrying
+// less than PRUNE_FRACTION of the total traffic are not drawn at all (this
+// also keeps the graph under ~100 connections).
+const WMID_MIN = 0.2
+const WIDTH_GROWTH = 0.15
 const PRUNE_FRACTION = 0.01
 
 // Beads: each edge direction emits beads at count * BEAD_RATE beads per
-// second (linear in the count). The component simulates every bead
-// independently in JS at BEAD_SPEED along the edge, with no limit on
+// second (linear in the count). The rate is reduced ~10× across all time
+// scales to keep the animation lightweight. The component simulates every
+// bead independently in JS at BEAD_SPEED along the edge, with no limit on
 // beads in flight.
 export const BEAD_SPEED = 180 // svg units per second
 export const BEAD_R = 2.2
-const BEAD_RATE = 0.12 // beads per second per recorded transition
+const BEAD_RATE = 0.012 // beads per second per recorded transition
 const FLOW_OFFSET = 3 // lane offset to the right of the travel direction
 
 const MAX_EXT_IN = 8 // referer nodes in the top row
@@ -84,10 +85,15 @@ function collectInternalTransitions(transitions) {
   return internal
 }
 
-/** Short display label for an external origin (protocol stripped). */
+/** Domain-only label for an external origin (path removed). */
 function extLabel(ext) {
-  const s = ext.replace(/^https?:\/\//, '')
-  return s.length > 11 ? `${s.slice(0, 10)}…` : s
+  try {
+    const host = new URL(ext).hostname
+    return host.length > 25 ? `${host.slice(0, 24)}…` : host
+  } catch {
+    const s = ext.replace(/^https?:\/\//, '').split('/')[0]
+    return s.length > 25 ? `${s.slice(0, 24)}…` : s
+  }
 }
 
 /**
@@ -175,8 +181,27 @@ function layoutAngles(root, unit, weight) {
   }
 }
 
+/** Compute median reading time per article in whole minutes. */
+function buildReadMinutes(visits) {
+  const times = {}
+  for (const v of visits || []) {
+    for (const [path, sec] of Object.entries(v.read || {})) {
+      ;(times[path] || (times[path] = [])).push(sec)
+    }
+  }
+  const minutes = {}
+  for (const [path, arr] of Object.entries(times)) {
+    arr.sort((a, b) => a - b)
+    const mid = Math.floor(arr.length / 2)
+    const median =
+      arr.length % 2 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2
+    minutes[path] = Math.max(1, Math.round(median / 60))
+  }
+  return minutes
+}
+
 /** Compute radial positions, view counts and labels for each node. */
-function positionNodes(nodes, maxDepth, unit, viewsData, titles) {
+function positionNodes(nodes, maxDepth, unit, viewsData, titles, readMinutes) {
   // Constant radial gap between rings, equal to the arc spacing of nodes
   // along a ring: leaf arc = unit * GAP, so GAP scales up with `unit` on
   // sparse trees (where closing the circle forces wider arcs) and with
@@ -196,10 +221,14 @@ function positionNodes(nodes, maxDepth, unit, viewsData, titles) {
     n.x = Math.cos(n.angle) * r
     n.y = Math.sin(n.angle) * r
     n.views = viewCount(n.path)
+    n.readMin = readMinutes[n.path] || 0
     // Slug inside the circle; full title goes on the link title attribute.
     const slug = n.path === '/' ? '🏠' : n.path.split('/').pop()
-    n.label = slug.length > 11 ? `${slug.slice(0, 10)}…` : slug
+    n.label = slug.length > 16 ? `${slug.slice(0, 15)}…` : slug
     n.title = titles.get(n.path) || ''
+    // Category (non-leaf) pages with no views in this window are left
+    // blank to keep the layout, but their circle/label is not drawn.
+    n.hidden = n.children.length > 0 && n.views === 0
   }
 
   return { radius, GAP }
@@ -279,7 +308,7 @@ const fmtPt = (p) => `${p[0].toFixed(2)} ${p[1].toFixed(2)}`
  * `wMid` is the half-width of the thin middle (already strength-scaled by
  * the caller); `ra`/`rb` are the radii of the node circles each end wraps.
  */
-function buildRibbon(a, b, ab, ba, wMid, ra = TNODE_R, rb = TNODE_R) {
+function buildRibbon(a, b, ab, ba, wMid, ra = TNODE_R, rb = TNODE_R, external = false) {
   const count = ab + ba
   const len = Math.hypot(b.x - a.x, b.y - a.y) || 1
   const ux = (b.x - a.x) / len
@@ -387,6 +416,7 @@ function buildRibbon(a, b, ab, ba, wMid, ra = TNODE_R, rb = TNODE_R) {
   return {
     d,
     title: `${a.path} ↔ ${b.path}: ${count} (${ab} / ${ba})`,
+    external,
   }
 }
 
@@ -401,7 +431,7 @@ function buildRibbon(a, b, ab, ba, wMid, ra = TNODE_R, rb = TNODE_R) {
  * edge run on parallel lanes instead of colliding. The component turns
  * these into independently simulated beads.
  */
-function buildFlows(a, b, ra, rb, ab, ba) {
+function buildFlows(a, b, ra, rb, ab, ba, visualScale = 1) {
   const len = Math.hypot(b.x - a.x, b.y - a.y) || 1
   const ux = (b.x - a.x) / len
   const uy = (b.y - a.y) / len
@@ -422,7 +452,7 @@ function buildFlows(a, b, ra, rb, ab, ba) {
       x2: a.x + toT * ux + s * rx,
       y2: a.y + toT * uy + s * ry,
       len: span,
-      interval: 1 / (count * BEAD_RATE),
+      interval: 1 / (count * BEAD_RATE * visualScale),
     }
   }
   const flows = []
@@ -437,14 +467,17 @@ function buildFlows(a, b, ra, rb, ab, ba) {
  * Absolute on purpose — cool routes stay visible regardless of how hot
  * the hottest connection is.
  */
-const scaledWidth = (count) => WMID_MIN + WIDTH_GROWTH * Math.log1p(count - 1)
+const scaledWidth = (count) => {
+  if (count <= 0) return 0
+  return WMID_MIN + WIDTH_GROWTH * Math.log1p(count - 1)
+}
 
 /**
  * Build ribbon edges and bead flows for every aggregated page-to-page
  * pair. Pairs carrying less than PRUNE_FRACTION of the total internal
  * traffic are pruned (this naturally bounds the graph to ~100 edges).
  */
-function buildInternalEdges(pairs, byPath) {
+function buildInternalEdges(pairs, byPath, visualScale = 1) {
   let total = 0
   for (const [, [ab, ba]] of pairs) total += ab + ba
   const minCount = total * PRUNE_FRACTION
@@ -456,8 +489,10 @@ function buildInternalEdges(pairs, byPath) {
     const [pf, pt] = k.split(' ')
     const a = byPath.get(pf)
     const b = byPath.get(pt)
-    edges.push(buildRibbon(a, b, ab, ba, scaledWidth(ab + ba)))
-    flows.push(...buildFlows(a, b, TNODE_R, TNODE_R, ab, ba))
+    const wMid = scaledWidth((ab + ba) * visualScale)
+    if (wMid <= 0) continue
+    edges.push(buildRibbon(a, b, ab, ba, wMid))
+    flows.push(...buildFlows(a, b, TNODE_R, TNODE_R, ab, ba, visualScale))
   }
   return { edges, flows }
 }
@@ -507,7 +542,7 @@ export function filterViewsByRange(views, t0, t1) {
  * Widths and pruning use the same log scale and traffic-share rule as
  * internal connections.
  */
-function buildExternal(external, byPath, radius, innerBounds) {
+function buildExternal(external, byPath, radius, innerBounds, visualScale = 1) {
   const extNodes = []
   const edges = []
   const flows = []
@@ -517,7 +552,7 @@ function buildExternal(external, byPath, radius, innerBounds) {
   const live = external.filter((p) => byPath.has(p.page))
   if (!live.length) return { extNodes, edges, flows }
 
-  const width = scaledWidth
+  const width = (count) => scaledWidth(count * visualScale)
 
   const overlaps = (x, y, r) =>
     [...byPath.values(), ...extNodes].some(
@@ -547,8 +582,10 @@ function buildExternal(external, byPath, radius, innerBounds) {
       extNodes.push(xn)
       for (const p of ps) {
         const page = byPath.get(p.page)
-        edges.push(buildRibbon(xn, page, p.in, 0, width(p.in), EXT_R, TNODE_R))
-        flows.push(...buildFlows(xn, page, EXT_R, TNODE_R, p.in, 0))
+        const wMid = width(p.in)
+        if (wMid <= 0) continue
+        edges.push(buildRibbon(xn, page, p.in, 0, wMid, EXT_R, TNODE_R, true))
+        flows.push(...buildFlows(xn, page, EXT_R, TNODE_R, p.in, 0, visualScale))
       }
     })
   }
@@ -593,8 +630,10 @@ function buildExternal(external, byPath, radius, innerBounds) {
       extNodes.push(xn)
     }
     xn.count += p.out
-    edges.push(buildRibbon(page, xn, p.out, 0, width(p.out), TNODE_R, EXT_R))
-    flows.push(...buildFlows(page, xn, TNODE_R, EXT_R, p.out, 0))
+    const wMid = width(p.out)
+    if (wMid <= 0) continue
+    edges.push(buildRibbon(page, xn, p.out, 0, wMid, TNODE_R, EXT_R, true))
+    flows.push(...buildFlows(page, xn, TNODE_R, EXT_R, p.out, 0, visualScale))
   }
 
   return { extNodes, edges, flows }
@@ -605,11 +644,12 @@ function buildExternal(external, byPath, radius, innerBounds) {
  * Returns { nodes, edges, flows, extNodes, arcs, bounds } or null when
  * there is nothing to show.
  */
-export function buildTransitionGraph(data, pageTree) {
+export function buildTransitionGraph(data, pageTree, visits = [], visualScale = 1) {
   const internal = collectInternalTransitions(data?.transitions)
   const external = collectExternalPairs(data?.transitions)
   const navOrder = buildNavigationOrder(pageTree)
   const titles = buildTitleMap(pageTree)
+  const readMinutes = buildReadMinutes(visits)
 
   if (!internal.length && !navOrder.size) return null
 
@@ -619,10 +659,10 @@ export function buildTransitionGraph(data, pageTree) {
   layoutAngles(root, unit, weightFn)
 
   const maxDepth = Math.max(1, ...nodes.map((n) => n.depth))
-  const { radius } = positionNodes(nodes, maxDepth, unit, data?.views, titles)
+  const { radius } = positionNodes(nodes, maxDepth, unit, data?.views, titles, readMinutes)
   const arcs = buildFamilyArcs(nodes, radius)
   const pairs = aggregatePairs(internal)
-  const { edges, flows } = buildInternalEdges(pairs, byPath)
+  const { edges, flows } = buildInternalEdges(pairs, byPath, visualScale)
 
   // Tight bounding box of the actual page nodes; family ring arcs can sweep
   // outside the node circle (e.g. a large arc between two siblings on the
@@ -646,7 +686,7 @@ export function buildTransitionGraph(data, pageTree) {
     bounds.y1 = Math.max(bounds.y1, b.y1)
   }
 
-  const ext = buildExternal(external, byPath, radius, bounds)
+  const ext = buildExternal(external, byPath, radius, bounds, visualScale)
   for (const xn of ext.extNodes) {
     bounds.x0 = Math.min(bounds.x0, xn.x - xn.r - pad)
     bounds.y0 = Math.min(bounds.y0, xn.y - xn.r - pad)

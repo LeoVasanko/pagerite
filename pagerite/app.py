@@ -126,13 +126,21 @@ class GeoIP:
         return ""
 
     def city(self, ip: str) -> str:
-        """City name for ``ip``, or "" when unavailable."""
+        """City name for ``ip``, or "" when unavailable.
+
+        GeoIP sometimes appends district names in parentheses (e.g.
+        "Berlin (Bezirk Tempelhof-Schöneberg)"); those are stripped before
+        the value is stored.
+        """
         if not ip or self._reader is None:
             return ""
         try:
             rec = self._reader.get(ip)
             if rec:
-                return (rec.get("city") or {}).get("names", {}).get("en", "")
+                city = (rec.get("city") or {}).get("names", {}).get("en", "")
+                if city:
+                    city = re.sub(r"\s*\([^)]*\)", "", city).strip()
+                return city
         except Exception:
             pass
         return ""
@@ -605,6 +613,12 @@ def _client_ip(request: Request) -> str:
     return forwarded or (request.client.host if request.client else "")
 
 
+def _query_suffix(request: Request) -> str:
+    """The request's query string as a "?..." suffix, or "" when absent."""
+    query = str(request.url.query)
+    return f"?{query}" if query else ""
+
+
 @lru_cache(maxsize=4096)
 def _cached_ptr(ip: str) -> str:
     """Reverse-DNS lookup with in-RAM LRU cache.  Returns the host name or ""."""
@@ -683,7 +697,11 @@ class AnalyticsPing(BaseModel):
     """Navigation ping from pagerite.js (see docs/analytics.md)."""
 
     fr: str = ""
-    to: str
+    to: str | None = None
+    #: 1 from admin clients: scrub the session instead of recording it.
+    hide: int = 0
+    #: Active reading time on ``fr`` (ms), if any.
+    read: int = 0
 
 
 @app.get("/_a", response_model=None)
@@ -716,6 +734,8 @@ async def analytics_ping(ping: AnalyticsPing, request: Request) -> None:
         ip,
         request.headers.get("user-agent", ""),
         request.headers.get("accept-language", ""),
+        hide=bool(ping.hide),
+        read=ping.read,
     )
     if index is not None:
         asyncio.create_task(_enrich_visit(index, ip))
@@ -725,7 +745,8 @@ def _track_entry(path: str, request: Request) -> None:
     """Stash the referer/UTM tags and queue a pending crawler hit for the GET.
 
     Nothing is counted on the GET itself — the client's /_a ping starts the
-    visit, so bots and admin browsing never register as visits.
+    visit, so bots never register as visits.  (Admin clients ping too, but
+    with hide=1, which scrubs their session instead of recording it.)
 
     The devserver's health probe (``GET /?from=devserver.py`` from
     ``127.0.0.1``) is ignored: it is not real traffic and would otherwise be
@@ -739,13 +760,13 @@ def _track_entry(path: str, request: Request) -> None:
     ):
         return
     own_origin = f"https://{urlparse(str(request.base_url)).netloc}"
+    full_path = f"{request.url.path}{_query_suffix(request)}"
     analytics_store.track_entry(
         request.headers.get("referer", ""),
         own_origin,
         _client_ip(request),
         request.headers.get("user-agent", ""),
-        "/" if path == "" else f"/{path}",
-        str(request.url.query),
+        full_path,
     )
 
 
@@ -968,6 +989,13 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
     if path and _is_reserved(path):
         # Invalid slug shape: not a content URL, let FastAPI return its
         # built-in 404 instead of rendering an editable article page.
+        # Scanner telltales (dotpaths like /.env, *.php) classify the IP
+        # as abuse in analytics.
+        analytics_store.track_404(
+            _client_ip(request),
+            request.headers.get("user-agent", ""),
+            f"/{path}{_query_suffix(request)}",
+        )
         raise HTTPException(404)
     chain = resolve(data.menu, path)
     node = chain[-1] if chain else None
@@ -1011,5 +1039,10 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
             if item.published:
                 return RedirectResponse(f"/{slug}")
     if _is_trackable_path(path):
+        analytics_store.track_404(
+            _client_ip(request),
+            request.headers.get("user-agent", ""),
+            f"/{path}{_query_suffix(request)}",
+        )
         _track_entry(path, request)
     return HTMLResponse(views.render_not_found(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html), 404)
