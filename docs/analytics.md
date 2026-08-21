@@ -5,8 +5,9 @@ Struct dumped to disk — separate from the kanta content database, path from
 `PAGERITE_ANALYTICS` (default: the database path with `.kantadb` replaced by
 `.analytics.json`, e.g. `pagerite.analytics.json`).
 
-- `pagerite/analytics.py` — data model (`Analytics`, `Visit`) and the `Store`
-  (in-memory data + session map, atomic JSON persistence).
+- `pagerite/analytics.py` — data model (`Analytics`, `Client`, `Visit`,
+  `CrawlerHit`, `AbuseHit`) and the `Store` (in-memory data + session map,
+  atomic JSON persistence).
 - `pagerite/app.py` — entry-referer stashing in `show_page` (`_track_entry`),
   the `POST /_a` ping endpoint, and `WebSocket /_api/ws/analytics`
   (admin-gated like every `/_api` endpoint).
@@ -42,40 +43,45 @@ The client (`pagerite.js`) POSTs fire-and-forget pings to `/_a` with
   editor open (`body.editing`). Admin noise, not visits.
 - **Admins**: when SSO is in use and the session is known to be an admin,
   the client still pings but adds `hide=1`. The server then records
-  nothing — and if the same (IP, UA) session already had a visit from
-  before logging in, that visit is removed from the JSON along with the
-  counts recorded when it was created (site visit, entry view, entry
-  transition). Views/transitions logged by later pings inside such a visit
-  lack per-event timestamps and are left as-is. With no auth proxy
-  (dev/test) "admin" is everyone's state, so `hide` stays 0 and everything
-  is recorded.
+  nothing — and if the same client session already had a visit from before
+  logging in, that visit is removed from the JSON along with the counts
+  recorded when it was created (site visit, entry view, entry transition).
+  Views/transitions logged by later pings inside such a visit lack
+  per-event timestamps and are left as-is. With no auth proxy (dev/test)
+  "admin" is everyone's state, so `hide` stays 0 and everything is recorded.
 - The server validates `to`: internal paths must be valid slug paths
   ("/" or `[a-z0-9_-]` segments), external ones are re-derived to the
   https origin and accepted only when the client sent exactly that.
-- The initial ping also records the visitor's `User-Agent` and
-  `Accept-Language` headers. The first `Accept-Language` tag is stored as
-  `lang` (e.g. `en-us`) and its region subtag, if present, is stored as
-  an initial `country` (e.g. `US`).
-- The visitor IP is stored.  A reverse-DNS lookup is attempted for each new
-  visit and the result, when available, is cached in RAM and stored as
-  `host`; local/reserved/multicast addresses are skipped.
-- If a DB-IP MMDB file (`dbip-*.mmdb` or `dbip-*.mmdb.gz`) is present in the
-  repository root, it is loaded at startup and used to look up a more accurate
-  `country`.  The MMDB lookup and the reverse-DNS lookup run in background
-  tasks after the visit is stored, so the `/ _a` response is never delayed.
-  The decompressed `dbip-*.mmdb` file is kept in the repository root and
-  ignored by git.  The CLI flag `--dbip` (`uv run pagerite --dbip`) downloads
-  the latest `dbip-city-lite-YYYY-MM.mmdb.gz` from DB-IP before the server
-  starts, skipping the download when the local database is already current and
+- **Client records**: the visitor's IP (IPv4 or IPv6 /64 network), raw
+  `User-Agent` and extracted `Accept-Language` tag are hashed with blake3;
+  the first 6 bytes identify a shared `Client` record.  The `Client` stores
+  the full IP, `User-Agent`, compact `ua_pretty`, `lang`, initial
+  `country` from the language-region subtag, and asynchronously-filled
+  `country`/`city` from DB-IP geoip plus reverse-DNS `host`.  Visits,
+  crawler hits and abuse hits all reference this record by its hash, so
+  client metadata is stored once instead of repeated per event.
+- The visitor IP is stored in the `Client`.  A reverse-DNS lookup is
+  attempted for each new client and the result, when available, is stored as
+  `host`; local/reserved/multicast addresses are skipped.  If a DB-IP MMDB
+  file (`dbip-*.mmdb` or `dbip-*.mmdb.gz`) is present in the repository
+  root, it is loaded at startup and used to look up `country`/`city`.  These
+  lookups run in background tasks after the event is stored, so the `/_a`
+  response is never delayed.  The decompressed `dbip-*.mmdb` file is kept in
+  the repository root and ignored by git.  The CLI flag `--dbip`
+  (`uv run pagerite --dbip`) downloads the latest
+  `dbip-city-lite-YYYY-MM.mmdb.gz` from DB-IP before the server starts,
+  skipping the download when the local database is already current and
   removing older versions after an update; without the flag only an existing
   file is used.
 - **Crawler hits**: every document GET is queued in RAM as a pending crawler
-  hit.  If a ping from the same (IP, User-Agent) pair arrives within 10
-  seconds the hit is discarded; otherwise it is written to `crawlers`.
-  Crawlers do not count as visits or views.  In the analytics viewer, crawler
-  hits are grouped by the same (IP, User-Agent) pair and shown as a trail of
-  internal pages that crawler visited; the crawler table lists the most active
-  crawlers first rather than the most recent hits.
+  hit.  If a ping from the same client arrives within 10 seconds the hit is
+  discarded; otherwise it is written to `crawlers`.  Crawlers do not count as
+  visits or views.  The `Accept-Language` header is stored on the shared
+  `Client` immediately; reverse-DNS host names and DB-IP geoip
+  country/city are filled in asynchronously, just like for real visits.  In
+  the analytics viewer, crawler hits are grouped by client hash and shown as
+  a trail of internal pages that crawler visited; the crawler table lists
+  the most active crawlers first rather than the most recent hits.
 - **Abuse (scanner) hits**: a 404 for a telltale path — any URL segment
   starting with a dot (`/.env`, `/.git/config`) or ending in `.php` —
   classifies the source IP as abuse immediately, and ten plain 404s from one
@@ -86,51 +92,55 @@ The client (`pagerite.js`) POSTs fire-and-forget pings to `/_a` with
   IP is recorded as an abuse hit with the full request path (query string
   included), and its pings are ignored.  The classified IP set (`abuse_ips`)
   is persisted in the JSON file; the plain-404 counters are RAM-only.  In the
-  viewer, abuse hits are grouped by IP (never by UA — scanners randomize
-  theirs) in a separate "Abuse" table.  Identical paths are collapsed into
-  one entry with their hit count; flagged paths that triggered classification
-  are lifted to the top, followed by other 404s and then document GETs from
-  the abuser.  Raw User-Agent strings are shown one per line with their
-  occurrence counts, and the full lists are click-to-copy.
+  viewer, abuse hits are grouped by IP (never by client/UA — scanners
+  randomize theirs) in a separate "Abuse" table.  Identical paths are
+  collapsed into one entry with their hit count; flagged paths that
+  triggered classification are lifted to the top, followed by other 404s and
+  then document GETs from the abuser.  Raw User-Agent strings are shown one
+  per line with their occurrence counts, and the full lists are click-to-copy.
 
 ## Visits and sessions
 
-There are no cookies. A visit is tied together by the (IP, User-Agent) pair
-(IP from the first `X-Forwarded-For` hop — we sit behind a proxy — else the
-direct peer): the first ping from a pair starts a new visit, subsequent
-pings extend it. Pings arriving with no known session (server restart)
-start a fresh visit from the first ping — treated as missing data rather
-than dropped. The (IP, UA) → visit map and the IP → entry-referer/UTM
-tables are in-memory only, but the IP and any resolvable reverse-DNS host
-name are stored on the `Visit` record itself.
+There are no cookies. A visit is tied together by a client hash — the first
+6 bytes of a blake3 digest over the prettified IP (IPv4 unchanged, IPv6
+/64 network), the raw `User-Agent` string and the extracted
+`Accept-Language` tag.  The first ping from a client hash starts a new
+visit; subsequent pings extend it.  Pings arriving with no known session
+(server restart) start a fresh visit from the first ping — treated as
+missing data rather than dropped.  The client-hash → visit map and the IP →
+entry-referer/UTM tables are in-memory only; client metadata is stored in
+`Analytics.clients` keyed by the client hash.
+
+Each `Client` record:
+
+- `ip` — visitor IP address (first `X-Forwarded-For` hop, or direct peer),
+- `host` — reverse-DNS host name for `ip` when resolvable, else `""`,
+- `lang` — first `Accept-Language` tag, lowercased (e.g. `"en-us"`),
+- `country` — two-letter country code.  Initially derived from the
+  `Accept-Language` region subtag, but overwritten by the DB-IP MMDB result
+  when a database is available,
+- `city` — city name from the DB-IP MMDB lookup, when available,
+- `ua` — raw `User-Agent` string,
+- `ua_pretty` — compact display form of the UA (browser/OS/device) when
+  parsable, otherwise the raw string.
 
 Each `Visit` record:
 
 - `start` — timestamp of the first event,
 - `entry` — first page (path) seen,
 - `referer` — external https origin of the initial load, `""` for direct,
-- `ip` — visitor IP address (first `X-Forwarded-For` hop, or direct peer),
-- `host` — reverse-DNS host name for `ip` when resolvable, else `""`,
+- `client` — 6-byte blake3 hash referencing `Analytics.clients`,
 - `trail` — everything seen afterwards in first-seen order: page paths and
   external exit URLs. Re-visiting an already seen page (incl. the entry)
   does not append.
-- `lang` — first `Accept-Language` tag, lowercased (e.g. `en-us`),
-- `country` — two-letter country code.  Initially derived from the
-  `Accept-Language` region subtag, but overwritten by the DB-IP MMDB result
-  when a database is available,
-- `city` — city name from the DB-IP MMDB lookup, when available,
-- `ua` — raw `User-Agent` string from the initial ping,
-- `ua_pretty` — compact display form of the UA (browser/OS/device) when
-  parsable, otherwise the raw string,
 - `utm` — `utm_*` query parameters from the landing URL, as a dict.
+- `read` — active reading time per path (seconds), keyed by path.
 
 Each `CrawlerHit` record:
 
 - `start` — timestamp of the document GET,
 - `entry` — page path requested,
-- `ip` — IP address,
-- `ua` — raw `User-Agent` header,
-- `ua_pretty` — compact display form of the UA when parsable,
+- `client` — 6-byte blake3 hash referencing `Analytics.clients`,
 - `referer` — external https origin of the request, `""` for direct/none,
 - `query` — raw query string of the request.
 
@@ -138,20 +148,18 @@ Each `AbuseHit` record:
 
 - `start` — timestamp of the request,
 - `path` — full request path including the query string (e.g. `/.env?x=1`),
-- `ip` — IP address (the grouping key for abusers),
-- `ua` — raw `User-Agent` header,
-- `ua_pretty` — compact display form of the UA when parsable,
+- `client` — 6-byte blake3 hash referencing `Analytics.clients`,
 - `flag` — true for the path that triggered abuse classification (telltale
   path or the 404 that crossed the threshold),
 - `is_404` — true for 404 responses, false for document GETs from the
   abuser.
 
-Crawler hits are grouped by (IP, User-Agent) in the analytics viewer; abuse
-hits are grouped by IP alone.  In the Abuse table identical paths are
-collapsed with their counts; flagged paths that triggered classification are
-lifted to the top, followed by other 404s and then document GETs from the
-abuser.  Within each category paths are sorted by count descending, then by
-their earliest hit.
+Crawler hits are grouped by client hash in the analytics viewer; abuse hits
+are grouped by IP alone (resolved from the referenced `Client`).  In the
+Abuse table identical paths are collapsed with their counts; flagged paths
+that triggered classification are lifted to the top, followed by other 404s
+and then document GETs from the abuser.  Within each category paths are
+sorted by count descending, then by their earliest hit.
 
 ## Aggregates
 

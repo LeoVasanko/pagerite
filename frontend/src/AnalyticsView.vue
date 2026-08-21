@@ -16,8 +16,8 @@ import {
   formatCrawlerRows,
   formatVisitRows,
 } from './analytics/format.js'
-import * as flagSvgs from 'country-flag-icons/string/3x2'
 import TrailLink from './TrailLink.vue'
+import VisitorCell from './VisitorCell.vue'
 import TransitionGraph from './TransitionGraph.vue'
 import VisitorCharts from './VisitorCharts.vue'
 
@@ -91,23 +91,12 @@ watch(range, (r) => {
   history.replaceState(null, '', url)
 })
 
-const visitRows = computed(() => formatVisitRows(visits.value, pageTree.value, now.value))
+const clients = computed(() => data.value?.clients || {})
+const visitRows = computed(() => formatVisitRows(visits.value, clients.value, pageTree.value, now.value))
 const crawlers = computed(() => data.value?.crawlers || [])
-const crawlerRows = computed(() => formatCrawlerRows(crawlers.value, pageTree.value, now.value))
-const abuseRows = computed(() => formatAbuseRows(data.value?.abuse || [], now.value))
+const crawlerRows = computed(() => formatCrawlerRows(crawlers.value, clients.value, pageTree.value, now.value))
+const abuseRows = computed(() => formatAbuseRows(data.value?.abuse || [], clients.value, now.value))
 
-function flagSvg(code) {
-  return flagSvgs[code?.toUpperCase()] || ''
-}
-
-function countryName(code) {
-  if (!code) return ''
-  try {
-    return new Intl.DisplayNames(['en'], { type: 'region' }).of(code.toUpperCase())
-  } catch {
-    return ''
-  }
-}
 </script>
 
 <template>
@@ -154,24 +143,17 @@ function countryName(code) {
                     <span v-if="v.utm && v.utm !== '—'" class="utm-tag small muted" :title="v.utmTitle">{{ v.utm }}</span>
                     <TrailLink v-for="(s, si) in v.trail" :key="si" :step="s" @close="$emit('close')" />
                   </td>
-                  <td class="ip-locale-cell" :class="{ 'host-cell': v.isHost }">
-                    <div class="ip-locale-rows">
-                      <div class="ip-locale-row">
-                        <div class="locale-line">
-                          <span v-if="flagSvg(v.country)" class="flag" v-html="flagSvg(v.country)" :title="countryName(v.country) || v.country"></span>
-                          <template v-if="v.city && v.city !== '—'"><small class="city-name muted">{{ v.city }}</small></template>
-                          <template v-else-if="!flagSvg(v.country)">—</template>
-                        </div>
-                        <div class="ip-line"><span class="clickable-ip small muted"
-                                   :title="v.ip"
-                                   @click="copyIp(v.ip, $event)">{{ v.ipDisplay }}</span></div>
-                      </div>
-                      <div class="ip-locale-row">
-                        <div class="ua-line"><small class="muted" :title="v.uaRaw">{{ v.ua }}</small></div>
-                        <div v-if="v.lang && v.lang !== '—'" class="locale-lang"><small class="muted">{{ v.langDisplay }}</small></div>
-                      </div>
-                    </div>
-                  </td>
+                  <VisitorCell
+                    :ip="v.ip"
+                    :ip-display="v.ipDisplay"
+                    :ua="v.ua"
+                    :ua-raw="v.uaRaw"
+                    :country="v.country"
+                    :city="v.city"
+                    :lang="v.lang"
+                    :lang-display="v.langDisplay"
+                    :is-host="v.isHost"
+                  />
                   <td class="last-seen muted"
                       :title="v.lastSeenLocal"
                       @click="copyList(v.lastSeenIso, $event)">{{ v.lastSeen }}</td>
@@ -189,7 +171,7 @@ function countryName(code) {
               <thead>
                 <tr>
                   <th>pages</th>
-                  <th>ip / ua</th>
+                  <th>visitor</th>
                   <th class="last-seen">last seen</th>
                 </tr>
               </thead>
@@ -198,12 +180,17 @@ function countryName(code) {
                   <td class="trail">
                     <TrailLink v-for="(s, si) in c.pages" :key="si" :step="s" :count="s.count" @close="$emit('close')" />
                   </td>
-                  <td class="ip-ua-cell">
-                    <div><span class="clickable-ip small muted"
-                               :title="c.ip"
-                               @click="copyIp(c.ip, $event)">{{ c.ipDisplay }}</span></div>
-                    <div class="ua-line"><small class="muted" :title="c.uaRaw">{{ c.ua }}</small></div>
-                  </td>
+                  <VisitorCell
+                    :ip="c.ip"
+                    :ip-display="c.ipDisplay"
+                    :ua="c.ua"
+                    :ua-raw="c.uaRaw"
+                    :country="c.country"
+                    :city="c.city"
+                    :lang="c.lang"
+                    :lang-display="c.langDisplay"
+                    :is-host="c.isHost"
+                  />
                   <td class="last-seen muted"
                       :title="c.lastSeenLocal"
                       @click="copyList(c.lastSeenIso, $event)">{{ c.lastSeen }}</td>
@@ -221,7 +208,7 @@ function countryName(code) {
               <thead>
                 <tr>
                   <th>paths</th>
-                  <th>ip / uas</th>
+                  <th>visitor</th>
                   <th class="last-seen">last seen</th>
                 </tr>
               </thead>
@@ -440,18 +427,11 @@ function countryName(code) {
   hyphens: none;
 }
 
-.visit-table .clickable-ip,
+.visit-table :deep(.clickable-ip),
 .visit-table .clickable-list,
 .visit-table .last-seen {
   cursor: pointer;
   position: relative;
-}
-
-.visit-table .ip-locale-cell {
-  width: 36ch;
-  max-width: 36ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .visit-table .ip-ua-cell {
@@ -462,79 +442,7 @@ function countryName(code) {
   text-overflow: ellipsis;
 }
 
-.visit-table .host-cell {
-  text-align: right;
-}
-
-.visit-table .ip-locale-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-}
-
-.visit-table .ip-locale-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.visit-table .ip-locale-row > * {
-  min-width: 0;
-}
-
-.visit-table .ip-locale-row .locale-line,
-.visit-table .ip-locale-row .ip-line,
-.visit-table .ip-locale-row .ua-line {
-  flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.visit-table .ip-locale-row .locale-lang {
-  flex: 0 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: right;
-}
-
-.visit-table .ip-locale-row .locale-line {
-  text-align: left;
-}
-
-.visit-table .ip-locale-row .ip-line {
-  text-align: right;
-}
-
-.visit-table .ip-locale-row .ua-line {
-  text-align: left;
-}
-
-.visit-table .locale-line {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-}
-
-.visit-table .city-name {
-  display: inline-block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  vertical-align: middle;
-}
-
-.visit-table .ua-line {
-  text-align: right;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-
-.visit-table .copy-popup {
+.visit-table :deep(.copy-popup) {
   position: absolute;
   bottom: calc(100% + 0.25rem);
   left: 50%;
@@ -547,28 +455,6 @@ function countryName(code) {
   white-space: nowrap;
   pointer-events: none;
   z-index: 10;
-}
-
-.visit-table .locale-line .flag {
-  display: inline-flex;
-  width: 18px;
-  height: 12px;
-  border-radius: 2px;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2) inset;
-  vertical-align: middle;
-}
-
-.visit-table .locale-line .flag :deep(svg) {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
-.visit-table .locale-line .city-name {
-  margin-left: 0.3rem;
-  vertical-align: middle;
 }
 
 .crawler-top-uas {

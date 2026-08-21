@@ -305,32 +305,52 @@ export function formatCounts(entries) {
 
 /**
  * Count distinct User-Agent strings among crawler hits, most common first.
- * Returns an array of [ua, count] pairs.
+ * Returns an array of [ua, count] pairs.  ``clients`` maps client hashes to
+ * client records.
  */
-export function countCrawlerUas(crawlers) {
+export function countCrawlerUas(crawlers, clients) {
   const counts = {}
   for (const c of crawlers || []) {
-    const value = c.ua_pretty || c.ua || '(no UA)'
+    const client = (clients || {})[c.client] || {}
+    const value = client.ua_pretty || client.ua || '(no UA)'
     counts[value] = (counts[value] || 0) + 1
   }
   return Object.entries(counts).sort((a, b) => b[1] - a[1])
 }
 
 /**
- * Group raw crawler hits by the same (ip, ua) pair we use to tell a real
- * visitor from a crawler, and format each group as a row showing every
- * internal page that crawler visited.  Rows are sorted by total hits,
- * most active crawler first, rather than by most recent hit.
+ * Reduce a reverse-DNS hostname to its right-most components that fit
+ * within ``limit`` characters.  This keeps the meaningful main domain
+ * while avoiding absurdly long subdomains like ``xxx.yyy.zzz...provider.net``.
  */
-export function formatCrawlerRows(crawlers, pageTree, now = Date.now()) {
+export function mainDomain(host, limit = 24) {
+  if (!host) return host
+  const labels = host.split('.').filter(Boolean)
+  if (!labels.length) return host
+  const parts = [labels.pop()]
+  while (labels.length) {
+    const next = labels[labels.length - 1]
+    const candidate = `${next}.${parts.join('.')}`
+    if (candidate.length > limit) break
+    parts.unshift(labels.pop())
+  }
+  return parts.join('.')
+}
+
+/**
+ * Group raw crawler hits by client hash and format each group as a row showing
+ * every internal page that crawler visited.  Rows are sorted by total hits,
+ * most active crawler first, rather than by most recent hit.
+ * ``clients`` maps client hashes to client records.
+ */
+export function formatCrawlerRows(crawlers, clients, pageTree, now = Date.now()) {
   const titles = buildTitleMap(pageTree)
   const groups = new Map()
   for (const c of crawlers || []) {
-    const key = `${c.ip}\0${c.ua}`
-    const g = groups.get(key) || {
-      ip: c.ip || '',
-      ua: c.ua_pretty || c.ua || '—',
-      uaRaw: c.ua || '',
+    const client = (clients || {})[c.client] || {}
+    const g = groups.get(c.client) || {
+      clientHash: c.client,
+      client,
       lastStart: 0,
       pages: new Map(),
     }
@@ -339,7 +359,7 @@ export function formatCrawlerRows(crawlers, pageTree, now = Date.now()) {
     if (c.entry?.startsWith('/')) {
       g.pages.set(c.entry, (g.pages.get(c.entry) || 0) + 1)
     }
-    groups.set(key, g)
+    groups.set(c.client, g)
   }
   const totalHits = (g) => {
     let n = 0
@@ -349,19 +369,29 @@ export function formatCrawlerRows(crawlers, pageTree, now = Date.now()) {
   return [...groups.values()]
     .sort((a, b) => totalHits(b) - totalHits(a) || b.lastStart - a.lastStart)
     .slice(0, 10)
-    .map((g) => ({
-      lastSeen: formatWhen(g.lastStart, now),
-      lastSeenIso: formatWhenIso(g.lastStart),
-      lastSeenLocal: formatWhenLocal(g.lastStart),
-      pages: [...g.pages.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .map(([path, count]) => ({ ...stepOf(path, titles), count })),
-      ip: g.ip,
-      ipDisplay: hostIP(g.ip) || g.ip || '—',
-      ua: g.ua,
-      uaRaw: g.uaRaw,
-      total: totalHits(g),
-    }))
+    .map((g) => {
+      const client = g.client || {}
+      const host = client.host || ''
+      const isHost = !!host
+      return {
+        lastSeen: formatWhen(g.lastStart, now),
+        lastSeenIso: formatWhenIso(g.lastStart),
+        lastSeenLocal: formatWhenLocal(g.lastStart),
+        pages: [...g.pages.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .map(([path, count]) => ({ ...stepOf(path, titles), count })),
+        ip: client.ip || '',
+        ipDisplay: isHost ? mainDomain(host) : hostIP(client.ip) || client.ip || '—',
+        isHost,
+        ua: client.ua_pretty || client.ua || '—',
+        uaRaw: client.ua || '',
+        lang: client.lang || '—',
+        langDisplay: formatLang(client.lang),
+        country: client.country || '—',
+        city: client.city || '—',
+        total: totalHits(g),
+      }
+    })
 }
 
 /**
@@ -374,12 +404,15 @@ export function formatCrawlerRows(crawlers, pageTree, now = Date.now()) {
  * count descending, then earliest first.  UAs are shown raw, one per line,
  * with their occurrence counts.  Paths are shown verbatim (query string
  * included), not resolved against the page tree.
+ * ``clients`` maps client hashes to client records.
  */
-export function formatAbuseRows(abuse, now = Date.now()) {
+export function formatAbuseRows(abuse, clients, now = Date.now()) {
   const groups = new Map()
   for (const a of abuse || []) {
-    const g = groups.get(a.ip) || {
-      ip: a.ip || '',
+    const client = (clients || {})[a.client] || {}
+    const ip = client.ip || ''
+    const g = groups.get(ip) || {
+      ip,
       pathCounts: new Map(),
       rawUas: [],
       uaCounts: new Map(),
@@ -400,10 +433,10 @@ export function formatAbuseRows(abuse, now = Date.now()) {
     if (a.flag) existing.flag = true
     if (!a.is_404) existing.is_404 = false
     g.pathCounts.set(path, existing)
-    const ua = a.ua || '(no UA)'
+    const ua = client.ua || '(no UA)'
     g.rawUas.push(ua)
     g.uaCounts.set(ua, (g.uaCounts.get(ua) || 0) + 1)
-    groups.set(a.ip, g)
+    groups.set(ip, g)
   }
   const totalHits = (g) => {
     let n = 0
@@ -448,33 +481,16 @@ export function formatAbuseRows(abuse, now = Date.now()) {
 }
 
 /**
- * Reduce a reverse-DNS hostname to its right-most components that fit
- * within ``limit`` characters.  This keeps the meaningful main domain
- * while avoiding absurdly long subdomains like ``xxx.yyy.zzz...provider.net``.
- */
-function mainDomain(host, limit = 24) {
-  if (!host) return host
-  const labels = host.split('.').filter(Boolean)
-  if (!labels.length) return host
-  const parts = [labels.pop()]
-  while (labels.length) {
-    const next = labels[labels.length - 1]
-    const candidate = `${next}.${parts.join('.')}`
-    if (candidate.length > limit) break
-    parts.unshift(labels.pop())
-  }
-  return parts.join('.')
-}
-
-/**
  * Format raw visit records as rows for a technical table.  Returns objects
  * with display strings; missing values become "—".  ``trail`` starts with the
  * external referer (when present), then the entry page and any further internal
  * pages or external exit origins. Only the 20 most recent visits are shown.
+ * ``clients`` maps client hashes to client records.
  */
-export function formatVisitRows(visits, pageTree, now = Date.now()) {
+export function formatVisitRows(visits, clients, pageTree, now = Date.now()) {
   const titles = buildTitleMap(pageTree)
   return [...(visits || [])].reverse().slice(0, 20).map((v) => {
+    const client = (clients || {})[v.client] || {}
     const trail = [v.entry, ...(v.trail || [])]
       .map((p) => stepOf(p, titles))
       .filter(Boolean)
@@ -485,24 +501,24 @@ export function formatVisitRows(visits, pageTree, now = Date.now()) {
       .map(([k, value]) => `${k}=${value}`)
       .join(', ')
     const dash = (s) => (s || '—')
-    const host = v.host || ''
+    const host = client.host || ''
     const isHost = !!host
     return {
       lastSeen: formatWhen(v.start, now),
       lastSeenIso: formatWhenIso(v.start),
       lastSeenLocal: formatWhenLocal(v.start),
-      langDisplay: formatLang(v.lang),
+      langDisplay: formatLang(client.lang),
       trail,
       refererStep: stepOf(v.referer, titles),
       referer: dash(v.referer),
-      ip: v.ip || '',
-      ipDisplay: isHost ? mainDomain(host) : hostIP(v.ip) || v.ip || '—',
+      ip: client.ip || '',
+      ipDisplay: isHost ? mainDomain(host) : hostIP(client.ip) || client.ip || '—',
       isHost,
-      lang: dash(v.lang),
-      country: dash(v.country),
-      city: dash(v.city),
-      ua: v.ua_pretty || v.ua || '—',
-      uaRaw: v.ua || '',
+      lang: dash(client.lang),
+      country: dash(client.country),
+      city: dash(client.city),
+      ua: client.ua_pretty || client.ua || '—',
+      uaRaw: client.ua || '',
       utm: utm || '—',
       utmTitle,
     }

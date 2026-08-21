@@ -652,14 +652,21 @@ async def _geoip_city(ip: str) -> str:
     return await asyncio.to_thread(_geoip.city, ip)
 
 
-async def _enrich_visit(index: int, ip: str) -> None:
-    """Run non-blocking reverse-DNS and geoip enrichment for a new visit."""
-    if not ip:
+async def _enrich_client(client_hash: bytes) -> None:
+    """Run non-blocking reverse-DNS and geoip enrichment for a client."""
+    client = analytics_store.data.clients.get(client_hash)
+    if not client or not client.ip:
         return
-    host = await _lookup_host(ip)
-    country = await _geoip_country(ip)
-    city = await _geoip_city(ip)
-    analytics_store.enrich_visit(index, host=host, country=country, city=city)
+    host = await _lookup_host(client.ip)
+    country = await _geoip_country(client.ip)
+    city = await _geoip_city(client.ip)
+    analytics_store.enrich_client(client_hash, host=host, country=country, city=city)
+
+
+def _schedule_client_enrichment(client_hashes: list[bytes]) -> None:
+    """Start background host/geoip enrichment for the given client hashes."""
+    for client_hash in client_hashes:
+        asyncio.create_task(_enrich_client(client_hash))
 
 
 async def _broadcast_analytics() -> None:
@@ -728,7 +735,7 @@ async def analytics_ping(ping: AnalyticsPing, request: Request) -> None:
     the response is never delayed by slow DNS or the first MMDB decompress.
     """
     ip = _client_ip(request)
-    index = analytics_store.ping(
+    visit_index, flushed_clients = analytics_store.ping(
         ping.fr,
         ping.to,
         ip,
@@ -737,11 +744,13 @@ async def analytics_ping(ping: AnalyticsPing, request: Request) -> None:
         hide=bool(ping.hide),
         read=ping.read,
     )
-    if index is not None:
-        asyncio.create_task(_enrich_visit(index, ip))
+    if visit_index is not None:
+        visit = analytics_store.data.visits[visit_index]
+        asyncio.create_task(_enrich_client(visit.client))
+    _schedule_client_enrichment(flushed_clients)
 
 
-def _track_entry(path: str, request: Request) -> None:
+def _track_entry(path: str, request: Request) -> list[bytes]:
     """Stash the referer/UTM tags and queue a pending crawler hit for the GET.
 
     Nothing is counted on the GET itself — the client's /_a ping starts the
@@ -752,21 +761,25 @@ def _track_entry(path: str, request: Request) -> None:
     ``127.0.0.1``) is ignored: it is not real traffic and would otherwise be
     logged as a crawler hit.  The root-path and localhost checks prevent
     remote visitors from hiding traffic with the same query string.
+
+    Returns the client hashes of any pending crawler hits flushed to persistent
+    storage, so callers can schedule async geoip and reverse-DNS enrichment.
     """
     if (
         path == ""
         and str(request.url.query) == "from=devserver.py"
         and _client_ip(request) == "127.0.0.1"
     ):
-        return
+        return []
     own_origin = f"https://{urlparse(str(request.base_url)).netloc}"
     full_path = f"{request.url.path}{_query_suffix(request)}"
-    analytics_store.track_entry(
+    return analytics_store.track_entry(
         request.headers.get("referer", ""),
         own_origin,
         _client_ip(request),
         request.headers.get("user-agent", ""),
         full_path,
+        request.headers.get("accept-language", ""),
     )
 
 
@@ -986,16 +999,20 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
     placeholder page (nav links point straight at its first child).
     """
     path = path.strip("/")
+    ua = request.headers.get("user-agent", "")
+    accept_language = request.headers.get("accept-language", "")
     if path and _is_reserved(path):
         # Invalid slug shape: not a content URL, let FastAPI return its
         # built-in 404 instead of rendering an editable article page.
         # Scanner telltales (dotpaths like /.env, *.php) classify the IP
         # as abuse in analytics.
-        analytics_store.track_404(
+        client_hash = analytics_store.track_404(
             _client_ip(request),
-            request.headers.get("user-agent", ""),
+            ua,
             f"/{path}{_query_suffix(request)}",
+            accept_language,
         )
+        asyncio.create_task(_enrich_client(client_hash))
         raise HTTPException(404)
     chain = resolve(data.menu, path)
     node = chain[-1] if chain else None
@@ -1010,7 +1027,8 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
         if request.headers.get("if-none-match") == etag:
             return Response(status_code=304)
         if _is_trackable_path(path):
-            _track_entry(path, request)
+            flushed = _track_entry(path, request)
+            _schedule_client_enrichment(flushed)
         return HTMLResponse(
             views.render_page(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html, str(request.base_url).rstrip("/")),
             headers={
@@ -1023,7 +1041,8 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
         # Category label without a landing page: placeholder with the pen
         # to create it (404 — no page here, but the node is real).
         if _is_trackable_path(path):
-            _track_entry(path, request)
+            flushed = _track_entry(path, request)
+            _schedule_client_enrichment(flushed)
         return HTMLResponse(
             views.render_category(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html),
             404,
@@ -1039,10 +1058,13 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
             if item.published:
                 return RedirectResponse(f"/{slug}")
     if _is_trackable_path(path):
-        analytics_store.track_404(
+        client_hash = analytics_store.track_404(
             _client_ip(request),
-            request.headers.get("user-agent", ""),
+            ua,
             f"/{path}{_query_suffix(request)}",
+            accept_language,
         )
-        _track_entry(path, request)
+        asyncio.create_task(_enrich_client(client_hash))
+        flushed = _track_entry(path, request)
+        _schedule_client_enrichment(flushed)
     return HTMLResponse(views.render_not_found(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html), 404)

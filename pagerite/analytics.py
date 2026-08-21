@@ -10,14 +10,16 @@ Admin clients ping with ``hide=1``, which records nothing and removes any
 visit the session accumulated before logging in.  Scanner telltale 404s
 (dotpaths, *.php) classify the source IP as abuse; its hits — including
 earlier crawler hits — are moved to the abuse list, which the viewer
-groups by IP with full request paths.  The session map is in-memory only.
-The visitor IP and, when available, its reverse-DNS host name are stored
-on the visit record itself.
+groups by IP with full request paths.  Client metadata (IP, UA, language,
+country/city, host) is stored once per unique client hash and referenced
+from visits, crawler hits and abuse hits.  The session map is in-memory
+only.
 
 Data is a msgspec Struct JSON-dumped to its own file (not the kanta db),
 rewritten atomically on every recorded event.
 """
 
+import ipaddress
 import os
 import re
 import tempfile
@@ -27,6 +29,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import blake3
 import msgspec
 from ua_parser import parse
 
@@ -56,34 +59,46 @@ def _compact_user_agent(ua: str) -> str:
     return " ".join(p for p in parts if p).strip()
 
 
+class Client(msgspec.Struct, omit_defaults=True):
+    """Client metadata shared by visits, crawler hits and abuse hits.
+
+    Identified by a 6-byte blake3 hash of the IPv4 address or IPv6 /64
+    network, the full User-Agent string and the extracted language tag.
+    Country/city/host are filled in asynchronously after the first event.
+    """
+
+    #: Visitor IP address (first X-Forwarded-For hop or direct peer).
+    ip: str = ""
+    #: Reverse-DNS host name for ``ip`` when resolvable, else "".
+    host: str = ""
+    #: First Accept-Language tag, lowercased (e.g. "en-us").
+    lang: str = ""
+    #: Two-letter country code from the DB-IP geoip lookup, or "".
+    country: str = ""
+    #: City name from the DB-IP geoip lookup, or "".
+    city: str = ""
+    #: Raw User-Agent header.
+    ua: str = ""
+    #: Compact display form of ``ua`` (browser/OS/device) when parsable.
+    ua_pretty: str = ""
+
+
 class Visit(msgspec.Struct, omit_defaults=True):
     """One visit: the initial-load data plus everything seen afterwards.
 
     ``trail`` holds page paths and external exit URLs in first-seen
     order; re-visiting an already seen page does not append. The entry
-    page itself is in ``entry``, not in the trail.
+    page itself is in ``entry``, not in the trail.  Client metadata is
+    held in ``Analytics.clients`` keyed by ``client``.
     """
 
     start: datetime
     entry: str
     #: External https origin of the initial load, "" for direct visits.
     referer: str = ""
-    #: Visitor IP address (first X-Forwarded-For hop or direct peer).
-    ip: str = ""
-    #: Reverse-DNS host name for ``ip`` when resolvable, else "".
-    host: str = ""
+    #: 6-byte blake3 hash referencing ``Analytics.clients``.
+    client: bytes = b""
     trail: list[str] = []
-    #: First Accept-Language tag, lowercased (e.g. "en-us").
-    lang: str = ""
-    #: Two-letter region subtag derived from ``lang`` (e.g. "US"), or "".
-    #: Overwritten by the DB-IP geoip lookup when a database is available.
-    country: str = ""
-    #: City name from the DB-IP geoip lookup, or "".
-    city: str = ""
-    #: Raw User-Agent header from the initial ping.
-    ua: str = ""
-    #: Compact display form of ``ua`` (browser/OS/device) when parsable.
-    ua_pretty: str = ""
     #: UTM query parameters from the landing URL, keyed by parameter name.
     utm: dict[str, str] = {}
     #: Active reading time per path (seconds), keyed by path.
@@ -91,14 +106,15 @@ class Visit(msgspec.Struct, omit_defaults=True):
 
 
 class CrawlerHit(msgspec.Struct, omit_defaults=True):
-    """A document GET that was never followed by an analytics ping."""
+    """A document GET that was never followed by an analytics ping.
+
+    Client metadata is held in ``Analytics.clients`` keyed by ``client``.
+    """
 
     start: datetime
     entry: str
-    ip: str = ""
-    ua: str = ""
-    #: Compact display form of ``ua`` when parsable.
-    ua_pretty: str = ""
+    #: 6-byte blake3 hash referencing ``Analytics.clients``.
+    client: bytes = b""
     #: External https origin of the initial load, "" for direct/none.
     referer: str = ""
     #: Raw query string of the landing URL (UTM tags can be parsed from it).
@@ -112,15 +128,14 @@ class AbuseHit(msgspec.Struct, omit_defaults=True):
     kept: the interesting part is exactly which paths were probed.
     ``flag`` marks the path that triggered classification; ``is_404``
     distinguishes 404 responses from document GETs made by the abuser.
+    Client metadata is held in ``Analytics.clients`` keyed by ``client``.
     """
 
     start: datetime
     #: Full request path including the query string (e.g. "/.env?x=1").
     path: str
-    ip: str = ""
-    ua: str = ""
-    #: Compact display form of ``ua`` when parsable.
-    ua_pretty: str = ""
+    #: 6-byte blake3 hash referencing ``Analytics.clients``.
+    client: bytes = b""
     #: True when this path triggered abuse classification (telltale path
     #: or the 404 that crossed the threshold).
     flag: bool = False
@@ -137,6 +152,8 @@ class Analytics(msgspec.Struct, omit_defaults=True):
     crawlers: list[CrawlerHit] = []
     #: Requests from abusive IPs (see AbuseHit), grouped by IP in the viewer.
     abuse: list[AbuseHit] = []
+    #: Client metadata keyed by 6-byte blake3 hash.
+    clients: dict[bytes, Client] = {}
     #: IPs classified as scanners/abusers (keys; values always True).
     abuse_ips: dict[str, bool] = {}
     #: Page transitions per 5-minute bucket (sparse):
@@ -236,8 +253,36 @@ def _is_abuse_path(path: str) -> bool:
     return bool(_ABUSE_PATH.search(path.split("?")[0]))
 
 
+def _network_ip(ip: str) -> str:
+    """IPv4 address unchanged, IPv6 collapsed to its /64 network address.
+
+    We hash the network rather than the full address so that clients in the
+    same /64 (a typical end-user allocation) are treated as one visitor.
+    """
+    if not ip:
+        return ip
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return ip
+    if isinstance(addr, ipaddress.IPv6Address):
+        return str(ipaddress.IPv6Network(f"{ip}/64", strict=False).network_address)
+    return ip
+
+
+def _client_hash(ip: str, ua: str, lang: str) -> bytes:
+    """6-byte blake3 digest identifying a visitor/client tuple.
+
+    The key is the prettified IP (IPv6 /64), the raw UA string and the
+    extracted language tag, separated by null bytes.
+    """
+    return blake3.blake3(
+        f"{_network_ip(ip)}\0{ua}\0{lang}".encode()
+    ).digest()[:6]
+
+
 class Store:
-    """In-memory analytics data plus the (IP, UA) -> visit session map."""
+    """In-memory analytics data plus the client-hash -> visit session map."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -247,8 +292,8 @@ class Store:
                 self.data = msgspec.json.decode(path.read_bytes(), type=Analytics)
             except msgspec.DecodeError, OSError:
                 pass  # legacy schema / corrupt or unreadable file: start fresh
-        #: (ip, user-agent) -> index of the current visit in data.visits
-        self.sessions: dict[tuple[str, str], int] = {}
+        #: client hash -> index of the current visit in data.visits
+        self.sessions: dict[bytes, int] = {}
         #: ip -> external https origin of the latest document GET carrying
         #: one, stashed for the visit the client's initial ping starts.
         #: Internal or absent referers never touch the table.
@@ -296,20 +341,26 @@ class Store:
         else:
             self._notify()
 
-    def _flush_crawlers(self, now: datetime | None = None) -> None:
-        """Move expired pending crawler hits into persistent ``data.crawlers``."""
+    def _flush_crawlers(self, now: datetime | None = None) -> list[bytes]:
+        """Move expired pending crawler hits into persistent ``data.crawlers``.
+
+        Returns the client hashes of the newly flushed hits so callers can
+        schedule async enrichment.
+        """
         if not self.pending_crawlers:
-            return
+            return []
         now = now or datetime.now(UTC)
         cutoff = now - _CRAWLER_TIMEOUT
         expired: list[CrawlerHit] = []
         remaining: list[CrawlerHit] = []
         for hit in self.pending_crawlers:
             (expired if hit.start <= cutoff else remaining).append(hit)
-        if expired:
-            self.pending_crawlers = remaining
-            self.data.crawlers.extend(expired)
-            self._save()
+        if not expired:
+            return []
+        self.pending_crawlers = remaining
+        self.data.crawlers.extend(expired)
+        self._save()
+        return [hit.client for hit in expired]
 
     def _count(self, table: dict[str, int], key: str) -> None:
         table[key] = table.get(key, 0) + 1
@@ -357,24 +408,72 @@ class Store:
             if i > index:
                 self.sessions[key] = i - 1
 
-    def _abuse_hit(
+    def _client_ip(self, client_hash: bytes) -> str:
+        """Return the IP stored for ``client_hash``, or "" if missing."""
+        client = self.data.clients.get(client_hash)
+        return client.ip if client else ""
+
+    def _ensure_client(
         self,
         ip: str,
         ua: str,
+        lang: str,
+        *,
+        country: str = "",
+    ) -> bytes:
+        """Get or create a ``Client`` record; return its 6-byte hash."""
+        h = _client_hash(ip, ua, lang)
+        if h not in self.data.clients:
+            self.data.clients[h] = Client(
+                ip=ip,
+                ua=ua,
+                ua_pretty=_compact_user_agent(ua),
+                lang=lang,
+                country=country,
+            )
+            self._save()
+        return h
+
+    def enrich_client(
+        self,
+        client_hash: bytes,
+        *,
+        host: str = "",
+        country: str = "",
+        city: str = "",
+    ) -> None:
+        """Fill in host/geoip fields on a client record after async lookups."""
+        client = self.data.clients.get(client_hash)
+        if client is None:
+            return
+        changed = False
+        if host and not client.host:
+            client.host = host
+            changed = True
+        if country:
+            client.country = country
+            changed = True
+        if city:
+            client.city = city
+            changed = True
+        if changed:
+            self._save()
+
+    def _abuse_hit(
+        self,
+        client_hash: bytes,
         path: str,
         start: datetime | None = None,
         *,
         flag: bool = False,
         is_404: bool = False,
     ) -> None:
-        """Append one abuse hit with the full request path."""
+        """Append one abuse hit referencing a client by hash."""
         self.data.abuse.append(
             AbuseHit(
                 start=start or datetime.now(UTC),
                 path=path,
-                ip=ip,
-                ua=ua,
-                ua_pretty=_compact_user_agent(ua),
+                client=client_hash,
                 flag=flag,
                 is_404=is_404,
             )
@@ -383,7 +482,7 @@ class Store:
     def classify_abuse(
         self,
         ip: str,
-        ua: str,
+        client_hash: bytes,
         path: str,
         *,
         flag: bool = False,
@@ -397,54 +496,62 @@ class Store:
         """
         if ip not in self.data.abuse_ips:
             self.data.abuse_ips[ip] = True
-            moved = [h for h in self.data.crawlers if h.ip == ip]
+            moved = [h for h in self.data.crawlers if self._client_ip(h.client) == ip]
             if moved:
-                self.data.crawlers = [h for h in self.data.crawlers if h.ip != ip]
+                self.data.crawlers = [h for h in self.data.crawlers if self._client_ip(h.client) != ip]
                 for h in moved:
                     self._abuse_hit(
-                        h.ip, h.ua,
+                        h.client,
                         h.entry + (f"?{h.query}" if h.query else ""),
                         start=h.start,
                     )
-            pending = [h for h in self.pending_crawlers if h.ip == ip]
+            pending = [h for h in self.pending_crawlers if self._client_ip(h.client) == ip]
             if pending:
-                self.pending_crawlers = [h for h in self.pending_crawlers if h.ip != ip]
+                self.pending_crawlers = [h for h in self.pending_crawlers if self._client_ip(h.client) != ip]
                 for h in pending:
                     self._abuse_hit(
-                        h.ip, h.ua,
+                        h.client,
                         h.entry + (f"?{h.query}" if h.query else ""),
                         start=h.start,
                     )
-        self._abuse_hit(ip, ua, path, flag=flag, is_404=is_404)
+        self._abuse_hit(client_hash, path, flag=flag, is_404=is_404)
         self._save()
 
-    def track_404(self, ip: str, ua: str, path: str) -> None:
+    def track_404(
+        self,
+        ip: str,
+        ua: str,
+        path: str,
+        accept_language: str = "",
+    ) -> bytes:
         """Record a 404 response for ``path`` (full path, query included).
 
         A telltale path (dot segment or *.php) classifies the IP as abuse
         immediately; enough plain 404s from one IP do too.  Hits from
         already-classified IPs go straight to the abuse list.
+
+        Returns the client hash so callers can schedule async enrichment.
         """
+        lang, country = _parse_accept_language(accept_language)
+        client_hash = self._ensure_client(ip, ua, lang, country=country)
         if ip in self.data.abuse_ips:
-            self._abuse_hit(ip, ua, path, flag=_is_abuse_path(path), is_404=True)
+            self._abuse_hit(client_hash, path, flag=_is_abuse_path(path), is_404=True)
             self._save()
-            return
+            return client_hash
         if _is_abuse_path(path):
-            self.classify_abuse(ip, ua, path, flag=True, is_404=True)
-            return
+            self.classify_abuse(ip, client_hash, path, flag=True, is_404=True)
+            return client_hash
         self.not_found_counts[ip] = self.not_found_counts.get(ip, 0) + 1
         if self.not_found_counts[ip] >= _ABUSE_404_THRESHOLD:
-            self.classify_abuse(ip, ua, path, flag=True, is_404=True)
+            self.classify_abuse(ip, client_hash, path, flag=True, is_404=True)
+            return client_hash
+        return client_hash
 
     def _new_visit(
         self,
         entry: str,
         referer: str,
-        key: tuple[str, str],
-        ip: str = "",
-        lang: str = "",
-        country: str = "",
-        ua: str = "",
+        client_hash: bytes,
         utm: dict[str, str] | None = None,
     ) -> Visit:
         now = datetime.now(UTC)
@@ -452,44 +559,15 @@ class Store:
             start=now,
             entry=entry,
             referer=referer,
-            ip=ip,
-            lang=lang,
-            country=country,
-            ua=ua,
-            ua_pretty=_compact_user_agent(ua),
+            client=client_hash,
             utm=utm or {},
         )
         self.data.visits.append(visit)
-        self.sessions[key] = len(self.data.visits) - 1
+        self.sessions[client_hash] = len(self.data.visits) - 1
         self._count(self.data.site_visits, _bucket(now))
         self._count(self.data.views.setdefault(entry, {}), _bucket(now))
         self._count_transition(referer or "(direct)", entry, now)
         return visit
-
-    def enrich_visit(
-        self,
-        index: int,
-        *,
-        host: str = "",
-        country: str = "",
-        city: str = "",
-    ) -> None:
-        """Fill in host/geoip fields on an existing visit after async lookups."""
-        if index < 0 or index >= len(self.data.visits):
-            return
-        visit = self.data.visits[index]
-        changed = False
-        if host and not visit.host:
-            visit.host = host
-            changed = True
-        if country:
-            visit.country = country
-            changed = True
-        if city:
-            visit.city = city
-            changed = True
-        if changed:
-            self._save()
 
     def track_entry(
         self,
@@ -498,7 +576,8 @@ class Store:
         ip: str,
         ua: str,
         full_path: str,
-    ) -> None:
+        accept_language: str = "",
+    ) -> list[bytes]:
         """Stash the entry referer/UTM tags and queue a pending crawler hit.
 
         Nothing is counted here — the client's initial /_a ping starts the
@@ -509,21 +588,28 @@ class Store:
         does not erase an earlier tagged landing.
 
         Every document GET is also queued as a pending crawler hit.  If a ping
-        from the same (IP, UA) pair arrives within ``_CRAWLER_TIMEOUT``, the
-        hit is discarded; otherwise it is flushed to ``data.crawlers``.
+        from the same client arrives within ``_CRAWLER_TIMEOUT``, the hit is
+        discarded; otherwise it is flushed to ``data.crawlers``.  The
+        Accept-Language header is stored on the client record immediately;
+        host/geoip are filled in later by async enrichment.
 
         GETs from IPs already classified as abuse are recorded as abuse hits
         with the full request path (query string included).
+
+        Returns the client hashes of any hits flushed to persistent storage,
+        so callers can schedule async enrichment.
         """
         entry = full_path.split("?")[0]
         query = full_path.split("?", 1)[1] if "?" in full_path else ""
+        lang, country = _parse_accept_language(accept_language)
+        client_hash = self._ensure_client(ip, ua, lang, country=country)
         if ip in self.data.abuse_ips:
-            self._flush_crawlers()
-            self._abuse_hit(ip, ua, full_path, is_404=False, flag=False)
+            flushed = self._flush_crawlers()
+            self._abuse_hit(client_hash, full_path, is_404=False, flag=False)
             self._save()
-            return
+            return flushed
         now = datetime.now(UTC)
-        self._flush_crawlers(now)
+        flushed = self._flush_crawlers(now)
         if referer:
             origin = _origin(referer)
             if origin is not None and origin != own_origin:
@@ -535,19 +621,18 @@ class Store:
             CrawlerHit(
                 start=now,
                 entry=entry,
-                ip=ip,
-                ua=ua,
-                ua_pretty=_compact_user_agent(ua),
+                client=client_hash,
                 referer=self.pending_referers.get(ip, ""),
                 query=query,
             )
         )
+        return flushed
 
-    def _add_read(self, ip: str, ua: str, path: str, seconds: int) -> None:
+    def _add_read(self, client_hash: bytes, path: str, seconds: int) -> None:
         """Add ``seconds`` of reading time for ``path`` to the current visit."""
         if seconds <= 0:
             return
-        index = self.sessions.get((ip, ua))
+        index = self.sessions.get(client_hash)
         if index is None or index >= len(self.data.visits):
             return
         visit = self.data.visits[index]
@@ -562,7 +647,7 @@ class Store:
         accept_language: str = "",
         hide: bool = False,
         read: int = 0,
-    ) -> int | None:
+    ) -> tuple[int | None, list[bytes]]:
         """Record a client navigation ping ({from, to, read} from pagerite.js).
 
         ``to`` is an internal path ("/...") or an https URL for exit links; a
@@ -575,63 +660,59 @@ class Store:
         referer and UTM tags stashed by the document GET if there are any.
 
         ``hide`` is set by admin clients: the ping cancels pending crawler
-        hits as usual, and any existing visit for this (IP, UA) session is
+        hits as usual, and any existing visit for this client session is
         removed from the stats (the admin browsed anonymously before logging
         in).  Nothing new is recorded.
 
         Pings from IPs classified as abuse are ignored entirely.
 
-        Returns the index of the new visit when one is created, so callers
-        can enrich it later with non-blocking lookups (host, geoip country).
+        Returns the index of the new visit when one is created (or None) and
+        the client hashes of any crawler hits flushed by this call, so callers
+        can schedule async enrichment (host, geoip country/city).
         """
-        self._flush_crawlers()
-        key = (ip, ua)
+        flushed = self._flush_crawlers()
+        lang, country = _parse_accept_language(accept_language)
+        client_hash = _client_hash(ip, ua, lang)
         if hide:
             # Admin ping: cancel pending crawler hits and scrub the session.
             self.pending_crawlers = [
-                hit for hit in self.pending_crawlers if not (hit.ip == ip and hit.ua == ua)
+                hit for hit in self.pending_crawlers if hit.client == client_hash
             ]
-            index = self.sessions.pop(key, None)
+            index = self.sessions.pop(client_hash, None)
             if index is not None and index < len(self.data.visits):
                 self._remove_visit(index)
                 self._save()
-            return None
+            return None, flushed
         if ip in self.data.abuse_ips:
-            return None
-        # A real visitor ping cancels any pending crawler hits from this
-        # (IP, UA) pair.
+            return None, flushed
+        # A real visitor ping cancels any pending crawler hits from this client.
         self.pending_crawlers = [
-            hit for hit in self.pending_crawlers if not (hit.ip == ip and hit.ua == ua)
+            hit for hit in self.pending_crawlers if hit.client != client_hash
         ]
         fr_path = _internal_path(from_) if from_ else ""
         if fr_path and read > 0:
-            self._add_read(ip, ua, fr_path, read)
+            self._add_read(client_hash, fr_path, read)
         if not to:
             if read > 0:
                 self._save()
-            return None
+            return None, flushed
         if to.startswith("/") and not to.startswith("//"):
             target = _internal_path(to) or ""
         else:
             target = _external_target(to) or ""
         if not target:
-            return None
-        key = (ip, ua)
-        index = self.sessions.get(key)
+            return None, flushed
+        index = self.sessions.get(client_hash)
         fr = fr_path or "(direct)"
         if index is None or index >= len(self.data.visits):
             # No known session: the initial ping of a fresh page load (or
             # missing data after a server restart) — start a visit.
-            lang, country = _parse_accept_language(accept_language)
             index = len(self.data.visits)
+            self._ensure_client(ip, ua, lang, country=country)
             self._new_visit(
                 target,
                 self.pending_referers.pop(ip, ""),
-                key,
-                ip=ip,
-                lang=lang,
-                country=country,
-                ua=ua,
+                client_hash,
                 utm=self.pending_utms.pop(ip, {}),
             )
         else:
@@ -644,4 +725,5 @@ class Store:
             if visit.entry != target and target not in visit.trail:
                 visit.trail.append(target)
         self._save()
-        return index if index is not None and index < len(self.data.visits) else None
+        visit_index = index if index is not None and index < len(self.data.visits) else None
+        return visit_index, flushed
