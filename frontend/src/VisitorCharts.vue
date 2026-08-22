@@ -128,7 +128,7 @@ const viewChart = computed(() => buildChart(viewSeries.value, now.value))
   width: 2.6rem;
   text-align: right;
   transform: translateY(50%);
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
@@ -137,7 +137,7 @@ const viewChart = computed(() => buildChart(viewSeries.value, now.value))
   position: absolute;
   top: 0.25rem;
   transform: translateX(-50%);
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   color: var(--muted);
   white-space: nowrap;
 }
@@ -203,7 +203,7 @@ const viewChart = computed(() => buildChart(viewSeries.value, now.value))
   position: absolute;
   top: 50%;
   left: -2.8rem;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   color: var(--muted);
   writing-mode: vertical-rl;
   white-space: nowrap;

@@ -772,7 +772,9 @@ def render_analytics(
     stylesheets = page_stylesheets + analytics_stylesheets
     doc = E.article
     with doc:
-        doc.div(id="analytics-app")
+        # .wide: the dashboard breaks out of the article column to the full
+        # viewport width, like wide figures (see the .wide rules).
+        doc.div(id="analytics-app", class_="wide")
     return str(
         _layout(
             scripts,

@@ -6,7 +6,7 @@
  * count), so the graph sums the buckets falling inside the selected
  * range, exactly like the charts and per-page views do.
  */
-import { computed, onBeforeUnmount, shallowRef, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { rangeWindow, WEEK } from './analytics/time.js'
 import { formatCount } from './analytics/format.js'
 import {
@@ -121,11 +121,36 @@ const startBeads = (flows) => {
 
 watch(() => graph.value?.flows, startBeads, { immediate: true })
 onBeforeUnmount(() => cancelAnimationFrame(rafId))
+
+// Text in the graph must render at a constant screen size regardless of
+// how far the enlarged graph's viewBox is scaled down to fit the panel:
+// measure the unit→pixel ratio and expose it as --u on the svg, which the
+// font-size rules divide by. Falls back to 1 (raw units) until measured.
+const svgEl = ref(null)
+const pxPerUnit = ref(1)
+let resizeObs = null
+
+function updateScale() {
+  const el = svgEl.value
+  if (el && el.viewBox.baseVal.width) {
+    pxPerUnit.value = el.clientWidth / el.viewBox.baseVal.width
+  }
+}
+
+onMounted(() => {
+  resizeObs = new ResizeObserver(updateScale)
+})
+watch(svgEl, (el) => {
+  resizeObs?.disconnect()
+  if (el) resizeObs?.observe(el)
+})
+watch(() => graph.value?.bounds, updateScale)
+onBeforeUnmount(() => resizeObs?.disconnect())
 </script>
 
 <template>
   <section v-if="graph">
-    <svg class="tmap" :viewBox="`${graph.bounds.x0} ${graph.bounds.y0} ${graph.bounds.x1 - graph.bounds.x0} ${graph.bounds.y1 - graph.bounds.y0}`"
+    <svg ref="svgEl" class="tmap" :style="{ '--u': pxPerUnit }" :viewBox="`${graph.bounds.x0} ${graph.bounds.y0} ${graph.bounds.x1 - graph.bounds.x0} ${graph.bounds.y1 - graph.bounds.y0}`"
          role="img" aria-label="map of transitions between pages">
       <defs>
         <!-- Unit-radius circle; only the portion near the bottom is used. -->
@@ -146,7 +171,7 @@ onBeforeUnmount(() => cancelAnimationFrame(rafId))
           <text :transform="`translate(${x.x}, ${x.y}) scale(${x.r - 4})`" class="tnodeslug" :style="{ '--node-r': x.r - 4 }">
             <textPath href="#tnode-label-arc" startOffset="50%" text-anchor="middle" side="right">{{ x.label }}</textPath>
           </text>
-          <text :x="x.x" :y="x.y + 4" class="tnodecount">{{ formatCount(x.count) }}</text>
+          <text :x="x.x" :y="x.y" class="tnodecount" dominant-baseline="middle">{{ formatCount(x.count) }}</text>
         </a>
         <g v-else :title="x.path">
           <circle :cx="x.x" :cy="x.y" :r="x.r"
@@ -154,7 +179,7 @@ onBeforeUnmount(() => cancelAnimationFrame(rafId))
           <text :transform="`translate(${x.x}, ${x.y}) scale(${x.r - 4})`" class="tnodeslug" :style="{ '--node-r': x.r - 4 }">
             <textPath href="#tnode-label-arc" startOffset="50%" text-anchor="middle" side="right">{{ x.label }}</textPath>
           </text>
-          <text :x="x.x" :y="x.y + 4" class="tnodecount">{{ formatCount(x.count) }}</text>
+          <text :x="x.x" :y="x.y" class="tnodecount" dominant-baseline="middle">{{ formatCount(x.count) }}</text>
         </g>
       </g>
       <g v-for="n in graph.nodes" :key="n.path">
@@ -163,7 +188,7 @@ onBeforeUnmount(() => cancelAnimationFrame(rafId))
           <text :transform="`translate(${n.x}, ${n.y}) scale(${TNODE_R - 4})`" class="tnodeslug" :style="{ '--node-r': TNODE_R - 4 }">
             <textPath href="#tnode-label-arc" startOffset="50%" text-anchor="middle" side="right">{{ n.label }}</textPath>
           </text>
-          <text :x="n.x" :y="n.y + 4" class="tnodecount">
+          <text :x="n.x" :y="n.y" class="tnodecount" dominant-baseline="middle">
             {{ n.readMin ? `${formatCount(n.views)}×${n.readMin}m` : formatCount(n.views) }}
           </text>
         </a>
@@ -187,8 +212,7 @@ onBeforeUnmount(() => cancelAnimationFrame(rafId))
 .tmap {
   display: block;
   width: 100%;
-  max-width: 36rem;
-  margin: 0 auto;
+  max-width: 100%;
 }
 .tmap .tconn {
   fill: var(--accent);
@@ -218,21 +242,24 @@ onBeforeUnmount(() => cancelAnimationFrame(rafId))
   stroke: var(--accent);
   stroke-width: 1.5;
 }
+/* Text renders at a constant screen size: --u (set from JS) is the
+   viewBox-unit → pixel ratio of the rendered svg, so dividing by it makes
+   the sizes independent of how far the graph is scaled down. */
 .tmap .tnodeslug {
   fill: var(--text);
-  font-size: calc(11px / var(--node-r, 34));
+  font-size: calc(15px / (var(--u, 1) * var(--node-r, 56)));
   text-anchor: middle;
 }
 .tmap a { cursor: pointer; }
 .tmap a:hover .tnodeslug { fill: var(--accent); }
 .tmap .tnodecount {
   fill: var(--muted);
-  font-size: 10px;
+  font-size: calc(13px / var(--u, 1));
   text-anchor: middle;
 }
 .tmap .tnodehidden {
   fill: var(--text);
-  font-size: 9px;
+  font-size: calc(13px / var(--u, 1));
 }
 
 section { margin-top: 1.8rem; }

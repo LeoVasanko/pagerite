@@ -791,8 +791,11 @@ figure:has(img[width]) {
 
    The rules below re-anchor the bleed for the layouts where the article
    is not viewport-centered; each just overrides width/margin-inline, and
-   later rules win at equal specificity. */
-figure:has(.wide) {
+   later rules win at equal specificity. The analytics dashboard uses the
+   same breakout directly on its container (div.wide — it is the page's
+   whole content, not a figure). */
+figure:has(.wide),
+div.wide {
   width: 100vw;
   max-width: none;
   margin-inline: calc(50% - 50vw);

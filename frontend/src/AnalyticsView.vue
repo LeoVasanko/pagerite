@@ -261,9 +261,10 @@ const abuseRows = computed(() => formatAbuseRows(data.value?.abuse || [], client
 }
 
 .analytics-panel {
-  margin: 0 auto;
-  width: min(60rem, 96vw);
-  padding: 1.5rem 2rem 4rem;
+  margin: 0;
+  width: 100%;
+  /* Same 1.25rem side spacing as main's article padding. */
+  padding: 1.5rem 1.25rem 4rem;
 }
 
 .analytics-panel header {
@@ -286,7 +287,7 @@ const abuseRows = computed(() => formatAbuseRows(data.value?.abuse || [], client
 .ranges button {
   padding: 0.2rem 0.7rem;
   font: inherit;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   color: var(--muted);
   background: none;
   border: 1px solid var(--line);
@@ -344,7 +345,7 @@ const abuseRows = computed(() => formatAbuseRows(data.value?.abuse || [], client
 .visit-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.82rem;
+  font-size: 0.9rem;
   line-height: 1.3;
 }
 

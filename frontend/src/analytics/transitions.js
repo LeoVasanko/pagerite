@@ -25,8 +25,8 @@
 
 import { MIN_READ_SECONDS } from './format.js'
 
-export const TNODE_R = 34 // node circles hold the slug and the view count
-export const EXT_R = 34 // external referer/exit nodes use the same full size
+export const TNODE_R = 60 // node circles hold the slug and the view count
+export const EXT_R = 60 // external source/exit nodes use the same full size
 
 // Edge width (half-width of the thin middle) grows logarithmically with
 // the count. The constants are scaled down by ~10× so busy ranges (day,
@@ -44,7 +44,7 @@ const PRUNE_FRACTION = 0.01
 // bead independently in JS at BEAD_SPEED along the edge, with no limit on
 // beads in flight.
 export const BEAD_SPEED = 180 // svg units per second
-export const BEAD_R = 2.2
+export const BEAD_R = 3.2
 const BEAD_RATE = 0.012 // beads per second per recorded transition
 const FLOW_OFFSET = 3 // lane offset to the right of the travel direction
 
@@ -321,8 +321,11 @@ function buildRibbon(a, b, ab, ba, wMid, ra = TNODE_R, rb = TNODE_R, external = 
   const ny = ux
 
   // Radius of each node surround and the attachment geometry on it.
-  const R2A = ra + 3
-  const R2B = rb + 3
+  // These are intentionally derived from the node radius so resizing the
+  // graph (node circles, text) keeps connectors proportional.
+  const SURROUND = 4
+  const R2A = ra + SURROUND
+  const R2B = rb + SURROUND
 
   // Attachment points sit somewhat forward from the side of the node,
   // leaving enough room for the surround to flow naturally into the flare.
@@ -334,7 +337,10 @@ function buildRibbon(a, b, ab, ba, wMid, ra = TNODE_R, rb = TNODE_R, external = 
 
   // Flares take a fair share of the free span while leaving the
   // count-scaled thin middle a visible share of the connection length.
-  const FLARE = Math.min(36, Math.max(0, (len - ENDA - ENDB) * 0.4))
+  // The maximum flare length scales with the node radius so larger nodes
+  // still show a wide connector end instead of hiding it under the circle.
+  const FLARE_MAX = Math.max(ra, rb) * 1.2
+  const FLARE = Math.min(FLARE_MAX, Math.max(0, (len - ENDA - ENDB) * 0.4))
 
   // Point on the connection centerline at distance t from A, offset s
   // perpendicular to it.
