@@ -20,7 +20,7 @@ Siblings order by the fractional `Node.order` key: a moved item gets a fresh key
 
 `Node.banner` is a raw trusted HTML snippet for the header banner (img, styled div, canvas+script...); empty inherits from the node's ancestors (front page last). It is rendered AFTER the banner design's artwork, so author code (e.g. a `<style>` override) always wins over the design's own styles.
 
-`Node.banner_design` picks a banner design: a theme folder name whose `banner.css` styles it and whose `banner.html` (arbitrary markup: canvas + style + script) or `banner.svg` supplies the inline artwork (wrapped in `div[data-design]`); "" = explicitly no design, None = inherit (nearest ancestor, front page last, then the active theme's own design if it ships banner.css/banner.svg/banner.html). The design's banner.css is linked in `<head>` (id `pagerite-banner`) between the theme and the custom CSS.
+`Node.banner_design` picks a banner design: a theme folder name whose `banner.css` styles it and whose `banner.html` (arbitrary markup: canvas + style + script) or `banner.svg` supplies the inline artwork (wrapped in `div[data-design]`); "" = explicitly no design, None = inherit (nearest ancestor, front page last, then the active theme's own design if it ships banner.css/banner.svg/banner.html). The design's banner.css lives in `<head>` (id `pagerite-banner`) between the theme and the custom CSS — a `<link>` in dev, an inline `<style>` in production.
 
 ## Site settings
 

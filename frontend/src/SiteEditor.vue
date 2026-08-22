@@ -242,30 +242,43 @@ async function saveSettings(opts = {}) {
 async function onThemeChange() {
   await saveSettings()
   // Theme CSS is backend-served at /_themes/{theme}/theme.css in both dev
-  // and prod: swap the link in place, then re-render (the theme's default
-  // banner design and the page's stylesheet links may change with it).
-  let link = document.getElementById('pagerite-theme')
+  // and prod, but rendered differently: a <link> in dev, an inline <style>
+  // in prod. Swap it in place, then re-render (the theme's default banner
+  // design and the page's stylesheets may change with it).
+  let el = document.getElementById('pagerite-theme')
+  const url = `/_themes/${theme.value}/theme.css`
   if (theme.value) {
-    const href = `/_themes/${theme.value}/theme.css`
-    if (link) {
-      link.href = href
-    } else {
+    if (el?.tagName === 'STYLE') {
+      el.textContent = await (await fetch(url)).text()
+    } else if (el) {
+      el.href = url
+    } else if (import.meta.env.DEV) {
       // Re-create after "none": keep base < theme < design < custom CSS.
-      // In dev there is no #pagerite-base link (the base is a
+      // In dev there is no #pagerite-base element (the base is a
       // Vite-injected <style>), so anchor to the next sheet instead of
       // prepending before the base styles.
-      link = document.createElement('link')
-      link.rel = 'stylesheet'
-      link.id = 'pagerite-theme'
-      link.href = href
+      el = document.createElement('link')
+      el.rel = 'stylesheet'
+      el.id = 'pagerite-theme'
+      el.href = url
       const before = document.getElementById('pagerite-base')?.nextSibling
         ?? document.getElementById('pagerite-banner')
         ?? document.getElementById('pagerite-user')
-      if (before) before.before(link)
-      else document.head.append(link)
+      if (before) before.before(el)
+      else document.head.append(el)
+    } else {
+      // Prod: inline <style>, fetched from the backend-served URL.
+      el = document.createElement('style')
+      el.id = 'pagerite-theme'
+      el.textContent = await (await fetch(url)).text()
+      const before = document.getElementById('pagerite-base')?.nextSibling
+        ?? document.getElementById('pagerite-banner')
+        ?? document.getElementById('pagerite-user')
+      if (before) before.before(el)
+      else document.head.append(el)
     }
-  } else if (link) {
-    link.remove()
+  } else if (el) {
+    el.remove()
   }
   loadPlain(path.value)
 }

@@ -197,8 +197,9 @@ Because it is a real page, fetch-navigation handles it like any other internal
 link: clicking the 📊 pen (or any link to `/_a`) fetches the server-rendered
 HTML, swaps the dynamic regions and mounts the Vue analytics app in place. The
 range selector updates the URL hash (`#week` etc.) so links to a specific
-range can be shared. When the URL has no hash, the server defaults to `day`
-if analytics history spans less than 24 hours, otherwise `week`.
+range can be shared. When the URL has no hash, the client derives the
+default from the first analytics snapshot: `day` if the recorded history
+spans less than 24 hours, otherwise `week`.
 
 `AnalyticsView.vue` is no longer a full-screen overlay; the `body.analytics-open`
 page-chrome hiding and `#/analytics/<range>` hash routing have been removed.

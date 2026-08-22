@@ -34,4 +34,4 @@ The banner artwork has scroll parallax: pagerite.js sets the `--pry` scroll para
 
 ## Stylesheet order
 
-The backend links the stylesheets in a fixed order — base (Vite build), theme, banner design, custom CSS last — each with a stable id so the site editor can swap them in place. The base stylesheet's `--font-brand` defaults to `var(--font-heading)`.
+The backend emits the stylesheets in a fixed order — base (Vite build), theme, banner design, entry sheets, custom CSS last — each with a stable id so fetch-navigation and the site editor can sync them in place. In dev they are `<link>`s (the base is Vite-injected from JS instead); in production they are inlined as `<style>` elements. The base stylesheet's `--font-brand` defaults to `var(--font-heading)`.

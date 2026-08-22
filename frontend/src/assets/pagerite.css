@@ -912,7 +912,9 @@ article h2 {
     padding: 0.5rem 1rem;
   }
 
-  #sidebar ul {
+  /* Only the main level becomes a horizontal wrapping strip; submenus stay
+     vertical blocks attached under their parent item. */
+  #sidebar > ul {
     flex-direction: row;
     flex-wrap: wrap;
     gap: 0.5rem 1.2rem;

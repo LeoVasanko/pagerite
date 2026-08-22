@@ -110,6 +110,35 @@ def _editor_css_url(vite_url: str | None) -> str | None:
     return None
 
 
+def _inline_asset(url: str) -> str:
+    """Read a served asset's content for inlining into the page (prod only).
+
+    Handles build assets (``/_assets/...`` from the Vite build) and theme
+    files (``/_themes/{name}/...`` from pagerite/themes/).
+    """
+    if url.startswith("/_themes/"):
+        name, _, file = url.removeprefix("/_themes/").partition("/")
+        if _valid_name(name) and _valid_name(file):
+            return (THEMES / name / file).read_text()
+        raise ValueError(f"not a theme asset: {url}")
+    return (BUILD / url.lstrip("/")).read_text()
+
+
+def _inline_script(url: str) -> str:
+    """Read a built JS bundle for inlining (prod only).
+
+    Inline modules resolve relative imports against the document URL, not
+    the bundle's directory, so rewrite the build's relative chunk
+    specifiers ("./chunk.js") to absolute /_assets/ paths.
+    """
+    js = _inline_asset(url)
+    for chunk in _manifest().values():
+        file = chunk.get("file", "")
+        if file.endswith(".js"):
+            js = js.replace(f'"./{file.rsplit("/", 1)[-1]}"', f'"/{file}"')
+    return js
+
+
 def _layout(
     modules: list[str] = (),
     stylesheets: list[str] = (),
@@ -118,16 +147,21 @@ def _layout(
     banner_design: str = "",
     favicon: str = "",
     social: dict[str, str] | None = None,
-    extra_meta: dict[str, str] | None = None,
 ) -> Template:
-    """Page layout template with standard asset URLs and ES-module scripts.
+    """Page layout template with standard assets and ES-module scripts.
 
-    Stylesheets use ``blocking="render"`` so the browser waits for them before
-    showing the page, avoiding a flash of unstyled content. Order matters and
-    is fixed: base (Vite build, absent in dev where Vite injects it from JS),
-    theme and banner design (backend-served from pagerite/themes/), entry-
-    specific stylesheets (e.g. overlayscrollbars.css), then the user's custom
-    CSS last so it always wins.
+    In dev (PAGERITE_VITE_URL set) assets are linked from the Vite dev
+    server and stylesheets use ``blocking="render"`` so the browser waits
+    for them before showing the page, avoiding a flash of unstyled content.
+    In production all page assets are inlined into the document: stylesheets
+    become ``<style>`` elements and module scripts inline ``<script>``s, so
+    a page loads with no asset round trips. The on-demand bundles (editor,
+    analytics) stay external in both modes.
+
+    Order matters and is fixed: base (Vite build, absent in dev where Vite
+    injects it from JS), theme and banner design (from pagerite/themes/),
+    entry-specific stylesheets (e.g. overlayscrollbars.css), then the user's
+    custom CSS last so it always wins.
 
     In dev, pagerite.js re-appends the backend-rendered theme/design links
     (and the custom CSS) after the Vite-injected base styles, keeping this
@@ -135,9 +169,6 @@ def _layout(
 
     ``social`` maps meta keys to contents: ``og:*``/``article:*`` go out as
     property attributes, everything else (description, twitter:*) as name.
-
-    ``extra_meta`` is emitted as plain ``<meta name="..." content="...">``
-    tags after the editor meta tags; used for page-specific import hints.
     """
     doc = Document(E.Title, lang="en")
     # Responsive layout (see the 48rem breakpoint in pagerite.css) needs
@@ -155,33 +186,63 @@ def _layout(
     # one, browsers fall back to the build's /favicon.ico by convention.
     if favicon:
         doc.link(rel="icon", href=f"/_f/{favicon}", id="pagerite-favicon")
-    # Editor asset URLs for pagerite.js, which injects the 🖊️ edit pens
-    # itself once it has validated the session (pages render identically
-    # for everyone; editing is gated by the auth proxy in front of /_api).
-    script, editor_css = _editor_assets()
-    doc.meta(name="pagerite:editor-src", content=script[-1])
-    if editor_css:
-        doc.meta(name="pagerite:editor-css", content=editor_css)
-    for key, value in (extra_meta or {}).items():
-        doc.meta(name=key, content=value)
-    # Stylesheet links carry stable ids so the site editor's hot swap can
-    # keep each sheet at its rendered position (see swapRegions).
+    # Asset URLs for the on-demand bundles (editor, analytics) for
+    # pagerite.js, which injects the 🖊️ edit pens itself once it has
+    # validated the session (pages render identically for everyone; editing
+    # is gated by the auth proxy in front of /_api). Dev passes the Vite
+    # dev-server URLs as meta tags (Vite serves the modules and injects
+    # their CSS for hot reloads); production inlines all page assets and
+    # carries the on-demand URLs in one JSON script instead.
     vite_url = os.environ.get("PAGERITE_VITE_URL")
+    editor_scripts, editor_css = _editor_assets()
+    config = {
+        "pagerite:editor-src": editor_scripts[-1],
+        "pagerite:analytics-src": _analytics_assets()[0][0],
+    }
+    if editor_css:
+        config["pagerite:editor-css"] = editor_css
+    if vite_url:
+        for key, value in config.items():
+            doc.meta(name=key, content=value)
+    else:
+        # Inert JSON script; URLs never contain "</", but stay safe.
+        doc.script(
+            HTML(json.dumps(config).replace("</", "<\\/")),
+            type="application/json",
+            id="pagerite-assets",
+        )
+    # Stylesheets carry stable ids so the fetch-navigation and the site
+    # editor's hot swap can sync <head> positionally (see swapdoc.js).
+    # Production inlines the CSS as <style> elements: one less round trip
+    # per sheet, and fetch-navigation can carry them across swaps whole.
     sheets = [
         ("pagerite-base", _base_css_url(vite_url)),
         ("pagerite-theme", _theme_css_url(theme)),
         ("pagerite-banner", _banner_css_url(banner_design)),
     ]
     for id_, url in sheets:
-        if url:
+        if not url:
+            continue
+        if vite_url:
             doc.link(rel="stylesheet", href=url, blocking="render", id=id_)
+        else:
+            doc.style(HTML(_inline_asset(url)), id=id_)
     for url in stylesheets:
-        doc.link(rel="stylesheet", href=url, blocking="render")
+        if vite_url:
+            doc.link(rel="stylesheet", href=url, blocking="render")
+        else:
+            # Id from the file stem minus the content hash, so the head
+            # sync can match sheets across pages (e.g. the analytics sheet
+            # exists on /_a only and is added/removed on swaps).
+            stem = url.rsplit("/", 1)[-1].removesuffix(".css")
+            name = re.sub(r"-[A-Za-z0-9_-]{8}$", "", stem)
+            doc.style(HTML(_inline_asset(url)), id=f"pagerite-css-{name}")
     for src in modules:
-        doc.script(src=src, type="module")
+        if vite_url:
+            doc.script(src=src, type="module")
     if custom_css.strip():
         doc.style(custom_css, id="pagerite-user")
-    return Template(
+    body = (
         doc
         .header(
             E.div(E.Banner, id="page-banner"),
@@ -194,8 +255,23 @@ def _layout(
             E.main(E.Main, id="main"),
             id="content",
         )
-        .footer(None),  # kept empty for now; zero-height (see pagerite.css)
+        .footer(None)  # kept empty for now; zero-height (see pagerite.css)
     )
+    if not vite_url:
+        # Inline the bundles at the end of the body: module scripts are
+        # deferred anyway, and the page can render before they execute.
+        # Escape "</script" so it cannot terminate the element early (only
+        # ever occurs inside string literals, where the backslash escape is
+        # a no-op).
+        for src in modules:
+            js = re.sub(r"</script", r"<\\/script", _inline_script(src), flags=re.I)
+            # Stable id from the file stem minus the content hash; the
+            # analytics page's script (pagerite-js-analytics) is found and
+            # re-created by pagerite.js on fetch-navigations to /_a.
+            stem = src.rsplit("/", 1)[-1].removesuffix(".js")
+            name = re.sub(r"-[A-Za-z0-9_-]{8}$", "", stem)
+            body.script(HTML(js), type="module", id=f"pagerite-js-{name}")
+    return Template(body)
 
 
 def _brand_link(brand: str, brand_html: str = "") -> HTML:
@@ -681,16 +757,22 @@ def render_analytics(
     theme: str = "",
     favicon: str = "",
     brand_html: str = "",
-    initial_range: str = "week",
 ) -> str:
-    """Render the analytics viewer as a normal page at /_a."""
+    """Render the analytics viewer as a normal page at /_a.
+
+    The analytics entry is inlined into this page only (prod) or loaded
+    from the Vite dev server (dev); its stylesheet rides along in <head>
+    so fetch-navigations can sync it into the live document. The initial
+    range is not rendered in: the client takes it from the URL hash or
+    derives it from the analytics data itself.
+    """
     page_scripts, page_stylesheets = _page_assets()
     analytics_scripts, analytics_stylesheets = _analytics_assets()
     scripts = page_scripts + analytics_scripts
     stylesheets = page_stylesheets + analytics_stylesheets
     doc = E.article
     with doc:
-        doc.div(id="analytics-app", **{"data-initial-range": initial_range})
+        doc.div(id="analytics-app")
     return str(
         _layout(
             scripts,
@@ -699,7 +781,6 @@ def render_analytics(
             theme,
             banner_design(menu, "_a", theme),
             favicon,
-            extra_meta={"pagerite:analytics-src": analytics_scripts[0]},
         )(
             Title=f"Analytics – {brand}" if brand else "Analytics",
             Brand=_brand_link(brand, brand_html),

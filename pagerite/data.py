@@ -100,6 +100,12 @@ class Data(msgspec.Struct):
     #: Favicon: name of a file in `files` (content-addressed), linked as
     #: <link rel="icon"> on every page. Empty = the build's /favicon.ico.
     favicon: str = ""
+    #: Public origin (scheme + host) of the site, learned from admin
+    #: browsers (POST /_api/site-url — location.origin is correct even
+    #: behind reverse proxies, unlike request Host headers). Used for
+    #: absolute social/canonical URLs; empty = fall back to the request's
+    #: own base URL.
+    site_url: str = ""
     #: Legacy flat page store (pre-tree databases); migrated into `menu`
     #: on startup, then cleared. Never written otherwise.
     pages: dict[str, Page] = {}

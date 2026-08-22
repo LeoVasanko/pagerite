@@ -1,6 +1,9 @@
 // Analytics page entry: mounts AnalyticsView inside the normal page layout.
-// The backend renders #analytics-app inside #main and links this module for
-// the initial load; pagerite.js also imports it on fetch-navigation to /_a.
+// In production the backend inlines this module into the /_a page (and
+// pagerite.js re-creates the script element after fetch-navigations there);
+// in dev pagerite.js imports it from the Vite dev server on demand. Either
+// way it auto-mounts on #analytics-app when it evaluates, and unmounts when
+// pagerite.js announces a swap away from /_a.
 import { createApp } from 'vue'
 import AnalyticsView from './AnalyticsView.vue'
 
@@ -8,11 +11,7 @@ let app = null
 
 export function mount(container) {
   if (app) return
-  app = createApp(AnalyticsView, {
-    initialRange: location.hash.slice(1)
-      || container.dataset.initialRange
-      || 'week',
-  })
+  app = createApp(AnalyticsView)
   app.mount(container)
 }
 
@@ -21,6 +20,11 @@ export function unmount() {
   app = null
 }
 
-// Auto-mount on a normal (non-fetch) page load.
+// pagerite.js calls this before swapping away from /_a; each evaluation
+// (the inlined production module evaluates fresh on every visit) replaces
+// the handle.
+window.__pageriteAnalyticsUnmount = unmount
+
+// Auto-mount when the page holding #analytics-app is present.
 const container = document.getElementById('analytics-app')
 if (container) mount(container)

@@ -22,7 +22,7 @@ import shutil
 import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from email.utils import format_datetime
 from functools import lru_cache
 from pathlib import Path
@@ -32,10 +32,11 @@ from xml.sax.saxutils import escape as xml_escape
 import blake3
 import msgspec
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import RedirectResponse, Response
 from fastapi_vue import Frontend
 from kanta import Kanta
 from pydantic import BaseModel
+from zstandard import ZstdCompressor
 
 from pagerite import analytics, seed, views
 from pagerite.__main__ import DEVMODE
@@ -282,6 +283,79 @@ async def _headers(request: Request, call_next) -> Response:
     return response
 
 
+# Dynamic HTML is compressed per request at level 9 (static assets are
+# already pre-compressed by fastapi-vue's Frontend).
+_zstd = ZstdCompressor(9)
+
+
+def _render_html(kind: str, path: str, base_url: str) -> str:
+    """Render one of the generated pages (see _html_response)."""
+    if kind == "page":
+        return views.render_page(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html, base_url)
+    if kind == "category":
+        return views.render_category(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html)
+    if kind == "not-found":
+        return views.render_not_found(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html)
+    return views.render_analytics(data.menu, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html)
+
+
+@lru_cache(maxsize=128)
+def _cached_body(kind: str, path: str, base_url: str, version: int, zstd: bool) -> bytes:
+    """Rendered page body. Every input the output depends on is in the key:
+    data.version bumps on any content/settings change, base_url feeds the
+    social meta URLs, and zstd selects the stored encoding (both variants
+    are cached rather than re-compressed).
+    """
+    body = _render_html(kind, path, base_url).encode()
+    return _zstd.compress(body) if zstd else body
+
+
+def _html_response(
+    request: Request,
+    kind: str,
+    path: str,
+    status_code: int = 200,
+    headers: dict | None = None,
+    etag: bool = False,
+) -> Response:
+    """Response for a generated page, zstd-compressed when the client
+    accepts it (no gzip fallback).
+
+    Done per handler rather than in middleware so that Frontend's
+    already-compressed asset responses are never touched. The ETag stays
+    identical across encodings (revalidation compares it before
+    compression); ``vary: accept-encoding`` keeps caches from mixing the
+    representations. In dev the cache is bypassed so theme/design edits on
+    disk apply immediately.
+
+    ``etag=True`` derives the validator from a blake3 hash of the
+    (uncompressed) body — for pages like /_a that have no Node whose
+    modified timestamp could serve as one — and answers matching
+    if-none-match revalidations with a 304.
+    """
+    zstd = "zstd" in request.headers.get("accept-encoding", "")
+    # Absolute social/canonical URLs use the learned public origin; until
+    # an admin visit teaches it, fall back to the request's own base URL.
+    base_url = data.site_url or str(request.base_url).rstrip("/")
+    if DEVMODE:
+        identity = _render_html(kind, path, base_url).encode()
+        body = _zstd.compress(identity) if zstd else identity
+    else:
+        identity = _cached_body(kind, path, base_url, data.version, False)
+        body = _cached_body(kind, path, base_url, data.version, True) if zstd else identity
+    h = dict(headers or {})
+    if zstd:
+        h["vary"] = "accept-encoding"
+    if etag:
+        tag = f'"{blake3.blake3(identity).hexdigest()[:32]}"'
+        h["etag"] = tag
+        if request.headers.get("if-none-match") == tag:
+            return Response(status_code=304, headers=h)
+    if zstd:
+        h["content-encoding"] = "zstd"
+    return Response(body, status_code, h, media_type="text/html")
+
+
 class PageIn(BaseModel):
     """Payload for creating or replacing a page."""
 
@@ -432,6 +506,33 @@ async def put_settings(settings: SettingsIn) -> None:
         data.brand_html = settings.brand_html
         data.theme = settings.theme
         data.custom_css = settings.custom_css
+        data.version += 1
+
+
+class SiteUrlIn(BaseModel):
+    """Payload for learning the site's public origin."""
+
+    url: str
+
+
+@app.post("/_api/site-url", status_code=204)
+async def learn_site_url(payload: SiteUrlIn) -> None:
+    """Learn the site's public origin (scheme + host) from an admin browser.
+
+    pagerite.js reports location.origin once an admin session is detected:
+    unlike request Host headers it reflects the real public scheme and host
+    even behind reverse proxies, with zero manual configuration. Stored in
+    the database with a version bump so cached pages re-render with correct
+    absolute social/canonical URLs.
+    """
+    url = payload.url.rstrip("/")
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.path:
+        raise HTTPException(400, "not an origin")
+    if url == data.site_url:
+        return
+    with kanta.transaction("learn site url"):
+        data.site_url = url
         data.version += 1
 
 
@@ -712,36 +813,20 @@ class AnalyticsPing(BaseModel):
     read: int = 0
 
 
-def _analytics_initial_range() -> str:
-    """Default analytics range: day when history is shorter than 24 h."""
-    visits = analytics_store.data.visits
-    if not visits:
-        return "week"
-    earliest = min(v.start for v in visits)
-    if datetime.now(UTC) - earliest < timedelta(hours=24):
-        return "day"
-    return "week"
-
-
 @app.get("/_a", response_model=None)
-async def analytics_page(request: Request) -> HTMLResponse:
+async def analytics_page(request: Request) -> Response:
     """Render the analytics viewer as a normal site page at /_a.
 
     The page itself is public, but the data stream (/_api/ws/analytics) stays
     admin-gated like the rest of /_api, so only authorized users see the
     statistics; others get the viewer with a "could not be loaded" message.
     """
-    return HTMLResponse(
-        views.render_analytics(
-            data.menu,
-            data.brand,
-            data.custom_css,
-            data.theme,
-            data.favicon,
-            data.brand_html,
-            initial_range=_analytics_initial_range(),
-        ),
+    return _html_response(
+        request,
+        "analytics",
+        "",
         headers={"cache-control": "no-cache"},
+        etag=True,
     )
 
 
@@ -1085,7 +1170,7 @@ frontend.route(app, "/")
 
 
 @app.get("/{path:path}", response_model=None)
-async def show_page(request: Request, path: str) -> HTMLResponse | Response:
+async def show_page(request: Request, path: str) -> Response:
     """Render the content page at a slug path, or 404.
 
     A node without content is a category label: its URL renders a
@@ -1122,8 +1207,10 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
         if _is_trackable_path(path):
             flushed = _track_entry(path, request)
             _schedule_client_enrichment(flushed)
-        return HTMLResponse(
-            views.render_page(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html, str(request.base_url).rstrip("/")),
+        return _html_response(
+            request,
+            "page",
+            path,
             headers={
                 "etag": etag,
                 "last-modified": _http_date(node.modified),
@@ -1136,8 +1223,10 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
         if _is_trackable_path(path):
             flushed = _track_entry(path, request)
             _schedule_client_enrichment(flushed)
-        return HTMLResponse(
-            views.render_category(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html),
+        return _html_response(
+            request,
+            "category",
+            path,
             404,
             headers={
                 "last-modified": _http_date(node.modified),
@@ -1160,4 +1249,4 @@ async def show_page(request: Request, path: str) -> HTMLResponse | Response:
         asyncio.create_task(_enrich_client(client_hash))
         flushed = _track_entry(path, request)
         _schedule_client_enrichment(flushed)
-    return HTMLResponse(views.render_not_found(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html), 404)
+    return _html_response(request, "not-found", path, 404)

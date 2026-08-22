@@ -21,10 +21,6 @@ import VisitorCell from './VisitorCell.vue'
 import TransitionGraph from './TransitionGraph.vue'
 import VisitorCharts from './VisitorCharts.vue'
 
-const props = defineProps({
-  initialRange: { type: String, default: 'week' },
-})
-
 const ABUSE_MAX_LINES = 5
 
 const data = ref(null)
@@ -35,6 +31,13 @@ let ws = null
 let reconnectTimeout = null
 let timeInterval = null
 
+// The initial range comes from the URL hash (shareable links); without one,
+// it is derived from the first analytics snapshot: day when the recorded
+// history is shorter than 24 h, week otherwise.
+const hashRange = location.hash.slice(1)
+const range = ref(RANGES[hashRange] ? hashRange : 'week')
+let rangePinned = Boolean(RANGES[hashRange])
+
 function connectAnalytics() {
   if (ws) return
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -43,6 +46,15 @@ function connectAnalytics() {
   ws.onmessage = (event) => {
     try {
       data.value = JSON.parse(event.data)
+      if (!rangePinned) {
+        rangePinned = true
+        const starts = (data.value?.visits || [])
+          .map((v) => Date.parse(v.start))
+          .filter((t) => !Number.isNaN(t))
+        if (starts.length && Date.now() - Math.min(...starts) < 24 * 3600 * 1000) {
+          range.value = 'day'
+        }
+      }
     } catch {
       error.value = 'analytics data could not be loaded'
     }
@@ -81,8 +93,6 @@ onUnmounted(() => {
 const visits = computed(() => data.value?.visits || [])
 const totalViews = computed(() => calcTotalViews(data.value?.views))
 const readStats = computed(() => calcReadStats(visits.value))
-
-const range = ref(RANGES[props.initialRange] ? props.initialRange : 'week')
 
 // Keep the URL shareable when the range changes.
 watch(range, (r) => {

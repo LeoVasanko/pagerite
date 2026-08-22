@@ -59,32 +59,39 @@ function swapRegions(doc) {
     curUserStyle.remove()
   }
   // Theme and other public stylesheets live in <head>, rendered with stable
-  // ids by the backend; sync them positionally so the custom CSS (rendered
-  // last) always keeps winning by order. Diff-based: unchanged sheets keep
-  // their elements, so their @keyframes are never torn down (re-creating
-  // keyframes would replay the editor's slide-in animation).
-  const freshLinks = [...doc.head.querySelectorAll('link[rel="stylesheet"]')]
-  const freshIds = new Set(freshLinks.map((l) => l.id))
-  for (const link of [...document.head.querySelectorAll('link[rel="stylesheet"]')]) {
-    if (!link.dataset.pagerite && !freshIds.has(link.id)) link.remove()
+  // ids by the backend (links in dev, inline <style> elements in prod);
+  // sync them positionally so the custom CSS (rendered last) always keeps
+  // winning by order. Diff-based: unchanged sheets keep their elements, so
+  // their @keyframes are never torn down (re-creating keyframes would
+  // replay the editor's slide-in animation).
+  const sel = 'link[rel="stylesheet"][id], style[id]'
+  const freshEls = [...doc.head.querySelectorAll(sel)]
+  const freshIds = new Set(freshEls.map((el) => el.id))
+  for (const el of [...document.head.querySelectorAll(sel)]) {
+    if (!freshIds.has(el.id)) el.remove()
   }
   // Insert missing sheets in the fresh document's order, each right after
   // its predecessor's element. The first sheet rendered is always the base
-  // CSS, so its link doubles as the fallback anchor when nothing matched yet
-  // (e.g. no theme was selected before and the position is otherwise lost).
+  // CSS, so its element doubles as the fallback anchor when nothing matched
+  // yet (e.g. no theme was selected before and the position is otherwise
+  // lost).
   let anchor = null
-  for (const link of freshLinks) {
-    const cur = link.id && document.getElementById(link.id)
-    if (cur && cur.href === link.href) {
+  for (const el of freshEls) {
+    const cur = el.id && document.getElementById(el.id)
+    if (cur && cur.outerHTML === el.outerHTML) {
       anchor = cur
       continue
     }
-    const el = document.importNode(link, true)
-    // Same id, new URL (theme switch): replace in place, keeping position.
-    if (cur) cur.replaceWith(el)
-    else if (anchor) anchor.after(el)
-    else document.getElementById('pagerite-base')?.after(el) ?? document.head.append(el)
-    anchor = el
+    const imported = document.importNode(el, true)
+    // Same id, new content (theme switch): replace in place, keeping position.
+    if (cur) cur.replaceWith(imported)
+    else if (anchor) anchor.after(imported)
+    else {
+      const base = document.getElementById('pagerite-base')
+      if (base) base.after(imported)
+      else document.head.append(imported)
+    }
+    anchor = imported
   }
   // The editor keeps its own title while open; only inherit the server title
   // when navigating outside the editor (e.g. fetch-navigation swaps).

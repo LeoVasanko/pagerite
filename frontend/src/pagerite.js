@@ -55,6 +55,19 @@ import "overlayscrollbars/overlayscrollbars.css";
   let isAdmin = false;
   let editorMeta = null;
 
+  // Asset URLs for the on-demand bundles. Dev renders them as
+  // pagerite:* meta tags (Vite dev-server URLs); production inlines all
+  // page assets and carries the on-demand URLs in a JSON script instead.
+  const assets = (() => {
+    const el = document.getElementById("pagerite-assets");
+    if (el) return JSON.parse(el.textContent);
+    const map = {};
+    for (const m of document.querySelectorAll('meta[name^="pagerite:"]')) {
+      map[m.name] = m.content;
+    }
+    return map;
+  })();
+
   function makePen(mode) {
     const btn = document.createElement("button");
     btn.type = "button";
@@ -124,11 +137,11 @@ import "overlayscrollbars/overlayscrollbars.css";
   }
 
   async function setupAuth() {
-    const src = document.querySelector('meta[name="pagerite:editor-src"]')?.content;
+    const src = assets["pagerite:editor-src"];
     if (!src) { pingEntryOnce(); return; }
     editorMeta = {
       src,
-      css: document.querySelector('meta[name="pagerite:editor-css"]')?.content,
+      css: assets["pagerite:editor-css"],
     };
 
     // Detect whether Paskia SSO is available on this site.
@@ -145,6 +158,26 @@ import "overlayscrollbars/overlayscrollbars.css";
       isAdmin = (await fetch("/_api/settings")).status === 200;
     } catch {
       // No auth proxy / dev.
+    }
+
+    if (isAdmin) {
+      // Teach the backend the site's public origin (used for absolute
+      // social/canonical URLs): unlike request headers, location.origin
+      // reflects the real scheme and host even behind reverse proxies.
+      fetch("/_api/site-url", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: location.origin }),
+      }).catch(() => {});
+      // Warm the cache with the editor bundle: the hashed asset is
+      // immutable, so preloading costs nothing and the pens then open
+      // instantly. The analytics page has no editor.
+      if (currentPath !== "/_a" && !import.meta.env.DEV) {
+        const preload = document.createElement("link");
+        preload.rel = "modulepreload";
+        preload.href = src;
+        document.head.append(preload);
+      }
     }
 
     renderAuthUi();
@@ -230,6 +263,7 @@ import "overlayscrollbars/overlayscrollbars.css";
     // buttons; re-add whichever auth UI is appropriate for this session.
     renderAuthUi();
     placeEditPen();
+    fitNav();
     // Multi-column layout only when there is enough text to justify it.
     // Split the body into columned segments: h1s, h2s and wide figures are
     // full-width separators and never go inside columns.
@@ -285,14 +319,17 @@ import "overlayscrollbars/overlayscrollbars.css";
   // internal link is fetched exactly once, and navigation is served from
   // memory with no fetch at all. Editor re-renders (swapdoc.loadPlain)
   // announce their fresh copies via pagerite:page-fetched, keeping the
-  // cache in sync after edits.
+  // cache in sync after edits. The current page is NOT preloaded: we just
+  // received it as the document (re-fetching would be redundant, and
+  // browser heuristics may send it without if-none-match, defeating the
+  // conditional request); it enters the cache when navigated to.
   const pageCache = new Map(); // pathname -> HTML text
   addEventListener("pagerite:page-fetched", (ev) => {
     pageCache.set(new URL(ev.detail.url, location.href).pathname, ev.detail.html);
   });
 
   function preload() {
-    const urls = new Set([location.pathname]);
+    const urls = new Set();
     for (const a of document.querySelectorAll(
       '#nav a[href^="/"], #sidebar a[href^="/"], #main a[href^="/"]',
     )) {
@@ -455,29 +492,39 @@ import "overlayscrollbars/overlayscrollbars.css";
 
   // --- Analytics page mount/unmount --------------------------------------
   // The analytics page is a normal page whose body is rendered by the server
-  // but whose content is a Vue app. We load the entry module on demand so the
-  // analytics bundle is only fetched when visiting /_a, and unmount the app
-  // before swapping away so Vue teardown runs cleanly.
-  let analyticsUnmount = null;
-
+  // but whose content is a Vue app. In dev the entry module is imported from
+  // the Vite dev server on demand; in production it is inlined into the /_a
+  // page as script#pagerite-js-analytics, which a fetch-navigation swap does
+  // not execute — re-create the element so the fresh module auto-mounts on
+  // #analytics-app (see analytics-main.js). The module exposes its unmount
+  // as window.__pageriteAnalyticsUnmount.
   function teardownAnalytics() {
-    analyticsUnmount?.();
-    analyticsUnmount = null;
+    // Remove even the server-rendered script element so a later return to
+    // /_a re-mounts from a fresh copy (the module has torn itself down).
+    document.getElementById("pagerite-js-analytics")?.remove();
+    window.__pageriteAnalyticsUnmount?.();
+    window.__pageriteAnalyticsUnmount = null;
   }
 
   async function mountAnalytics(doc) {
-    const src = doc.querySelector('meta[name="pagerite:analytics-src"]')?.content;
-    if (!src) {
-      teardownAnalytics();
+    if (!doc.getElementById("analytics-app")) return;
+    // Already mounted: on a full /_a load the inline script has run.
+    if (document.getElementById("pagerite-js-analytics")) return;
+    const inline = doc.getElementById("pagerite-js-analytics");
+    if (inline) {
+      const s = document.createElement("script");
+      for (const a of inline.attributes) s.setAttribute(a.name, a.value);
+      s.textContent = inline.textContent;
+      document.body.append(s);
       return;
     }
     try {
-      const mod = await import(/* @vite-ignore */ src);
+      // Dev: the cached module auto-mounts only on its first evaluation,
+      // so call mount() explicitly for repeat visits (it no-ops when the
+      // app is already up).
+      const mod = await import(/* @vite-ignore */ assets["pagerite:analytics-src"]);
       const container = document.getElementById("analytics-app");
-      if (container) {
-        mod.mount(container);
-        analyticsUnmount = mod.unmount;
-      }
+      if (container) mod.mount(container);
     } catch (e) {
       console.error("analytics mount failed:", e);
     }
@@ -504,8 +551,8 @@ import "overlayscrollbars/overlayscrollbars.css";
         // Reflect any redirect the server issued.
         if (res.redirected) finalUrl = res.url;
         const html = await res.text();
-        // Populate the cache too, or the post-swap preload (which includes
-        // location.pathname) would fetch the very page we just loaded again.
+        // Populate the cache too, so returning here (back/forward, or a
+        // self-link in the nav) is served from memory.
         pageCache.set(new URL(finalUrl, location.href).pathname, html);
         doc = new DOMParser().parseFromString(html, "text/html");
       } catch {
@@ -534,27 +581,47 @@ import "overlayscrollbars/overlayscrollbars.css";
       } else if (oldSidebar) {
         oldSidebar.remove();
       }
-      // Site-wide custom CSS lives in <head id="pagerite-user"> and must be
-      // kept in sync across fetch-navigations. It is kept last in <head>:
-      // in dev Vite injects the base stylesheet after the server-rendered
-      // tag, and equal-specificity :root rules are decided by order.
-      const oldUserStyle = document.getElementById("pagerite-user");
-      const newUserStyle = doc.getElementById("pagerite-user");
-      if (oldUserStyle && newUserStyle) {
-        oldUserStyle.textContent = newUserStyle.textContent;
-        document.head.appendChild(oldUserStyle);
-      } else if (newUserStyle) {
-        document.head.appendChild(document.importNode(newUserStyle, true));
-      } else if (oldUserStyle) {
-        oldUserStyle.remove();
+      // Stylesheets live in <head> with stable ids — links in dev, inline
+      // <style> elements in production — and must follow the swap: the
+      // analytics sheet exists on /_a only, and theme/banner/custom CSS
+      // may have changed since this page was loaded. Diff by id, keeping
+      // the fresh document's order; unchanged sheets keep their elements
+      // so their @keyframes are never torn down. Editor-injected sheets
+      // (data-pagerite, no id) and Vite's dev styles (no id) are left
+      // alone. Mirrors the head sync in swapdoc.js.
+      const sel = 'link[rel="stylesheet"][id], style[id]';
+      const fresh = [...doc.head.querySelectorAll(sel)];
+      const freshIds = new Set(fresh.map((el) => el.id));
+      for (const el of [...document.head.querySelectorAll(sel)]) {
+        if (!freshIds.has(el.id)) el.remove();
       }
+      let anchor = null;
+      for (const el of fresh) {
+        const cur = document.getElementById(el.id);
+        if (cur && cur.outerHTML === el.outerHTML) {
+          anchor = cur;
+          continue;
+        }
+        const imported = document.importNode(el, true);
+        if (cur) cur.replaceWith(imported);
+        else if (anchor) anchor.after(imported);
+        else {
+          const base = document.getElementById("pagerite-base");
+          if (base) base.after(imported);
+          else document.head.append(imported);
+        }
+        anchor = imported;
+      }
+      // Custom CSS must stay last: equal-specificity :root rules (font
+      // variables) are decided by order, and in dev Vite injects the base
+      // stylesheet after the server-rendered tag.
+      const userStyle = document.getElementById("pagerite-user");
+      if (userStyle) document.head.appendChild(userStyle);
       document.title = doc.title;
       // Banners may contain scripts (canvas etc.), content pages may too.
       runScripts(document.getElementById("page-banner"));
       runScripts(document.getElementById("main"));
       applyEffects();
-      // The fetched doc carries the analytics meta; the live document's
-      // <head> is never swapped, so querying it would never find the entry.
       mountAnalytics(doc);
     };
     // Rotating cube page transition (see the FRAGILE block in pagerite.css);
@@ -706,6 +773,44 @@ import "overlayscrollbars/overlayscrollbars.css";
     document.fonts?.ready.then(fit);
     fit();
   }
+
+  // --- Nav condense-to-fit -------------------------------------------------
+  // The top nav stays on one row even on too-narrow screens: first the link
+  // gaps shrink, then the nav's side padding, and only in extreme cases the
+  // font size. #nav is replaced on fetch-navigation swaps, so this re-runs
+  // from applyEffects (fresh elements each time); CSS keeps flex-wrap: wrap
+  // as the no-JS fallback.
+  function fitNav() {
+    const nav = document.getElementById("nav");
+    const ul = nav?.querySelector("ul");
+    if (!ul) return;
+    // Restore the themed defaults before measuring.
+    nav.style.fontSize = "";
+    nav.style.paddingInline = "";
+    ul.style.columnGap = "";
+    ul.style.flexWrap = "nowrap";
+    const overflow = () => ul.scrollWidth - ul.clientWidth;
+    if (overflow() <= 0) return;
+    // 1) shrink the gaps between items (down to a fifth of the themed gap)
+    const gap = parseFloat(getComputedStyle(ul).columnGap) || 0;
+    const joints = Math.max(ul.children.length - 1, 1);
+    if (gap > 0) {
+      ul.style.columnGap = `${Math.max(0.2 * gap, gap - overflow() / joints)}px`;
+    }
+    // 2) shrink the nav's side padding (down to 0.4x)
+    if (overflow() > 0) {
+      const pad = parseFloat(getComputedStyle(nav).paddingInlineStart) || 0;
+      nav.style.paddingInline = `${Math.max(0.4 * pad, pad - overflow() / 2)}px`;
+    }
+    // 3) shrink the font to fit what remains
+    if (overflow() > 0) {
+      const fs = parseFloat(getComputedStyle(nav).fontSize);
+      nav.style.fontSize = `${fs * ul.clientWidth / ul.scrollWidth}px`;
+    }
+  }
+
+  addEventListener("resize", fitNav);
+  document.fonts?.ready.then(fitNav);
 
   setupAuth();
   applyEffects();
