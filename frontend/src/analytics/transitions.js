@@ -1,11 +1,14 @@
 /**
  * Radial transition map and helpers.
  *
- * Radial site map: the front page at the center, each slug level on its own
- * ring. All pages of the site are shown (from /_api/pages), plus any extra
- * paths seen in transitions (deleted pages); siblings run clockwise in
- * navigation order, starting at the top. Internal path -> path transitions
- * join opposite directions into straight connections (middle width = total
+ * Site map following the menu structure: top-level items in a row at the
+ * top (below the external source row), each item's subtree fanning out
+ * below it in menu order along a slightly circular downward arc. Index
+ * pages with no views are omitted, their children moving up in their
+ * place. All pages of the site are shown (from /_api/pages), plus any
+ * extra paths seen in transitions (deleted pages); these form their own
+ * top-level groups. Internal path -> path transitions join opposite
+ * directions into straight connections (middle width = total
  * count; connectors flare into the node pills at both ends and wrap
  * around their backs, surrounding them; the pills are drawn on top). Connection width grows
  * logarithmically with the count (a single count renders as a ~1 px
@@ -239,38 +242,16 @@ function buildNodeTree(internal, navOrder) {
   return { nodes, byPath, root: byPath.get('/') }
 }
 
-/** Sort children by navigation order and compute each subtree's angular weight. */
-function prepareWeights(root, navOrder) {
+/** Sort each node's children by navigation order, recursively. */
+function sortByNav(root, navOrder) {
   const byNav = (a, b) =>
     (navOrder.get(a.path) ?? Infinity) - (navOrder.get(b.path) ?? Infinity)
     || a.path.localeCompare(b.path)
-  const weight = (n) =>
-    n.children.length ? n.children.reduce((s, k) => s + weight(k), 0) : 1 / n.depth
-
-  const walkSort = (n) => {
+  const walk = (n) => {
     n.children.sort(byNav)
-    n.children.forEach(walkSort)
+    n.children.forEach(walk)
   }
-  walkSort(root)
-
-  return weight
-}
-
-/** Assign angles clockwise starting from the top (-PI/2). */
-function layoutAngles(root, unit, weight) {
-  const lay = (n, a0) => {
-    n.angle = a0
-    let a = a0
-    for (const k of n.children) {
-      lay(k, a)
-      a += weight(k) * unit
-    }
-  }
-  let a = -Math.PI / 2
-  for (const k of root.children) {
-    lay(k, a)
-    a += weight(k) * unit
-  }
+  walk(root)
 }
 
 /** Compute median reading time per article in whole minutes. */
@@ -294,17 +275,8 @@ function buildReadMinutes(visits) {
   return minutes
 }
 
-/** Compute radial positions, view counts and labels for each node. */
-function positionNodes(nodes, maxDepth, unit, viewsData, titles, readMinutes) {
-  // Constant radial gap between rings, equal to the arc spacing of nodes
-  // along a ring: leaf arc = unit * GAP, so GAP scales up with `unit` on
-  // sparse trees (where closing the circle forces wider arcs) and with
-  // 1/unit on dense ones (keeping arcs at the node clearance).
-  // Clearance is pill-width based.
-  const CLEAR = TNODE_W + 20
-  const GAP = CLEAR * Math.max(unit, 1 / unit)
-  const radius = (d) => d * GAP
-
+/** Compute view counts, labels and hidden flags for each node. */
+function annotateNodes(nodes, viewsData, titles, readMinutes) {
   const viewCount = (p) => {
     let n = 0
     for (const c of Object.values(viewsData?.[p] || {})) n += c
@@ -312,76 +284,110 @@ function positionNodes(nodes, maxDepth, unit, viewsData, titles, readMinutes) {
   }
 
   for (const n of nodes) {
-    const r = radius(n.depth)
-    n.x = Math.cos(n.angle) * r
-    n.y = Math.sin(n.angle) * r
     n.views = viewCount(n.path)
     n.readMin = readMinutes[n.path] || 0
-    // Slug inside the pill; full title goes on the link title attribute.
-    const slug = n.path === '/' ? '🏠︎' : n.path.split('/').pop()
-    n.label = slug.length > 16 ? `${slug.slice(0, 15)}…` : slug
+    // Article title inside the pill (shortened with ellipsis as needed),
+    // slug as fallback for pages missing from the site tree. The short
+    // path (last two segments, no leading /) renders above the pill; the
+    // front page shows a home symbol there instead (larger).
+    const slug = n.path.split('/').pop()
+    const label = titles.get(n.path) || (n.path === '/' ? '🏠︎' : slug)
+    n.label = label.length > 24 ? `${label.slice(0, 23)}…` : label
+    const segs = n.path.split('/').filter(Boolean)
+    n.crumb = n.path === '/'
+      ? '🏠︎'
+      : segs.length > 2 ? `…/${segs.slice(-2).join('/')}` : segs.join('/')
     n.title = titles.get(n.path) || ''
-    // Category (non-leaf) pages with no views in this window are left
-    // blank to keep the layout, but their pill/label is not drawn.
+    // Category (non-leaf) pages with no views in this window are omitted:
+    // their children move up in their place (see layoutGroups).
     n.hidden = n.children.length > 0 && n.views === 0
   }
-
-  return { radius, GAP }
 }
 
 /**
- * Family structure at a glance: a radial spoke from each parent to its
- * first child, and a ring arc across each sibling group from first to last
- * child in navigation (clockwise) order.
+ * Top-down layout following the menu structure: top-level items in an
+ * equally spaced row at the top (right below the external source row),
+ * the row following a shallow circular sag (center lowest) so connections
+ * between neighbors do not overlap the pills in between. Each top item's
+ * whole subtree fans out from it in menu (DFS preorder) order along a
+ * parabola that leaves the parent heading straight down and gradually
+ * bends to the right — no horizontal space is reserved for fans, they
+ * extend under the slots to their right. Hidden index pages are omitted
+ * from the fan; when the top item itself is hidden, the fan shifts one
+ * slot up, the first visible child taking the top position. The short
+ * path shown above each pill (last two segments) keeps the omitted menu
+ * level visible.
+ * Also returns curved spoke paths tracing each fan: top slot to first
+ * member, then member to member in menu order, each bowed to the right.
  */
-function buildFamilyArcs(nodes, radius) {
-  const arcs = []
-  for (const n of nodes) {
-    if (!n.children.length) continue
-    // The spoke aims along the FIRST CHILD's angle (the node's own angle
-    // coincides with it, except for the center page which has none).
-    const first = n.children[0]
-    const pillR = pillContact(Math.cos(first.angle), Math.sin(first.angle)).t
-    const r1 = radius(n.depth) + pillR
-    const r2 = radius(first.depth) - pillR
-    arcs.push({
-      d: `M ${Math.cos(first.angle) * r1} ${Math.sin(first.angle) * r1} `
-       + `L ${Math.cos(first.angle) * r2} ${Math.sin(first.angle) * r2}`,
-    })
-    if (n.children.length < 2) continue
-    const r = radius(n.children[0].depth)
-    const a0 = n.children[0].angle
-    const a1 = n.children[n.children.length - 1].angle
-    if (a1 - a0 >= 2 * Math.PI - 1e-6) continue // full circle: degenerate arc
-    const large = a1 - a0 > Math.PI ? 1 : 0
-    arcs.push({
-      d: `M ${Math.cos(a0) * r} ${Math.sin(a0) * r} `
-       + `A ${r} ${r} 0 ${large} 1 ${Math.cos(a1) * r} ${Math.sin(a1) * r}`,
-      r,
-      a0,
-      a1,
-    })
-  }
-  return arcs
-}
+function layoutGroups(root) {
+  // Top slots are spaced well over one pill width apart regardless of
+  // fan sizes.
+  const SLOT = TNODE_W + 100
+  const CLEAR = TNODE_W * 0.8 // fan spacing per member along the curve
 
-/** Bounding box of a circular arc centred at the origin, sampled. */
-function arcBounds(r, a0, a1) {
-  let x0 = Infinity
-  let y0 = Infinity
-  let x1 = -Infinity
-  let y1 = -Infinity
-  const steps = 36
-  for (let i = 0; i <= steps; i++) {
-    const t = a0 + (a1 - a0) * (i / steps)
-    const x = Math.cos(t) * r
-    const y = Math.sin(t) * r
-    if (x < x0) x0 = x
-    if (y < y0) y0 = y
-    if (x > x1) x1 = x
-    if (y > y1) y1 = y
+  // First pass: visible members per group, in menu order. Hidden index
+  // pages are skipped, but their children still appear. The front page
+  // forms its own group.
+  const groups = []
+  for (const g of [root, ...root.children]) {
+    const members = []
+    if (g === root) {
+      if (!g.hidden) members.push(g)
+    } else {
+      const walk = (n) => {
+        if (!n.hidden) members.push(n)
+        n.children.forEach(walk)
+      }
+      walk(g)
+    }
+    if (members.length) groups.push(members)
   }
-  return { x0, y0, x1, y1 }
+
+  // Top row on a true circular sag: center lowest, edges raised by SAG.
+  const half = ((groups.length - 1) * SLOT) / 2 || 1
+  const SAG = TNODE_H * 0.6
+  const Rc = (half * half + SAG * SAG) / (2 * SAG)
+  const topY = (x) => SAG - Rc + Math.sqrt(Rc * Rc - x * x)
+
+  // Second pass: place groups. Fan members follow a right-opening cubic
+  // p(t) = (gx + B t³, y0 + t): the tangent stays vertical near the
+  // parent (leaving almost straight down) and bends right gently,
+  // reaching ~50° from vertical at the last member. Member spacing along
+  // the curve is the pill clearance (dt integrated against curve speed).
+  const spokePairs = [] // [from node, to node] — paths emitted below
+  groups.forEach((members, gi) => {
+    const gx = gi * SLOT - half
+    const y0 = topY(gx)
+    members[0].x = gx
+    members[0].y = y0
+    const m = members.length - 1
+    if (!m) return
+    const tMax = m * CLEAR * 0.9
+    const B = 0.4 / (tMax * tMax)
+    let t = 0
+    for (let i = 1; i <= m; i++) {
+      const bend = 3 * B * t * t
+      t += CLEAR / Math.hypot(bend, 1)
+      const n = members[i]
+      n.x = gx + B * t * t * t
+      n.y = y0 + t
+      spokePairs.push([members[i - 1], n])
+    }
+  })
+
+  // Fan spokes bow to the right via a quadratic control point pushed
+  // rightward from the segment midpoint.
+  const spokes = spokePairs.map(([p, n]) => {
+    const mx = (p.x + n.x) / 2
+    const my = (p.y + n.y) / 2
+    const bow = Math.hypot(n.x - p.x, n.y - p.y) * 0.18
+    return {
+      d: `M ${p.x.toFixed(2)} ${p.y.toFixed(2)} `
+       + `Q ${(mx + bow).toFixed(2)} ${my.toFixed(2)} ${n.x.toFixed(2)} ${n.y.toFixed(2)}`,
+    }
+  })
+  return { GAP: TNODE_H * 2.6, spokes }
 }
 
 /** Collapse opposite transition directions into one unordered pair per page pair. */
@@ -600,6 +606,7 @@ function buildInternalEdges(pairs, byPath, visualScale = 1) {
     const [pf, pt] = k.split(' ')
     const a = byPath.get(pf)
     const b = byPath.get(pt)
+    if (a.hidden || b.hidden) continue // unplaced index pages are omitted
     const wMid = scaledWidth((ab + ba) * visualScale)
     if (wMid <= 0) continue
     edges.push(buildRibbon(a, b, ab, ba, wMid))
@@ -723,7 +730,7 @@ function collectSourcePairs(visits) {
  * Widths and pruning use the same log scale and traffic-share rule as
  * internal connections.
  */
-function buildExternal({ sources, exits }, byPath, radius, innerBounds, visualScale = 1) {
+function buildExternal({ sources, exits }, byPath, gap, innerBounds, visualScale = 1) {
   const extNodes = []
   const edges = []
   const flows = []
@@ -737,9 +744,13 @@ function buildExternal({ sources, exits }, byPath, radius, innerBounds, visualSc
 
   const width = (count) => scaledWidth(count * visualScale)
 
+  // Pill-shape overlap test (axis-aligned pills): much tighter than the
+  // bounding-circle test, so diagonal placements can sit close.
   const overlaps = (x, y) =>
     [...byPath.values(), ...extNodes].some(
-      (n) => Math.hypot(n.x - x, n.y - y) < TNODE_BOUND + TNODE_BOUND + 10,
+      (n) => !n.hidden
+        && Math.abs(n.x - x) < TNODE_W + 12
+        && Math.abs(n.y - y) < TNODE_H + 12,
     )
 
   // Incoming: one source node per identified source, in a row centered
@@ -779,6 +790,7 @@ function buildExternal({ sources, exits }, byPath, radius, innerBounds, visualSc
       extNodes.push(xn)
       for (const p of ps) {
         const page = byPath.get(p.page)
+        if (page.hidden) continue
         const wMid = width(p.in)
         if (wMid <= 0) continue
         edges.push(buildRibbon(xn, page, p.in, 0, wMid, true))
@@ -788,10 +800,21 @@ function buildExternal({ sources, exits }, byPath, radius, innerBounds, visualSc
   }
 
   // Outgoing: group by full URL so several links to the same domain stay
-  // distinct. Each exit node is placed one ring-gap outside its source page
-  // (same radial spacing internal rings use), fanned around the source angle,
-  // and shows the total count across all pages that link to that URL.
-  const GAP = radius(1) - radius(0)
+  // distinct; each shows the total count across all pages linking to it.
+  // Placement looks for empty space around the source page, always
+  // leftward: diagonal down-left first (often right beside the source,
+  // no need to drop below the fans), then left, up-left, and steeper
+  // fallbacks; the distance grows until a spot is free. Several exits of
+  // one page start at different directions.
+  const GAP = gap
+  const DIRS = [
+    (3 * Math.PI) / 4,         // diagonal down-left
+    Math.PI,                   // left
+    (5 * Math.PI) / 4,         // diagonal up-left
+    Math.PI / 2 + 0.35,        // steep down-left
+    Math.PI - 0.35,            // shallow up-left
+    (3 * Math.PI) / 4 + 0.5,   // far down-left
+  ]
   const outgoing = liveExits.filter((p) => p.out >= minCount)
     .sort((a, b) => b.out - a.out)
   const perPage = new Map()
@@ -805,23 +828,26 @@ function buildExternal({ sources, exits }, byPath, radius, innerBounds, visualSc
   }
 
   const exitNodes = new Map() // full URL -> node
-  const placedPerPage = new Map() // for angle fanning of the placement anchor
+  const placedPerPage = new Map() // for the placement direction offset
   for (const p of selected) {
     const page = byPath.get(p.page)
+    if (page.hidden) continue
     let xn = exitNodes.get(p.ext)
     if (!xn) {
       const used = placedPerPage.get(p.page) || 0
       placedPerPage.set(p.page, used + 1)
-      const base = page.depth ? page.angle : Math.PI / 2
-      const ang = base + [0, 0.4, -0.4][used]
-      let dist = GAP
-      let x = page.x + Math.cos(ang) * dist
-      let y = page.y + Math.sin(ang) * dist
-      for (let tries = 0; tries < 5 && overlaps(x, y); tries++) {
-        dist += GAP * 0.3
-        x = page.x + Math.cos(ang) * dist
-        y = page.y + Math.sin(ang) * dist
+      let x = 0
+      let y = 0
+      let found = false
+      for (let di = 0; di < DIRS.length && !found; di++) {
+        const ang = DIRS[(used + di) % DIRS.length]
+        for (let dist = GAP; dist <= GAP * 3.5; dist += GAP * 0.4) {
+          x = page.x + Math.cos(ang) * dist
+          y = page.y + Math.sin(ang) * dist
+          if (!overlaps(x, y)) { found = true; break }
+        }
       }
+      if (!found) continue // no empty space near the page: leave it out
       xn = {
         path: p.ext,
         href: p.ext,
@@ -845,9 +871,10 @@ function buildExternal({ sources, exits }, byPath, radius, innerBounds, visualSc
 }
 
 /**
- * Build the radial transition map model.
+ * Build the transition map model.
  * Returns { nodes, edges, flows, extNodes, arcs, bounds } or null when
- * there is nothing to show.
+ * there is nothing to show. `arcs` holds the family spokes; `nodes` only
+ * contains placed (visible) nodes.
  */
 export function buildTransitionGraph(data, pageTree, visits = [], visualScale = 1) {
   const internal = collectInternalTransitions(data?.transitions)
@@ -860,39 +887,25 @@ export function buildTransitionGraph(data, pageTree, visits = [], visualScale = 
   if (!internal.length && !navOrder.size) return null
 
   const { nodes, byPath, root } = buildNodeTree(internal, navOrder)
-  const weightFn = prepareWeights(root, navOrder)
-  const unit = (2 * Math.PI) / weightFn(root)
-  layoutAngles(root, unit, weightFn)
-
-  const maxDepth = Math.max(1, ...nodes.map((n) => n.depth))
-  const { radius } = positionNodes(nodes, maxDepth, unit, data?.views, titles, readMinutes)
-  const arcs = buildFamilyArcs(nodes, radius)
+  sortByNav(root, navOrder)
+  annotateNodes(nodes, data?.views, titles, readMinutes)
+  const { GAP, spokes } = layoutGroups(root)
+  const placed = nodes.filter((n) => !n.hidden)
   const pairs = aggregatePairs(internal)
   const { edges, flows } = buildInternalEdges(pairs, byPath, visualScale)
 
-  // Tight bounding box of the actual page nodes; family ring arcs can sweep
-  // outside the node pills (e.g. a large arc between two siblings on the
-  // left side reaching around the right), so their geometry is included too.
-  // External nodes extend the box below.
+  // Tight bounding box of the placed page nodes; external nodes extend it.
   const pad = 16
-  const xs = nodes.map((n) => n.x)
-  const ys = nodes.map((n) => n.y)
+  const xs = placed.map((n) => n.x)
+  const ys = placed.map((n) => n.y)
   const bounds = {
     x0: Math.min(...xs) - TNODE_BOUND - pad,
     y0: Math.min(...ys) - TNODE_BOUND - pad,
     x1: Math.max(...xs) + TNODE_BOUND + pad,
     y1: Math.max(...ys) + TNODE_BOUND + pad,
   }
-  for (const arc of arcs) {
-    if (arc.a0 == null) continue
-    const b = arcBounds(arc.r, arc.a0, arc.a1)
-    bounds.x0 = Math.min(bounds.x0, b.x0)
-    bounds.y0 = Math.min(bounds.y0, b.y0)
-    bounds.x1 = Math.max(bounds.x1, b.x1)
-    bounds.y1 = Math.max(bounds.y1, b.y1)
-  }
 
-  const ext = buildExternal({ sources, exits }, byPath, radius, bounds, visualScale)
+  const ext = buildExternal({ sources, exits }, byPath, GAP, bounds, visualScale)
   for (const xn of ext.extNodes) {
     bounds.x0 = Math.min(bounds.x0, xn.x - TNODE_BOUND - pad)
     bounds.y0 = Math.min(bounds.y0, xn.y - TNODE_BOUND - pad)
@@ -901,11 +914,11 @@ export function buildTransitionGraph(data, pageTree, visits = [], visualScale = 
   }
 
   return {
-    nodes,
+    nodes: placed,
     edges: [...edges, ...ext.edges],
     flows: [...flows, ...ext.flows],
     extNodes: ext.extNodes,
-    arcs,
+    arcs: spokes,
     bounds,
   }
 }

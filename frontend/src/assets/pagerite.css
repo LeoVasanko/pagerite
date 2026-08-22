@@ -65,6 +65,12 @@
   box-sizing: border-box;
 }
 
+/* Links never underline — including SVG link text, which the UA stylesheet
+   underlines by default. */
+a {
+  text-decoration: none;
+}
+
 html {
   scroll-behavior: smooth;
   /* Native-scrollbar fallback styling (JS off or before pagerite.js runs):

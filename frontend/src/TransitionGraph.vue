@@ -167,14 +167,16 @@ const fitPx = (label) =>
       <circle v-for="(b, i) in beads" :key="'b' + i"
               :cx="b.x" :cy="b.y" :r="BEAD_R" class="tbead" />
       <g v-for="(x, i) in graph.extNodes" :key="'x' + i">
-        <a v-if="x.href" :href="x.href" target="_blank" rel="noopener" :title="x.path">
+        <a v-if="x.href" :href="x.href" target="_blank" rel="noopener">
+          <title>{{ x.path }}</title>
           <rect :x="x.x - TNODE_W/2" :y="x.y - TNODE_H/2" :width="TNODE_W" :height="TNODE_H" :rx="TNODE_H/2"
                 :class="['txnode', x.kind === 'source' ? 'txnode-source' : 'txnode-exit']" />
           <text :x="x.x" :y="x.y - TNODE_H*0.16" class="tnodeslug" dominant-baseline="middle"
                 :style="{ '--slug-px': `${fitPx(x.label)}px` }">{{ x.label }}</text>
           <text :x="x.x" :y="x.y + TNODE_H*0.24" class="tnodecount" dominant-baseline="middle">{{ formatCount(x.count) }}</text>
         </a>
-        <g v-else :title="x.path">
+        <g v-else>
+          <title>{{ x.path }}</title>
           <rect :x="x.x - TNODE_W/2" :y="x.y - TNODE_H/2" :width="TNODE_W" :height="TNODE_H" :rx="TNODE_H/2"
                 :class="['txnode', x.kind === 'source' ? 'txnode-source' : 'txnode-exit']" />
           <text :x="x.x" :y="x.y - TNODE_H*0.16" class="tnodeslug" dominant-baseline="middle"
@@ -183,7 +185,8 @@ const fitPx = (label) =>
         </g>
       </g>
       <g v-for="n in graph.nodes" :key="n.path">
-        <a v-if="!n.hidden" :href="n.path" :title="n.title">
+        <a :href="n.path">
+          <title>{{ n.title }}</title>
           <rect :x="n.x - TNODE_W/2" :y="n.y - TNODE_H/2" :width="TNODE_W" :height="TNODE_H" :rx="TNODE_H/2" class="tnode" />
           <text :x="n.x" :y="n.y - TNODE_H*0.16" class="tnodeslug" dominant-baseline="middle"
                 :style="{ '--slug-px': `${fitPx(n.label)}px` }">{{ n.label }}</text>
@@ -191,16 +194,8 @@ const fitPx = (label) =>
             {{ n.readMin ? `${formatCount(n.views)}×${n.readMin}m` : formatCount(n.views) }}
           </text>
         </a>
-        <template v-else>
-          <text :x="n.x" :y="n.y"
-                :transform="`rotate(${n.angle * 180 / Math.PI}, ${n.x}, ${n.y})`"
-                class="tnodehidden" text-anchor="start" dominant-baseline="middle">➤</text>
-          <text :x="n.x + Math.cos(n.angle) * 10"
-                :y="n.y + Math.sin(n.angle) * 10"
-                :transform="`rotate(${(n.angle + (Math.cos(n.angle) < 0 ? Math.PI : 0)) * 180 / Math.PI}, ${n.x + Math.cos(n.angle) * 10}, ${n.y + Math.sin(n.angle) * 10})`"
-                :text-anchor="Math.cos(n.angle) < 0 ? 'end' : 'start'"
-                class="tnodehidden" dominant-baseline="middle">{{ n.label }}</text>
-        </template>
+        <text v-if="n.crumb" :x="n.x" :y="n.y - TNODE_H/2 - 10"
+              :class="['tnodepath', n.path === '/' && 'tnodepath-home']">{{ n.crumb }}</text>
       </g>
     </svg>
   </section>
@@ -249,17 +244,18 @@ const fitPx = (label) =>
   text-anchor: middle;
 }
 .tmap a { cursor: pointer; }
-.tmap a:hover .tnodeslug { text-decoration: underline; }
 .tmap .tnodecount {
   fill: var(--bg, Canvas);
   opacity: 0.75;
   font-size: calc(13px / var(--u, 1));
   text-anchor: middle;
 }
-.tmap .tnodehidden {
-  fill: var(--text);
-  font-size: calc(13px / var(--u, 1));
+.tmap .tnodepath {
+  fill: var(--muted);
+  font-size: calc(11px / var(--u, 1));
+  text-anchor: middle;
 }
+.tmap .tnodepath-home { font-size: calc(17px / var(--u, 1)); }
 
 section { margin-top: 1.8rem; }
 </style>
