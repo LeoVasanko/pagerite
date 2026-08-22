@@ -27,6 +27,7 @@ from email.utils import format_datetime
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
+from xml.sax.saxutils import escape as xml_escape
 
 import blake3
 import msgspec
@@ -1001,6 +1002,59 @@ async def editor_ws(ws: WebSocket) -> None:
 async def front_page(request: Request) -> Response:
     """Render the front page (slug path "")."""
     return await show_page(request, "")
+
+
+@app.get("/sitemap.xml")
+async def sitemap(request: Request) -> Response:
+    """Dynamically generate a sitemap of all published article pages."""
+    base = str(request.base_url).rstrip("/")
+    entries: list[tuple[str, datetime]] = []
+
+    def walk(nodes: dict[str, Node], prefix: str) -> None:
+        for slug, node in sorted_nodes(nodes):
+            path = f"{prefix}/{slug}" if prefix else slug
+            if node.published and node.content is not None:
+                entries.append((path, node.modified))
+            walk(node.children, path)
+
+    walk(data.menu, "")
+
+    def priority(path: str) -> float:
+        return 1.0 if path == "" else max(0.1, 0.8 - path.count("/") * 0.2)
+
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ]
+    for path, modified in entries:
+        loc = xml_escape(f"{base}/{path}" if path else base)
+        lastmod = modified.astimezone(UTC).isoformat()
+        lines.append(
+            f"  <url>"
+            f"<loc>{loc}</loc>"
+            f"<lastmod>{lastmod}</lastmod>"
+            f"<priority>{priority(path):.1f}</priority>"
+            f"</url>"
+        )
+    lines.append("</urlset>")
+
+    return Response(
+        "\n".join(lines),
+        media_type="application/xml",
+        headers={"cache-control": "no-cache"},
+    )
+
+
+@app.get("/robots.txt")
+async def robots_txt(request: Request) -> Response:
+    """Allow all crawling and point crawlers at the sitemap."""
+    base = str(request.base_url).rstrip("/")
+    body = f"User-agent: *\nAllow: /\nSitemap: {base}/sitemap.xml\n"
+    return Response(
+        body,
+        media_type="text/plain",
+        headers={"cache-control": "no-cache"},
+    )
 
 
 # Vue build asset routes are inserted at this position during load(): the
