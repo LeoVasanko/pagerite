@@ -356,7 +356,7 @@ const abuseRows = computed(() => formatAbuseRows(data.value?.abuse || [], client
 }
 
 .visit-table .last-seen {
-  width: 5rem;
+  width: 6rem;
   text-align: right;
   white-space: nowrap;
   cursor: pointer;

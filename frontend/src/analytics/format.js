@@ -92,7 +92,7 @@ export function calcReadStats(visits) {
     totalVisitSeconds += secs.reduce((a, b) => a + b, 0)
     for (const [path, s] of Object.entries(v.read || {})) {
       if (s >= MIN_READ_SECONDS) {
-        ;(perArticle[path] || (perArticle[path] = [])).push(s)
+        ; (perArticle[path] || (perArticle[path] = [])).push(s)
       }
     }
   }
@@ -185,6 +185,8 @@ export function formatWhen(ts, now = Date.now()) {
   if (adiff <= 86400000) {
     return formatter
       .format(Math.round(diff / 3600000), 'hour')
+      .replace('hours', 'h')
+      .replace('hour', 'h')
       .replaceAll(' ', '\u202F')
   }
   if (adiff <= 604800000) {
