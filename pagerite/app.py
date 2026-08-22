@@ -1008,32 +1008,54 @@ async def front_page(request: Request) -> Response:
 async def sitemap(request: Request) -> Response:
     """Dynamically generate a sitemap of all published article pages."""
     base = str(request.base_url).rstrip("/")
-    entries: list[tuple[str, datetime]] = []
+    entries: list[tuple[str, datetime, int]] = []
 
-    def walk(nodes: dict[str, Node], prefix: str) -> None:
+    def walk(
+        nodes: dict[str, Node], prefix: str, parent_has_content: bool = True
+    ) -> None:
+        first_content_slug = next(
+            (
+                slug
+                for slug, node in sorted_nodes(nodes)
+                if node.published and node.content is not None
+            ),
+            None,
+        )
         for slug, node in sorted_nodes(nodes):
             path = f"{prefix}/{slug}" if prefix else slug
+            depth = path.count("/") if path else 0
+            if (
+                not parent_has_content
+                and slug == first_content_slug
+                and node.published
+                and node.content is not None
+                and depth > 0
+            ):
+                depth -= 1
             if node.published and node.content is not None:
-                entries.append((path, node.modified))
-            walk(node.children, path)
+                entries.append((path, node.modified, depth))
+            if node.children:
+                walk(node.children, path, node.content is not None)
 
     walk(data.menu, "")
 
-    def priority(path: str) -> float:
-        return 1.0 if path == "" else max(0.1, 0.8 - path.count("/") * 0.2)
+    def priority(depth: int) -> float:
+        return max(0.1, 1.0 - depth * 0.2)
 
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
     ]
-    for path, modified in entries:
+    for path, modified, depth in entries:
         loc = xml_escape(f"{base}/{path}" if path else base)
-        lastmod = modified.astimezone(UTC).isoformat()
+        lastmod = (
+            modified.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        )
         lines.append(
             f"  <url>"
             f"<loc>{loc}</loc>"
             f"<lastmod>{lastmod}</lastmod>"
-            f"<priority>{priority(path):.1f}</priority>"
+            f"<priority>{priority(depth):.1f}</priority>"
             f"</url>"
         )
     lines.append("</urlset>")

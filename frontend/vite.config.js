@@ -7,11 +7,10 @@ import vueDevTools from 'vite-plugin-vue-devtools'
 
 const backendUrl = process.env.PAGERITE_BACKEND_URL || 'http://localhost:3200'
 
-// Proxy content pages (/slug, /path/to/slug) to the FastAPI backend in dev.
-// Excludes Vite internals (/@..., /src, /node_modules, /__...) and the
-// backend's /_ prefix. /_api, /_f, /_themes and the /_a analytics ping are
-// handled by the fastapi-vue plugin.
-const CONTENT_PROXY = '^\\/(?!_|@|src|node_modules|__)(?:[^./?]+(?:\\/[^./?]+)*)?(?:\\?.*)?$'
+// Proxy everything except Vite's own dev-time paths and the backend machinery
+// to the FastAPI backend in dev. /_api, /_f, /_themes and /_a are handled by
+// the fastapi-vue plugin, and /@..., /src, /node_modules, /__... stay with Vite.
+const CONTENT_PROXY = '^(?!/_|/@|/src|/node_modules|/__).*$'
 
 // https://vite.dev/config/
 export default defineConfig({
