@@ -5,7 +5,13 @@ ping on page load starts a visit, later pings extend it, and pings with no
 known session start a fresh one (missing data, not dropped). The document
 GET handler stashes the entry referer (external https origin) and any
 utm_* query parameters in in-memory IP tables, consumed when the ping
-starts the visit; nothing is counted without a ping (bots stay invisible).
+starts the visit; nothing is counted without a ping (plain bots that only
+fetch documents end up in the crawler list).  JS-running crawlers
+(Googlebot, GoogleOther, Applebot, ...) do ping, but their UA gives them
+away (``_is_bot_ua``) and their pings are ignored, so they land in the
+crawler list too.  Idle-time link preloads from pagerite.js carry an
+``x-pagerite-preload`` header and are not tracked at all — the ping sent
+when the user actually navigates does the counting.
 Admin clients ping with ``hide=1``, which records nothing and removes any
 visit the session accumulated before logging in.  Scanner telltale 404s
 (dotpaths, *.php) classify the source IP as abuse; its hits — including
@@ -238,6 +244,18 @@ def _utm_tags(query: str) -> dict[str, str]:
 
 
 _CRAWLER_TIMEOUT = timedelta(seconds=10)
+
+#: UAs of JS-running crawlers, which would register as visitors on their
+#: ping.  Anything calling itself a "bot" matches; known crawlers without
+#: that token (GoogleOther) are listed as extra alternates.  No source
+#: verification: a spoofed bot UA just lands in the crawler list, and
+#: scanners that probe telltale paths are caught by the abuse rules anyway.
+_BOT_UA = re.compile(r"bot|googleother", re.IGNORECASE)
+
+
+def _is_bot_ua(ua: str) -> bool:
+    """True when the UA claims a crawler identity (Googlebot, Applebot, ...)."""
+    return bool(_BOT_UA.search(ua))
 
 #: Plain-404 count per IP that classifies it as abuse even without a
 #: telltale path hit.
@@ -664,7 +682,10 @@ class Store:
         removed from the stats (the admin browsed anonymously before logging
         in).  Nothing new is recorded.
 
-        Pings from IPs classified as abuse are ignored entirely.
+        Pings from IPs classified as abuse, and pings whose User-Agent
+        claims a JS-running crawler identity (``_is_bot_ua``), are ignored
+        entirely — the crawler's pending hits stay queued and flush to
+        ``data.crawlers`` normally.
 
         Returns the index of the new visit when one is created (or None) and
         the client hashes of any crawler hits flushed by this call, so callers
@@ -684,6 +705,11 @@ class Store:
                 self._save()
             return None, flushed
         if ip in self.data.abuse_ips:
+            return None, flushed
+        if _is_bot_ua(ua):
+            # A JS-running crawler (Googlebot, GoogleOther, Applebot execute
+            # JS and ping): never a visit.  Its pending crawler hits are
+            # kept and flush to ``data.crawlers`` normally.
             return None, flushed
         # A real visitor ping cancels any pending crawler hits from this client.
         self.pending_crawlers = [

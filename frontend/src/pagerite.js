@@ -337,7 +337,10 @@ import "overlayscrollbars/overlayscrollbars.css";
     }
     for (const url of urls) {
       if (pageCache.has(url)) continue;
-      fetch(url)
+      // x-pagerite-preload: idle cache warm-up, not a page view — the
+      // server excludes these GETs from analytics (the ping sent on actual
+      // navigation does the counting).
+      fetch(url, { headers: { "x-pagerite-preload": "1" } })
         .then((r) => (r.ok && (r.headers.get("content-type") || "").includes("text/html")
           ? r.text() : ""))
         .then((html) => { if (html) pageCache.set(url, html); })

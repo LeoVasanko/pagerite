@@ -857,8 +857,9 @@ def _track_entry(path: str, request: Request) -> list[bytes]:
     """Stash the referer/UTM tags and queue a pending crawler hit for the GET.
 
     Nothing is counted on the GET itself — the client's /_a ping starts the
-    visit, so bots never register as visits.  (Admin clients ping too, but
-    with hide=1, which scrubs their session instead of recording it.)
+    visit, so bots never register as visits (JS-running crawlers ping too,
+    but the ping handler ignores known bot UAs).  (Admin clients ping too,
+    but with hide=1, which scrubs their session instead of recording it.)
 
     The devserver's health probe (``GET /?from=devserver.py`` from
     ``127.0.0.1``) is ignored: it is not real traffic and would otherwise be
@@ -868,6 +869,12 @@ def _track_entry(path: str, request: Request) -> list[bytes]:
     Returns the client hashes of any pending crawler hits flushed to persistent
     storage, so callers can schedule async geoip and reverse-DNS enrichment.
     """
+    if request.headers.get("x-pagerite-preload"):
+        # Idle-time page-cache warm-up by pagerite.js, not a page view: the
+        # ping sent when the user actually navigates does the counting.
+        # (Forging the header only hides a GET from the crawler stats; the
+        # path-based abuse classification is unaffected.)
+        return []
     if (
         path == ""
         and str(request.url.query) == "from=devserver.py"

@@ -24,7 +24,14 @@ The client (`pagerite.js`) POSTs fire-and-forget pings to `/_a` with
 
 - **Initial page load**: `to` is the loaded path. This ping is what starts
   the visit and counts the entry page view — the document GET alone records
-  nothing, so bots and admin browsing never register. Reloads are not
+  nothing, so bots and admin browsing never register. JS-running crawlers
+  (Googlebot, GoogleOther, Applebot, ...) do ping, but their User-Agent
+  gives them away: pings whose UA matches `_is_bot_ua` (anything calling
+  itself a "bot", plus known exceptions such as GoogleOther) are ignored
+  server-side, and their document GETs land in the crawler list instead.
+  No source-IP verification is done: a spoofed bot UA merely lands in the
+  crawler stats, and scanners that probe telltale paths are caught by the
+  abuse rules regardless. Reloads are not
   visits: the ping is skipped (PerformanceNavigationTiming `reload`), so a
   refresh neither counts a second view nor logs a self-transition. The GET
   handler stashes a cross-origin https `Referer` (origin part only) and any
@@ -74,8 +81,13 @@ The client (`pagerite.js`) POSTs fire-and-forget pings to `/_a` with
   removing older versions after an update; without the flag only an existing
   file is used.
 - **Crawler hits**: every document GET is queued in RAM as a pending crawler
-  hit.  If a ping from the same client arrives within 10 seconds the hit is
-  discarded; otherwise it is written to `crawlers`.  Crawlers do not count as
+  hit — except idle-time link preloads from pagerite.js, which carry an
+  `x-pagerite-preload` header and are not tracked at all (the ping sent when
+  the user actually navigates to a preloaded page does the counting; forging
+  the header only hides a GET from the crawler stats, the path-based abuse
+  classification is unaffected).  If a ping
+  from the same client arrives within 10 seconds the hit is discarded;
+  otherwise it is written to `crawlers`.  Crawlers do not count as
   visits or views.  The `Accept-Language` header is stored on the shared
   `Client` immediately; reverse-DNS host names and DB-IP geoip
   country/city are filled in asynchronously, just like for real visits.  In
