@@ -681,6 +681,7 @@ def render_analytics(
     theme: str = "",
     favicon: str = "",
     brand_html: str = "",
+    initial_range: str = "week",
 ) -> str:
     """Render the analytics viewer as a normal page at /_a."""
     page_scripts, page_stylesheets = _page_assets()
@@ -689,7 +690,7 @@ def render_analytics(
     stylesheets = page_stylesheets + analytics_stylesheets
     doc = E.article
     with doc:
-        doc.div(id="analytics-app")
+        doc.div(id="analytics-app", **{"data-initial-range": initial_range})
     return str(
         _layout(
             scripts,

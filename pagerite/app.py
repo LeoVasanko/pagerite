@@ -22,7 +22,7 @@ import shutil
 import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
 from functools import lru_cache
 from pathlib import Path
@@ -711,6 +711,17 @@ class AnalyticsPing(BaseModel):
     read: int = 0
 
 
+def _analytics_initial_range() -> str:
+    """Default analytics range: day when history is shorter than 24 h."""
+    visits = analytics_store.data.visits
+    if not visits:
+        return "week"
+    earliest = min(v.start for v in visits)
+    if datetime.now(UTC) - earliest < timedelta(hours=24):
+        return "day"
+    return "week"
+
+
 @app.get("/_a", response_model=None)
 async def analytics_page(request: Request) -> HTMLResponse:
     """Render the analytics viewer as a normal site page at /_a.
@@ -721,7 +732,13 @@ async def analytics_page(request: Request) -> HTMLResponse:
     """
     return HTMLResponse(
         views.render_analytics(
-            data.menu, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html
+            data.menu,
+            data.brand,
+            data.custom_css,
+            data.theme,
+            data.favicon,
+            data.brand_html,
+            initial_range=_analytics_initial_range(),
         ),
         headers={"cache-control": "no-cache"},
     )

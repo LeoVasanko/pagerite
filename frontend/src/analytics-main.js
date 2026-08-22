@@ -9,7 +9,9 @@ let app = null
 export function mount(container) {
   if (app) return
   app = createApp(AnalyticsView, {
-    initialRange: location.hash.slice(1) || 'week',
+    initialRange: location.hash.slice(1)
+      || container.dataset.initialRange
+      || 'week',
   })
   app.mount(container)
 }
