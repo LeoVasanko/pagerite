@@ -10,7 +10,8 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vu
 import { rangeWindow, WEEK } from './analytics/time.js'
 import { formatCount } from './analytics/format.js'
 import {
-  TNODE_R,
+  TNODE_W,
+  TNODE_H,
   BEAD_R,
   BEAD_SPEED,
   buildTransitionGraph,
@@ -146,16 +147,17 @@ watch(svgEl, (el) => {
 })
 watch(() => graph.value?.bounds, updateScale)
 onBeforeUnmount(() => resizeObs?.disconnect())
+
+// Font size (px) that fits a label inside the pill width at the current
+// zoom: ~0.52 em average glyph width, 12 px padding per side, capped.
+const fitPx = (label) =>
+  Math.min(15, (TNODE_W * pxPerUnit.value - 24) / (0.52 * Math.max(label.length, 1)))
 </script>
 
 <template>
   <section v-if="graph">
     <svg ref="svgEl" class="tmap" :style="{ '--u': pxPerUnit }" :viewBox="`${graph.bounds.x0} ${graph.bounds.y0} ${graph.bounds.x1 - graph.bounds.x0} ${graph.bounds.y1 - graph.bounds.y0}`"
          role="img" aria-label="map of transitions between pages">
-      <defs>
-        <!-- Unit-radius circle; only the portion near the bottom is used. -->
-        <path id="tnode-label-arc" d="M 0,-1 A 1,1 0 1,0 0,1 A 1,1 0 1,0 -0.001,-1" />
-      </defs>
       <path v-for="(a, i) in graph.arcs" :key="'a' + i"
             :d="a.d" class="tarc" />
       <path v-for="(e, i) in graph.edges" :key="'e' + i"
@@ -166,29 +168,26 @@ onBeforeUnmount(() => resizeObs?.disconnect())
               :cx="b.x" :cy="b.y" :r="BEAD_R" class="tbead" />
       <g v-for="(x, i) in graph.extNodes" :key="'x' + i">
         <a v-if="x.href" :href="x.href" target="_blank" rel="noopener" :title="x.path">
-          <circle :cx="x.x" :cy="x.y" :r="x.r"
-                  :class="['txnode', x.kind === 'source' ? 'txnode-source' : 'txnode-exit']" />
-          <text :transform="`translate(${x.x}, ${x.y}) scale(${x.r - 4})`" class="tnodeslug" :style="{ '--node-r': x.r - 4 }">
-            <textPath href="#tnode-label-arc" startOffset="50%" text-anchor="middle" side="right">{{ x.label }}</textPath>
-          </text>
-          <text :x="x.x" :y="x.y" class="tnodecount" dominant-baseline="middle">{{ formatCount(x.count) }}</text>
+          <rect :x="x.x - TNODE_W/2" :y="x.y - TNODE_H/2" :width="TNODE_W" :height="TNODE_H" :rx="TNODE_H/2"
+                :class="['txnode', x.kind === 'source' ? 'txnode-source' : 'txnode-exit']" />
+          <text :x="x.x" :y="x.y - TNODE_H*0.16" class="tnodeslug" dominant-baseline="middle"
+                :style="{ '--slug-px': `${fitPx(x.label)}px` }">{{ x.label }}</text>
+          <text :x="x.x" :y="x.y + TNODE_H*0.24" class="tnodecount" dominant-baseline="middle">{{ formatCount(x.count) }}</text>
         </a>
         <g v-else :title="x.path">
-          <circle :cx="x.x" :cy="x.y" :r="x.r"
-                  :class="['txnode', x.kind === 'source' ? 'txnode-source' : 'txnode-exit']" />
-          <text :transform="`translate(${x.x}, ${x.y}) scale(${x.r - 4})`" class="tnodeslug" :style="{ '--node-r': x.r - 4 }">
-            <textPath href="#tnode-label-arc" startOffset="50%" text-anchor="middle" side="right">{{ x.label }}</textPath>
-          </text>
-          <text :x="x.x" :y="x.y" class="tnodecount" dominant-baseline="middle">{{ formatCount(x.count) }}</text>
+          <rect :x="x.x - TNODE_W/2" :y="x.y - TNODE_H/2" :width="TNODE_W" :height="TNODE_H" :rx="TNODE_H/2"
+                :class="['txnode', x.kind === 'source' ? 'txnode-source' : 'txnode-exit']" />
+          <text :x="x.x" :y="x.y - TNODE_H*0.16" class="tnodeslug" dominant-baseline="middle"
+                :style="{ '--slug-px': `${fitPx(x.label)}px` }">{{ x.label }}</text>
+          <text :x="x.x" :y="x.y + TNODE_H*0.24" class="tnodecount" dominant-baseline="middle">{{ formatCount(x.count) }}</text>
         </g>
       </g>
       <g v-for="n in graph.nodes" :key="n.path">
         <a v-if="!n.hidden" :href="n.path" :title="n.title">
-          <circle :cx="n.x" :cy="n.y" :r="TNODE_R" class="tnode" />
-          <text :transform="`translate(${n.x}, ${n.y}) scale(${TNODE_R - 4})`" class="tnodeslug" :style="{ '--node-r': TNODE_R - 4 }">
-            <textPath href="#tnode-label-arc" startOffset="50%" text-anchor="middle" side="right">{{ n.label }}</textPath>
-          </text>
-          <text :x="n.x" :y="n.y" class="tnodecount" dominant-baseline="middle">
+          <rect :x="n.x - TNODE_W/2" :y="n.y - TNODE_H/2" :width="TNODE_W" :height="TNODE_H" :rx="TNODE_H/2" class="tnode" />
+          <text :x="n.x" :y="n.y - TNODE_H*0.16" class="tnodeslug" dominant-baseline="middle"
+                :style="{ '--slug-px': `${fitPx(n.label)}px` }">{{ n.label }}</text>
+          <text :x="n.x" :y="n.y + TNODE_H*0.24" class="tnodecount" dominant-baseline="middle">
             {{ n.readMin ? `${formatCount(n.views)}×${n.readMin}m` : formatCount(n.views) }}
           </text>
         </a>
@@ -227,33 +226,33 @@ onBeforeUnmount(() => resizeObs?.disconnect())
   filter: drop-shadow(0 0 2.5px var(--accent));
 }
 .tmap .txnode {
-  fill: var(--bg, Canvas);
-  stroke-width: 1.5;
+  fill: var(--text);
+  stroke: none;
 }
-.tmap .txnode-source { stroke: var(--text); }
-.tmap .txnode-exit { stroke: var(--text); }
+.tmap .txnode-source { fill: var(--text); }
+.tmap .txnode-exit { fill: var(--text); }
 .tmap .tarc {
   fill: none;
   stroke: var(--line);
   stroke-width: 1;
 }
 .tmap .tnode {
-  fill: var(--bg, Canvas);
-  stroke: var(--accent);
-  stroke-width: 1.5;
+  fill: var(--accent);
+  stroke: none;
 }
 /* Text renders at a constant screen size: --u (set from JS) is the
    viewBox-unit → pixel ratio of the rendered svg, so dividing by it makes
    the sizes independent of how far the graph is scaled down. */
 .tmap .tnodeslug {
-  fill: var(--text);
-  font-size: calc(15px / (var(--u, 1) * var(--node-r, 56)));
+  fill: var(--bg, Canvas);
+  font-size: calc(var(--slug-px, 15px) / var(--u, 1));
   text-anchor: middle;
 }
 .tmap a { cursor: pointer; }
-.tmap a:hover .tnodeslug { fill: var(--accent); }
+.tmap a:hover .tnodeslug { text-decoration: underline; }
 .tmap .tnodecount {
-  fill: var(--muted);
+  fill: var(--bg, Canvas);
+  opacity: 0.75;
   font-size: calc(13px / var(--u, 1));
   text-anchor: middle;
 }

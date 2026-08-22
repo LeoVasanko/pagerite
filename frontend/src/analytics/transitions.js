@@ -6,7 +6,8 @@
  * paths seen in transitions (deleted pages); siblings run clockwise in
  * navigation order, starting at the top. Internal path -> path transitions
  * join opposite directions into straight connections (middle width = total
- * count, wrapping the node circles at both ends). Connection width grows
+ * count; connectors flare into the node pills at both ends and wrap
+ * around their backs, surrounding them; the pills are drawn on top). Connection width grows
  * logarithmically with the count (a single count renders as a ~1 px
  * line, uncapped growth); connections carrying less than 1% of the total
  * traffic are pruned, which naturally keeps the graph under ~100
@@ -25,8 +26,97 @@
 
 import { MIN_READ_SECONDS } from './format.js'
 
-export const TNODE_R = 60 // node circles hold the slug and the view count
-export const EXT_R = 60 // external source/exit nodes use the same full size
+// Nodes are constant-size pills (stadium rects) holding the slug and the
+// view count on two centered lines. TNODE_BOUND is the pill's bounding
+// radius, used for layout clearance and placement; connectors and flows
+// use the exact outline geometry instead (pillContact below).
+export const TNODE_W = 160
+export const TNODE_H = 54
+const TNODE_BOUND = Math.hypot(TNODE_W, TNODE_H) / 2
+
+const PILL_R = TNODE_H / 2 // cap radius and straight-section half-height
+const PILL_OFF = TNODE_W / 2 - PILL_R // x offset of the cap centers
+
+/**
+ * Where the ray from a node center along (ux, uy) exits the pill outline
+ * (a capsule: straight top/bottom plus semicircular caps), enlarged by
+ * `margin`. Returns the distance `t` to the contact point and the outline
+ * arc position `s` of that point (see pillPointAt).
+ */
+const pillContact = (ux, uy, margin = 0) => {
+  const r = PILL_R + margin
+  const off = PILL_OFF + margin
+  const q = (Math.PI / 2) * r
+  // Straight top/bottom: valid when the crossing lands on the flat section.
+  let tf = Infinity
+  if (Math.abs(uy) > 1e-9) {
+    const t = r / Math.abs(uy)
+    if (Math.abs(t * ux) <= off + 1e-9) tf = t
+  }
+  // Rounded cap on the side the ray points to.
+  const cx = off * (ux >= 0 ? 1 : -1)
+  const disc = r * r - (cx * uy) ** 2
+  const tc = disc >= 0 ? cx * ux + Math.sqrt(disc) : Infinity
+  if (tf <= tc) {
+    const x = tf * ux
+    return { t: tf, s: uy > 0 ? q + off - x : q + 2 * off + Math.PI * r + x + off }
+  }
+  if (tc < Infinity) {
+    let th = Math.atan2(tc * uy, tc * ux - cx)
+    if (th < 0) th += 2 * Math.PI
+    const s = cx > 0
+      ? th <= Math.PI / 2
+        ? th * r
+        : q + 4 * off + Math.PI * r + (th - (3 * Math.PI) / 2) * r
+      : q + 2 * off + (th - Math.PI / 2) * r
+    return { t: tc, s }
+  }
+  return { t: TNODE_BOUND + margin, s: 0 }
+}
+
+/** Total perimeter of the (margined) pill outline. */
+const pillPerimeter = (margin = 0) =>
+  4 * (PILL_OFF + margin) + 2 * Math.PI * (PILL_R + margin)
+
+/**
+ * Point on the pill outline at arc position `s`, counterclockwise from the
+ * right cap tip: right cap up, top flat right-to-left, left cap down,
+ * bottom flat left-to-right, right cap up to the tip. Pills are never
+ * rotated, so the returned offset from the node center is in absolute
+ * coordinates.
+ */
+const pillPointAt = (s, margin = 0) => {
+  const r = PILL_R + margin
+  const off = PILL_OFF + margin
+  const P = pillPerimeter(margin)
+  const q = (Math.PI / 2) * r
+  s = ((s % P) + P) % P
+  if (s < q) {
+    const th = s / r
+    return [off + r * Math.cos(th), r * Math.sin(th)]
+  }
+  s -= q
+  if (s < 2 * off) return [off - s, r]
+  s -= 2 * off
+  if (s < Math.PI * r) {
+    const th = Math.PI / 2 + s / r
+    return [-off + r * Math.cos(th), r * Math.sin(th)]
+  }
+  s -= Math.PI * r
+  if (s < 2 * off) return [-off + s, -r]
+  s -= 2 * off
+  const th = (3 * Math.PI) / 2 + s / r
+  return [off + r * Math.cos(th), r * Math.sin(th)]
+}
+
+/** Unit tangent to the pill outline at arc position `s`, in the direction
+ * of increasing `s` (numeric; exact on both flats and caps). */
+const pillTangent = (s, margin = 0) => {
+  const [x1, y1] = pillPointAt(s - 0.5, margin)
+  const [x2, y2] = pillPointAt(s + 0.5, margin)
+  const m = Math.hypot(x2 - x1, y2 - y1) || 1
+  return [(x2 - x1) / m, (y2 - y1) / m]
+}
 
 // Edge width (half-width of the thin middle) grows logarithmically with
 // the count. The constants are scaled down by ~10× so busy ranges (day,
@@ -210,7 +300,8 @@ function positionNodes(nodes, maxDepth, unit, viewsData, titles, readMinutes) {
   // along a ring: leaf arc = unit * GAP, so GAP scales up with `unit` on
   // sparse trees (where closing the circle forces wider arcs) and with
   // 1/unit on dense ones (keeping arcs at the node clearance).
-  const CLEAR = 2 * TNODE_R + 12
+  // Clearance is pill-width based.
+  const CLEAR = TNODE_W + 20
   const GAP = CLEAR * Math.max(unit, 1 / unit)
   const radius = (d) => d * GAP
 
@@ -226,12 +317,12 @@ function positionNodes(nodes, maxDepth, unit, viewsData, titles, readMinutes) {
     n.y = Math.sin(n.angle) * r
     n.views = viewCount(n.path)
     n.readMin = readMinutes[n.path] || 0
-    // Slug inside the circle; full title goes on the link title attribute.
+    // Slug inside the pill; full title goes on the link title attribute.
     const slug = n.path === '/' ? '🏠︎' : n.path.split('/').pop()
     n.label = slug.length > 16 ? `${slug.slice(0, 15)}…` : slug
     n.title = titles.get(n.path) || ''
     // Category (non-leaf) pages with no views in this window are left
-    // blank to keep the layout, but their circle/label is not drawn.
+    // blank to keep the layout, but their pill/label is not drawn.
     n.hidden = n.children.length > 0 && n.views === 0
   }
 
@@ -250,8 +341,9 @@ function buildFamilyArcs(nodes, radius) {
     // The spoke aims along the FIRST CHILD's angle (the node's own angle
     // coincides with it, except for the center page which has none).
     const first = n.children[0]
-    const r1 = radius(n.depth) + TNODE_R
-    const r2 = radius(first.depth) - TNODE_R
+    const pillR = pillContact(Math.cos(first.angle), Math.sin(first.angle)).t
+    const r1 = radius(n.depth) + pillR
+    const r2 = radius(first.depth) - pillR
     arcs.push({
       d: `M ${Math.cos(first.angle) * r1} ${Math.sin(first.angle) * r1} `
        + `L ${Math.cos(first.angle) * r2} ${Math.sin(first.angle) * r2}`,
@@ -310,9 +402,13 @@ const fmtPt = (p) => `${p[0].toFixed(2)} ${p[1].toFixed(2)}`
 /**
  * Build one ribbon edge between two nodes with counts ab and ba.
  * `wMid` is the half-width of the thin middle (already strength-scaled by
- * the caller); `ra`/`rb` are the radii of the node circles each end wraps.
+ * the caller). Each end flares into the node's pill surround (the outline
+ * enlarged by margin S): the flare contact points follow the pill outline
+ * a constant arc distance to each side of the direct contact point, and
+ * the back of the ribbon wraps all the way around the pill between them,
+ * surrounding the node. The pills themselves are drawn on top.
  */
-function buildRibbon(a, b, ab, ba, wMid, ra = TNODE_R, rb = TNODE_R, external = false) {
+function buildRibbon(a, b, ab, ba, wMid, external = false) {
   const count = ab + ba
   const len = Math.hypot(b.x - a.x, b.y - a.y) || 1
   const ux = (b.x - a.x) / len
@@ -320,27 +416,40 @@ function buildRibbon(a, b, ab, ba, wMid, ra = TNODE_R, rb = TNODE_R, external = 
   const nx = -uy
   const ny = ux
 
-  // Radius of each node surround and the attachment geometry on it.
-  // These are intentionally derived from the node radius so resizing the
-  // graph (node circles, text) keeps connectors proportional.
-  const SURROUND = 4
-  const R2A = ra + SURROUND
-  const R2B = rb + SURROUND
-
-  // Attachment points sit somewhat forward from the side of the node,
-  // leaving enough room for the surround to flow naturally into the flare.
-  const BETA = (65 * Math.PI) / 180
-  const ENDA = R2A * Math.cos(BETA)
-  const wEndA = R2A * Math.sin(BETA)
-  const ENDB = R2B * Math.cos(BETA)
-  const wEndB = R2B * Math.sin(BETA)
+  // Direct contact: where the centerline exits each pill's surround.
+  const S = 4
+  const cA = pillContact(ux, uy, S)
+  const cB = pillContact(-ux, -uy, S)
 
   // Flares take a fair share of the free span while leaving the
   // count-scaled thin middle a visible share of the connection length.
-  // The maximum flare length scales with the node radius so larger nodes
-  // still show a wide connector end instead of hiding it under the circle.
-  const FLARE_MAX = Math.max(ra, rb) * 1.2
-  const FLARE = Math.min(FLARE_MAX, Math.max(0, (len - ENDA - ENDB) * 0.4))
+  // The maximum flare length scales with the contact distance so wide
+  // approach angles still show a wide connector end.
+  const free = Math.max(0, len - cA.t - cB.t)
+  const FLARE = Math.min(Math.max(cA.t, cB.t) * 1.2, free * 0.4)
+
+  // Flare endpoints: walk the outline a constant arc distance to each
+  // side of the direct contact point (spanning flats and caps alike).
+  const D = (Math.PI / 4) * (PILL_R + S)
+  // Per node: endpoints for the +n (left) and -n (right) flare sides,
+  // each with its arc position, absolute point, and an outline tangent
+  // oriented back toward the direct contact point.
+  const ends = (cx, cy, contact) => {
+    const pick = (s) => {
+      const [px, py] = pillPointAt(s, S)
+      // Outline tangent oriented back toward the direct contact point
+      // (the flare side sweeps from the contact point around to its
+      // endpoint and into the connection), so it can never fork outward.
+      const tan = pillTangent(s, S)
+      if (s > contact.s) { tan[0] = -tan[0]; tan[1] = -tan[1] }
+      return { s, p: [cx + px, cy + py], tan, side: px * nx + py * ny }
+    }
+    const plus = pick(contact.s + D)
+    const minus = pick(contact.s - D)
+    return plus.side >= 0 ? [plus, minus] : [minus, plus]
+  }
+  const [aLeftEnd, aRightEnd] = ends(a.x, a.y, cA)
+  const [bLeftEnd, bRightEnd] = ends(b.x, b.y, cB)
 
   // Point on the connection centerline at distance t from A, offset s
   // perpendicular to it.
@@ -349,48 +458,24 @@ function buildRibbon(a, b, ab, ba, wMid, ra = TNODE_R, rb = TNODE_R, external = 
     a.y + t * uy + s * ny,
   ]
 
-  // Arc around a node from p to q the long way, passing its back side.
-  const wrap = (p, q, node, back, R2) => {
-    const ang = (pt2) =>
-      Math.atan2(pt2[1] - node[1], pt2[0] - node[0])
-
-    const TAU = 2 * Math.PI
-    const da = ((ang(back) - ang(p)) % TAU + TAU) % TAU
-    const db = ((ang(q) - ang(p)) % TAU + TAU) % TAU
-
-    return `A ${R2} ${R2} 0 1 ${da < db ? 1 : 0} ${fmtPt(q)} `
-  }
-
-  // Build one side of a flare in node -> middle order.
-  const flarePoints = (endT, midT, s, dir, R2, END, wEnd) => {
-    const span = Math.abs(midT - endT)
-    const pEnd = P(endT, s * wEnd)
-    const pMid = P(midT, s * wMid)
-
-    // At the node, leave tangent to the circular surround.
-    // The circle radius at the attachment is locally:
-    //   A: (+END, ±wEnd)
-    //   B: (-END, ±wEnd)
-    // A perpendicular tangent pointing into the connection therefore has
-    // these centerline/normal components.
-    const tangentT = dir * wEnd / R2
-    const tangentS = -s * END / R2
-
-    const hEnd = span * 0.65
-    const hMid = span * 0.4
-
-    const cEnd = P(
-      endT + tangentT * hEnd,
-      s * wEnd + tangentS * hEnd,
-    )
-
-    // At the thin end, arrive parallel with the centerline.
-    const cMid = P(
-      midT - dir * hMid,
-      s * wMid,
-    )
-
-    return { pEnd, cEnd, cMid, pMid }
+  // One side of a flare: from the outline endpoint, leaving tangent to
+  // the pill outline, to the connection middle arriving parallel with
+  // the centerline. The tangent pull is clamped so the control point
+  // stays well on its own side of the centerline — otherwise a long
+  // flare on a rounded cap crosses the opposite side.
+  const flarePoints = (end, midT, s, dir) => {
+    let hEnd = FLARE * 0.65
+    const hMid = FLARE * 0.4
+    const tanS = end.tan[0] * nx + end.tan[1] * ny // inward rate
+    if (tanS * end.side < 0) {
+      hEnd = Math.min(hEnd, (Math.abs(end.side) * 0.6) / Math.abs(tanS))
+    }
+    return {
+      pEnd: end.p,
+      cEnd: [end.p[0] + end.tan[0] * hEnd, end.p[1] + end.tan[1] * hEnd],
+      cMid: P(midT - dir * hMid, s * wMid),
+      pMid: P(midT, s * wMid),
+    }
   }
 
   // Emit a cubic in either traversal direction. Reversing a cubic requires
@@ -402,25 +487,39 @@ function buildRibbon(a, b, ab, ba, wMid, ra = TNODE_R, rb = TNODE_R, external = 
     return `C ${fmtPt(f.cMid)} ${fmtPt(f.cEnd)} ${fmtPt(f.pEnd)} `
   }
 
-  const LA = P(ENDA, wEndA)
-  const RA = P(ENDA, -wEndA)
-  const LB = P(len - ENDB, wEndB)
-  const RB = P(len - ENDB, -wEndB)
+  // Trace the surround outline the long way around (behind the node) from
+  // arc s1 to arc s2. Sampled as a polyline: the visible result is a thin
+  // halo hugging the pill, so exact arc segments are unnecessary.
+  const outlineWrap = (cx, cy, s1, s2) => {
+    const per = pillPerimeter(S)
+    const dPlus = ((s2 - s1) % per + per) % per
+    const total = dPlus > per / 2 ? dPlus : per - dPlus
+    const dir = dPlus > per / 2 ? 1 : -1
+    const n = Math.max(4, Math.ceil(total / 6))
+    let out = ''
+    for (let i = 1; i <= n; i++) {
+      const [x, y] = pillPointAt(s1 + (dir * total * i) / n, S)
+      out += `L ${(cx + x).toFixed(2)} ${(cy + y).toFixed(2)} `
+    }
+    return out
+  }
 
-  const aLeft = flarePoints(ENDA, ENDA + FLARE, 1, 1, R2A, ENDA, wEndA)
-  const bLeft = flarePoints(len - ENDB, len - ENDB - FLARE, 1, -1, R2B, ENDB, wEndB)
-  const bRight = flarePoints(len - ENDB, len - ENDB - FLARE, -1, -1, R2B, ENDB, wEndB)
-  const aRight = flarePoints(ENDA, ENDA + FLARE, -1, 1, R2A, ENDA, wEndA)
+  const aLeft = flarePoints(aLeftEnd, cA.t + FLARE, 1, 1)
+  const bLeft = flarePoints(bLeftEnd, len - cB.t - FLARE, 1, -1)
+  const bRight = flarePoints(bRightEnd, len - cB.t - FLARE, -1, -1)
+  const aRight = flarePoints(aRightEnd, cA.t + FLARE, -1, 1)
 
-  const d = `M ${fmtPt(LA)} `
+  // Each end wraps the full back of the node pill between its two flare
+  // contact points (bLeft -> bRight around B, aRight -> aLeft around A).
+  const d = `M ${fmtPt(aLeft.pEnd)} `
     + curve(aLeft)
     + `L ${fmtPt(bLeft.pMid)} `
     + curve(bLeft, true)
-    + wrap(LB, RB, [b.x, b.y], P(len + R2B, 0), R2B)
+    + outlineWrap(b.x, b.y, bLeftEnd.s, bRightEnd.s)
     + curve(bRight)
     + `L ${fmtPt(aRight.pMid)} `
     + curve(aRight, true)
-    + wrap(RA, LA, [a.x, a.y], P(-R2A, 0), R2A)
+    + outlineWrap(a.x, a.y, aRightEnd.s, aLeftEnd.s)
     + 'Z'
 
   return {
@@ -433,7 +532,7 @@ function buildRibbon(a, b, ab, ba, wMid, ra = TNODE_R, rb = TNODE_R, external = 
 /**
  * Flow descriptors for the bead animation, one per edge direction with a
  * nonzero count: a straight segment running from inside the source node
- * to inside the target node (beads render under the node circles, so
+ * to inside the target node (beads render under the node pills, so
  * they emerge from and vanish beneath the nodes rather than popping in
  * at the surround), plus the emission interval (seconds between beads,
  * inverse of count * BEAD_RATE). Each segment is offset to the
@@ -441,12 +540,14 @@ function buildRibbon(a, b, ab, ba, wMid, ra = TNODE_R, rb = TNODE_R, external = 
  * edge run on parallel lanes instead of colliding. The component turns
  * these into independently simulated beads.
  */
-function buildFlows(a, b, ra, rb, ab, ba, visualScale = 1) {
+function buildFlows(a, b, ab, ba, visualScale = 1) {
   const len = Math.hypot(b.x - a.x, b.y - a.y) || 1
   const ux = (b.x - a.x) / len
   const uy = (b.y - a.y) / len
-  const t0 = ra / 3
-  const t1 = len - rb / 3
+  const rA = pillContact(ux, uy).t
+  const rB = pillContact(-ux, -uy).t
+  const t0 = rA / 3
+  const t1 = len - rB / 3
   if (t1 - t0 < 12) return []
 
   // Unit normal pointing to the visual right of the A -> B direction.
@@ -502,7 +603,7 @@ function buildInternalEdges(pairs, byPath, visualScale = 1) {
     const wMid = scaledWidth((ab + ba) * visualScale)
     if (wMid <= 0) continue
     edges.push(buildRibbon(a, b, ab, ba, wMid))
-    flows.push(...buildFlows(a, b, TNODE_R, TNODE_R, ab, ba, visualScale))
+    flows.push(...buildFlows(a, b, ab, ba, visualScale))
   }
   return { edges, flows }
 }
@@ -636,9 +737,9 @@ function buildExternal({ sources, exits }, byPath, radius, innerBounds, visualSc
 
   const width = (count) => scaledWidth(count * visualScale)
 
-  const overlaps = (x, y, r) =>
+  const overlaps = (x, y) =>
     [...byPath.values(), ...extNodes].some(
-      (n) => Math.hypot(n.x - x, n.y - y) < (n.r ?? TNODE_R) + r + 10,
+      (n) => Math.hypot(n.x - x, n.y - y) < TNODE_BOUND + TNODE_BOUND + 10,
     )
 
   // Incoming: one source node per identified source, in a row centered
@@ -661,8 +762,8 @@ function buildExternal({ sources, exits }, byPath, radius, innerBounds, visualSc
     .slice(0, MAX_EXT_IN)
   if (origins.length) {
     const cx = (innerBounds.x0 + innerBounds.x1) / 2
-    const y = innerBounds.y0 - TNODE_R - 64
-    const spacing = 2 * EXT_R + 44
+    const y = innerBounds.y0 - TNODE_BOUND - 64
+    const spacing = TNODE_W + 44
     const x0 = cx - ((origins.length - 1) * spacing) / 2
     origins.forEach(({ source, ps, total, href, isUtm }, i) => {
       const label = isUtm ? source : extLabel(source)
@@ -672,7 +773,6 @@ function buildExternal({ sources, exits }, byPath, radius, innerBounds, visualSc
         label: label.length > 25 ? `${label.slice(0, 24)}…` : label,
         x: x0 + i * spacing,
         y,
-        r: EXT_R,
         count: total,
         kind: 'source',
       }
@@ -681,8 +781,8 @@ function buildExternal({ sources, exits }, byPath, radius, innerBounds, visualSc
         const page = byPath.get(p.page)
         const wMid = width(p.in)
         if (wMid <= 0) continue
-        edges.push(buildRibbon(xn, page, p.in, 0, wMid, EXT_R, TNODE_R, true))
-        flows.push(...buildFlows(xn, page, EXT_R, TNODE_R, p.in, 0, visualScale))
+        edges.push(buildRibbon(xn, page, p.in, 0, wMid, true))
+        flows.push(...buildFlows(xn, page, p.in, 0, visualScale))
       }
     })
   }
@@ -717,7 +817,7 @@ function buildExternal({ sources, exits }, byPath, radius, innerBounds, visualSc
       let dist = GAP
       let x = page.x + Math.cos(ang) * dist
       let y = page.y + Math.sin(ang) * dist
-      for (let tries = 0; tries < 5 && overlaps(x, y, EXT_R); tries++) {
+      for (let tries = 0; tries < 5 && overlaps(x, y); tries++) {
         dist += GAP * 0.3
         x = page.x + Math.cos(ang) * dist
         y = page.y + Math.sin(ang) * dist
@@ -728,7 +828,6 @@ function buildExternal({ sources, exits }, byPath, radius, innerBounds, visualSc
         label: extLabel(p.ext),
         x,
         y,
-        r: EXT_R,
         count: 0,
         kind: 'exit',
       }
@@ -738,8 +837,8 @@ function buildExternal({ sources, exits }, byPath, radius, innerBounds, visualSc
     xn.count += p.out
     const wMid = width(p.out)
     if (wMid <= 0) continue
-    edges.push(buildRibbon(page, xn, p.out, 0, wMid, TNODE_R, EXT_R, true))
-    flows.push(...buildFlows(page, xn, TNODE_R, EXT_R, p.out, 0, visualScale))
+    edges.push(buildRibbon(page, xn, p.out, 0, wMid, true))
+    flows.push(...buildFlows(page, xn, p.out, 0, visualScale))
   }
 
   return { extNodes, edges, flows }
@@ -772,17 +871,17 @@ export function buildTransitionGraph(data, pageTree, visits = [], visualScale = 
   const { edges, flows } = buildInternalEdges(pairs, byPath, visualScale)
 
   // Tight bounding box of the actual page nodes; family ring arcs can sweep
-  // outside the node circle (e.g. a large arc between two siblings on the
+  // outside the node pills (e.g. a large arc between two siblings on the
   // left side reaching around the right), so their geometry is included too.
   // External nodes extend the box below.
   const pad = 16
   const xs = nodes.map((n) => n.x)
   const ys = nodes.map((n) => n.y)
   const bounds = {
-    x0: Math.min(...xs) - TNODE_R - pad,
-    y0: Math.min(...ys) - TNODE_R - pad,
-    x1: Math.max(...xs) + TNODE_R + pad,
-    y1: Math.max(...ys) + TNODE_R + pad,
+    x0: Math.min(...xs) - TNODE_BOUND - pad,
+    y0: Math.min(...ys) - TNODE_BOUND - pad,
+    x1: Math.max(...xs) + TNODE_BOUND + pad,
+    y1: Math.max(...ys) + TNODE_BOUND + pad,
   }
   for (const arc of arcs) {
     if (arc.a0 == null) continue
@@ -795,10 +894,10 @@ export function buildTransitionGraph(data, pageTree, visits = [], visualScale = 
 
   const ext = buildExternal({ sources, exits }, byPath, radius, bounds, visualScale)
   for (const xn of ext.extNodes) {
-    bounds.x0 = Math.min(bounds.x0, xn.x - xn.r - pad)
-    bounds.y0 = Math.min(bounds.y0, xn.y - xn.r - pad)
-    bounds.x1 = Math.max(bounds.x1, xn.x + xn.r + pad)
-    bounds.y1 = Math.max(bounds.y1, xn.y + xn.r + pad)
+    bounds.x0 = Math.min(bounds.x0, xn.x - TNODE_BOUND - pad)
+    bounds.y0 = Math.min(bounds.y0, xn.y - TNODE_BOUND - pad)
+    bounds.x1 = Math.max(bounds.x1, xn.x + TNODE_BOUND + pad)
+    bounds.y1 = Math.max(bounds.y1, xn.y + TNODE_BOUND + pad)
   }
 
   return {
