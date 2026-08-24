@@ -269,10 +269,9 @@ body:has(.multicol) #content {
 
 body.editing #content {
   margin-left: var(--editor-w);
-  padding-left: 1rem;
-  /* gap between the docked editor and the content */
-  /* No overflow clipping here: .editor-host lives outside this box
-     (negative left), and .wide shrink-wraps to the remaining space. */
+  /* No padding/gap here: the article area starts flush at the panel's right
+     edge so that full-bleed .wide images (anchored to that edge below) line
+     up with it exactly. */
 }
 
 /* The sidebar's gutter space is needed by the editor instead. */
@@ -280,33 +279,17 @@ body.editing #sidebar {
   display: none;
 }
 
-/* While editing, the window itself does not scroll: the editor panel is
-   exactly the remaining window height, and only the article area (#main)
-   scrolls. Without the editor, normal full-page scroll applies. */
-body.editing {
-  height: 100vh;
-  overflow: hidden;
-}
-
-body.editing #content {
-  min-height: 0;
-  grid-template-rows: 100%;
-}
-
-body.editing #main {
-  height: 100%;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-/* The editor host lives inside #content: it starts below the banner and
-   ends above the footer. With the page scroll locked while editing, the
-   panel exactly fills that space — the full available window height. */
+/* While editing, the window keeps scrolling normally (the overlay
+   scrollbars take no layout space, so the vw-based .wide bleed stays exact
+   and no horizontal scrollbar appears). The editor panel is fixed to the
+   viewport's left edge; main.js sets its top each scroll frame — the
+   banner's bottom edge while the banner is visible, else the viewport top.
+   The panel scrolls internally. */
 .editor-host {
-  position: absolute;
-  top: 0;
+  position: fixed;
+  top: 0; /* main.js: banner bottom while visible, else 0 */
   bottom: 0;
-  left: calc(0px - var(--editor-w));
+  left: 0;
   width: var(--editor-w);
 }
 
@@ -826,18 +809,18 @@ body:has(.multicol) figure:has(.wide) {
   margin-inline: calc(-20vw - 1.25rem) 0;
 }
 
-/* Editing: shrink the bleed to the space right of the docked editor. */
+/* Editing: shrink the bleed to the space right of the docked editor. The
+   window keeps its overlay scrollbars while editing, so — unlike a classic
+   scrollbar — they take no layout space and the vw math stays exact. */
 body.editing figure:has(.wide) {
   width: calc(100vw - var(--editor-w));
   margin-inline: calc(50% - (100vw - var(--editor-w)) / 2);
 }
 
 /* Editing + multicol: the left gutter is 1/5 of the space right of the
-   editor, and the bleed also crosses #content's 1rem editing gap plus
-   main's 1.25rem left padding (the gutter shrink from the padding roughly
-   cancels the rounding): −2rem in total. */
+   editor, and the bleed also crosses main's 1.25rem left padding. */
 body.editing:has(.multicol) figure:has(.wide) {
-  margin-inline: calc((100vw - var(--editor-w)) / -5 - 2rem) 0;
+  margin-inline: calc((100vw - var(--editor-w)) / -5 - 1.25rem) 0;
 }
 
 /* Narrow windows with a sidebar: below 102rem the symmetric gutters can no

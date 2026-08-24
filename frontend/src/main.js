@@ -23,6 +23,28 @@ let app = null
 let savedTitle = null
 let visible = false
 
+// The panel is fixed to the viewport's left edge (pagerite.css) but tracks
+// the page: its top is the banner's bottom edge while the banner is visible
+// (= #content's top edge), and the viewport top once the banner has
+// scrolled away. The window keeps scrolling normally while editing.
+function trackPanelTop() {
+  const content = document.getElementById('content')
+  if (host && content) {
+    host.style.top = `${Math.max(0, content.getBoundingClientRect().top)}px`
+  }
+}
+
+function startTrackingPanel() {
+  trackPanelTop()
+  addEventListener('scroll', trackPanelTop, { passive: true })
+  addEventListener('resize', trackPanelTop)
+}
+
+function stopTrackingPanel() {
+  removeEventListener('scroll', trackPanelTop)
+  removeEventListener('resize', trackPanelTop)
+}
+
 export function openEditor(path, { mode = 'page' } = {}) {
   if (app) {
     // Shell already mounted: re-show it if hidden, switch to the requested
@@ -36,9 +58,9 @@ export function openEditor(path, { mode = 'page' } = {}) {
   savedTitle = document.title
   host = document.createElement('div')
   host.className = 'editor-host'
-  // Docked inside #content: below the banner, next to the article only.
   document.getElementById('content').prepend(host)
   document.body.classList.add('editing')
+  startTrackingPanel()
   // Which tab is active; pagerite.js uses this to decide whether a pen click
   // closes the panel or switches tabs.
   document.body.dataset.editorMode = mode
@@ -65,6 +87,7 @@ function showEditor() {
   host.style.display = ''
   host.firstElementChild?.classList.remove('closing')
   document.body.classList.add('editing')
+  startTrackingPanel()
   visible = true
   dispatchEvent(new CustomEvent('pagerite:editor-shown'))
 }
@@ -72,6 +95,7 @@ function showEditor() {
 export function closeEditor() {
   if (!visible) return
   visible = false
+  stopTrackingPanel()
   document.body.classList.remove('editing')
   // dataset.editorMode is kept while hidden: the tabs use it to tell whether
   // a pagerite:editor-shown event targets them.

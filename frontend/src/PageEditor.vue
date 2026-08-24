@@ -4,9 +4,9 @@
 // (/_api/ws/editor). Docked left of the article on the page itself.
 // The socket connects when the editor is opened and reconnects with
 // exponential backoff after a failure; unsaved text and pending saves
-// survive a disconnect. Editor scroll drives the article scroll (while
-// editing the window scroll is locked and only #main scrolls), keeping the
-// rendered article at the cursor's position. Saving (💾 / Ctrl+S) is explicit
+// survive a disconnect. Editor and article (window) scrolls are linked
+// proportionally both ways (syncWindowToEditor / syncEditorToWindow).
+// Saving (💾 / Ctrl+S) is explicit
 // and refreshes the page regions in place — never a reload — so the editor
 // state (unsaved text included) also survives closing the shell; it is lost
 // only on a real page reload.
@@ -307,19 +307,37 @@ function onEditorShown() {
   if (dirty.value) requestRender()
 }
 
-function syncScroll() {
-  // Editor scroll drives the article: keep the rendered page at the same
-  // proportional position as the cursor area in the editor. While editing
-  // the window scroll is locked and #main is the scrolling element.
+// Bidirectional proportional scroll sync between the CodeMirror scroller
+// and the window (the article's scroller, also while editing). Both
+// directions apply instantly (never smooth — a smooth window scroll feeds
+// its intermediate positions back into the editor and fights the user's
+// scrolling) and coalesce to one update per frame. Loops are broken two
+// ways: a one-frame driver flag, and a 1px tolerance so the scroll events
+// caused by our own writes are no-ops. When the panel's height changes
+// mid-scroll (its top tracks the banner), the page is the driver: the
+// editor is re-matched to the page's position, never vice versa.
+function syncWindowToEditor() {
   if (syncingScroll || !view) return
-  const main = document.getElementById('main')
-  if (!main) return
   syncingScroll = true
   requestAnimationFrame(() => {
     const scroller = view.scrollDOM
     const max = scroller.scrollHeight - scroller.clientHeight
     const pct = max > 0 ? scroller.scrollTop / max : 0
-    main.scrollTop = pct * (main.scrollHeight - main.clientHeight)
+    const y = pct * Math.max(0, document.documentElement.scrollHeight - innerHeight)
+    if (Math.abs(scrollY - y) > 1) scrollTo({ top: y, behavior: 'instant' })
+    syncingScroll = false
+  })
+}
+
+function syncEditorToWindow() {
+  if (syncingScroll || !view) return
+  syncingScroll = true
+  requestAnimationFrame(() => {
+    const scroller = view.scrollDOM
+    const pageMax = Math.max(0, document.documentElement.scrollHeight - innerHeight)
+    const pct = pageMax > 0 ? scrollY / pageMax : 0
+    const top = pct * Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+    if (Math.abs(scroller.scrollTop - top) > 1) scroller.scrollTop = top
     syncingScroll = false
   })
 }
@@ -379,7 +397,11 @@ onMounted(() => {
     }),
     parent: editorEl.value,
   })
-  view.scrollDOM.addEventListener('scroll', syncScroll)
+  view.scrollDOM.addEventListener('scroll', syncWindowToEditor)
+  // Page → editor: window scroll (and resizes, e.g. the panel growing when
+  // the banner scrolls away) re-match the editor to the page's position.
+  addEventListener('scroll', syncEditorToWindow, { passive: true })
+  addEventListener('resize', syncEditorToWindow)
   // Opening the editor means you want to write: start focused.
   view.focus()
   window.__pageritePageEditor = {
@@ -399,6 +421,8 @@ onUnmounted(() => {
   }
   view?.destroy()
   delete window.__pageritePageEditor
+  removeEventListener('scroll', syncEditorToWindow)
+  removeEventListener('resize', syncEditorToWindow)
   removeEventListener('keydown', onKeydown)
   removeEventListener('pagerite:editor-shown', onEditorShown)
 })
@@ -606,7 +630,7 @@ onUnmounted(() => {
 
 /* CodeMirror sits inside a bordered box, like a dialog's input area, with
    a slight margin to the panel edges. Wheel scroll stays in the editor and
-   drives the article (syncScroll) instead of double-scrolling. */
+   drives the article (syncWindowToEditor) instead of double-scrolling. */
 .editor {
   flex: 1;
   min-width: 0;
