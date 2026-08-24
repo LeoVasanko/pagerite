@@ -1,8 +1,9 @@
 /**
  * Chart geometry, smoothing, and SVG path generation for analytics charts.
  *
- * Fixed 720x180 viewBox, stretched to the panel width; values are per-unit
- * rates (hour on the week view, day on month+).
+ * Fixed 720x180 plot area inside a larger viewBox that also holds the axis
+ * labels, so each chart SVG is self-contained; values are per-unit rates
+ * (hour on the week view, day on month+).
  */
 
 import { DAY, HOUR, MIN5, WEEK, mondayUTC } from './time.js'
@@ -11,6 +12,10 @@ import { formatCount } from './format.js'
 export const CHART_W = 720
 export const CHART_H = 180
 export const PAD_TOP = 14 // room above the highest point
+export const MARGIN_L = 56 // y tick labels + vertical axis label
+export const MARGIN_B = 24 // x tick labels
+export const VIEW_W = MARGIN_L + CHART_W + 8
+export const VIEW_H = CHART_H + MARGIN_B
 
 /**
  * Y always starts at 0; the max is a multiple of a 1-2-5 major step with at
@@ -190,7 +195,7 @@ export function buildChart(input, now = Date.now()) {
   const nMajor = Math.round(max / step)
   for (let k = 0; k <= nMajor; k++) {
     const v = k * step
-    majors.push({ value: v, y: y(v), bottom: (1 - PAD_TOP / CHART_H) * (v / max) * 100 })
+    majors.push({ value: v, y: y(v), label: fmtY(v) })
   }
   if (minor) {
     for (let v = minor; v < max; v += minor) {
@@ -204,37 +209,37 @@ export function buildChart(input, now = Date.now()) {
   // ranges: boundary lines at Mondays / months / years.
   const isWeek = t1 - t0 === WEEK
   const isMonth = !isWeek && t1 - t0 <= 31 * DAY
-  const xticks = isWeek
-    ? Array.from({ length: 7 }, (_, d) => {
-        const t = t0 + d * DAY + 12 * HOUR
-        return {
-          x: x(t), left: ((t - t0) / (t1 - t0)) * 100,
-          label: new Date(t).toLocaleDateString(undefined, {
-            weekday: 'short', timeZone: 'UTC',
-          }),
-          line: false,
-        }
+  let xticks
+  if (isWeek) {
+    xticks = Array.from({ length: 7 }, (_, d) => {
+      const t = t0 + d * DAY + 12 * HOUR
+      return {
+        x: x(t),
+        label: new Date(t).toLocaleDateString(undefined, {
+          weekday: 'short', timeZone: 'UTC',
+        }),
+        line: false,
+      }
+    })
+  } else if (isMonth) {
+    // t0 is day-aligned; label every day whose noon falls inside the range.
+    xticks = []
+    for (let day = t0; day + 12 * HOUR < t1; day += DAY) {
+      const date = new Date(day)
+      const t = day + 12 * HOUR
+      xticks.push({
+        x: x(t),
+        label: date.getUTCDate() === 1
+          ? date.toLocaleDateString(undefined, { month: 'short', timeZone: 'UTC' })
+          : String(date.getUTCDate()),
+        line: false,
       })
-    : isMonth
-      ? Array.from(
-          { length: Math.floor((t1 - Math.ceil(t0 / DAY) * DAY) / DAY) },
-          (_, d) => {
-            const day = Math.ceil(t0 / DAY) * DAY + d * DAY
-            const date = new Date(day)
-            const t = day + 12 * HOUR
-            return {
-              x: x(t), left: ((t - t0) / (t1 - t0)) * 100,
-              label: date.getUTCDate() === 1
-                ? date.toLocaleDateString(undefined, { month: 'short', timeZone: 'UTC' })
-                : String(date.getUTCDate()),
-              line: false,
-            }
-          },
-        )
-      : xticksFor(t0, t1).map((t) => ({
-          x: x(t), left: ((t - t0) / (t1 - t0)) * 100,
-          label: fmtTick(t, t1 - t0), line: true,
-        }))
+    }
+  } else {
+    xticks = xticksFor(t0, t1).map((t) => ({
+      x: x(t), label: fmtTick(t, t1 - t0), line: true,
+    }))
+  }
   return { max, majors, minors, series: drawn, xticks, unit }
 }
 
@@ -297,7 +302,7 @@ export function buildDayChart(input, now = Date.now()) {
   const nMajor = Math.round(max / step)
   for (let k = 0; k <= nMajor; k++) {
     const v = k * step
-    majors.push({ value: v, y: y(v), bottom: (1 - PAD_TOP / CHART_H) * (v / max) * 100 })
+    majors.push({ value: v, y: y(v), label: fmtY(v) })
   }
   if (minor) {
     for (let v = minor; v < max; v += minor) {
@@ -313,12 +318,10 @@ export function buildDayChart(input, now = Date.now()) {
     const d = new Date(t)
     xticks.push({
       x: ((t - t0) / (t1 - t0)) * CHART_W,
-      left: ((t - t0) / (t1 - t0)) * 100,
       label: `${String(d.getUTCHours()).padStart(2, '0')}:00`,
       line: false,
     })
   }
-
   return { bars, skyline: skyline.trim(), max, majors, minors, xticks, unit: '5min', series: [] }
 }
 

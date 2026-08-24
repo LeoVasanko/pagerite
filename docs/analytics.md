@@ -236,10 +236,14 @@ truncated at the current bucket, never drawing fake zeroes for the future);
 its x labels are weekday names centered at midday UTC, without vertical grid
 lines (day boundaries would be misleading in the viewer's timezone). The
 month view labels days the same lineless way — day numbers at noon UTC,
-with the month name substituted for the 1st. Year is a rolling 365-day window ending at now, re-bucketed to daily points,
-with boundary lines at months/years.  All uses the full data reach, but keeps
-at least the past 30 days so the chart never collapses to a tiny sliver when
-the site is young. Below the charts: a **transition map** (all pages from
+with the month name substituted for the 1st. Month, year and all are
+rolling windows ending at now, aligned to UTC day boundaries at the start
+so the labels span the whole range; the bucket size follows the window —
+6 hours up to 31 days, daily beyond — with boundary lines at months/years
+on the longer ranges.  All uses the full data reach, but keeps
+at least the past 30 days (identical to the month view when the site is
+younger than that, bucket size included) so the chart never collapses to a
+tiny sliver when the site is young. Below the charts: a **transition map** (all pages from
 `/_api/pages` — top-level menu items on a large-radius circular arc whose
 bottom point is the last item (each earlier item a bit higher), connected
 by an unlabeled top lane, each item's

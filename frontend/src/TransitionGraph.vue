@@ -7,7 +7,7 @@
  * so the visual scale can normalize against a one-week reference.
  */
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import { WEEK } from './analytics/time.js'
+import { DAY, WEEK } from './analytics/time.js'
 import { formatCount } from './analytics/format.js'
 import {
   TNODE_W,
@@ -26,14 +26,16 @@ const props = defineProps({
 const visualScale = computed(() => {
   const { t0, t1 } = props.window
   if (t0 != null && t1 != null) return WEEK / (t1 - t0)
-  // 'all': scale by the actual data span.
+  // 'all': scale by the actual data span, but never less than the 30-day
+  // minimum the plot enforces, so sparse young data is not over-amplified.
   const times = new Set()
   for (const buckets of Object.values(props.data?.views || {})) {
     for (const k of Object.keys(buckets)) times.add(Date.parse(k))
   }
   const arr = [...times]
   if (arr.length < 2) return 1
-  return WEEK / (Math.max(...arr) - Math.min(...arr))
+  const span = Math.max(...arr) - Math.min(...arr)
+  return WEEK / Math.max(span, 30 * DAY)
 })
 
 const graph = computed(() =>

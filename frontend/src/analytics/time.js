@@ -92,27 +92,38 @@ export function weeklySeries(buckets) {
  * to per-day rates (the unit the month+ charts are read in).
  * Ranges without a fixed span use the full data reach, but never less than
  * their configured minSpan so the chart keeps a readable minimum x scale.
+ * t0 is aligned to the UTC day so the x labels cover the whole range;
+ * t1 is now, so the scale never extends into the future. The bucket size
+ * follows the resulting window (6h up to 31 days, daily beyond), so ranges
+ * covering the same window — "all" at its 30-day minimum vs "month" —
+ * render the identical curve.
  */
 export function rollingSeries(buckets, rangeKey) {
   const raw = rawTimes(buckets)
   const times = Object.keys(raw).map(Number)
   if (!times.length) return null
   const { span, bucket, minSpan = 0 } = RANGES[rangeKey]
-  const t1 = Math.floor(Date.now() / bucket) * bucket + bucket
-  const earliest = Math.floor(Math.min(...times) / bucket) * bucket
-  const t0 = span != null
+  const t1 = Date.now()
+  const earliest = Math.min(...times)
+  const t0 = Math.floor((span != null
     ? t1 - span
-    : Math.min(earliest, t1 - minSpan)
+    : Math.min(earliest, t1 - minSpan)) / DAY) * DAY
+  // The bucket follows the actual window length, not the range key: when
+  // "all" is capped to its 30-day minimum it covers the very window "month"
+  // does, and daily bins would draw a different curve over the same data
+  // (coarser edge detection, points a day apart plotted at bin starts, the
+  // last point stuck at today's midnight instead of reaching now).
+  const bucketMs = t1 - t0 <= 31 * DAY ? Math.min(bucket, 6 * HOUR) : bucket
   const points = []
-  for (let t = t0; t < t1; t += bucket) {
-    points.push({ t, count: sumRange(raw, t, t + bucket) })
+  for (let t = t0; t < t1; t += bucketMs) {
+    points.push({ t, count: sumRange(raw, t, t + bucketMs) })
   }
   return {
     series: [{ points, label: '', opacity: 1, area: true }],
     t0,
     t1,
-    rate: DAY / bucket,
-    binMinutes: bucket / 60e3,
+    rate: DAY / bucketMs,
+    binMinutes: bucketMs / 60e3,
     unitMinutes: 24 * 60,
     unit: 'day',
   }
@@ -153,22 +164,19 @@ export function makeSeries(buckets, rangeKey) {
 /**
  * Absolute UTC time window for a given range key. Used to filter visits,
  * transitions and views for the non-chart stats on the analytics page.
- * The week range is a rolling 7 days ending at now; the charts instead
- * align to Monday 00:00 UTC and overlay previous weeks, so their x window
- * differs from the stats range on purpose.
+ * Every bounded range is a rolling span ending at now; the charts instead
+ * align week to Monday 00:00 UTC (overlaying previous weeks) and month+
+ * to UTC day boundaries, so their x windows differ from the stats range
+ * on purpose.
  * Returns { t0, t1 } where null means unbounded.
  */
 export function rangeWindow(rangeKey) {
   const now = Date.now()
-  if (rangeKey === 'week') {
-    return { t0: now - WEEK, t1: now }
-  }
   if (rangeKey === 'all') {
     return { t0: null, t1: null }
   }
-  const { span, bucket } = RANGES[rangeKey]
-  const t1 = Math.floor(now / bucket) * bucket + bucket
-  return { t0: t1 - span, t1 }
+  const span = rangeKey === 'week' ? WEEK : RANGES[rangeKey].span
+  return { t0: now - span, t1: now }
 }
 
 /**
