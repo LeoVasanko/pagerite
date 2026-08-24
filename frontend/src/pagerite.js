@@ -385,9 +385,11 @@ import "overlayscrollbars/overlayscrollbars.css";
   // Reading time pauses after 1 minute of inactivity and resumes on the
   // next mouse/touch/scroll/keyboard event.
   // Excluded: back/forward (popstate never pings), everything while the
-  // editor is open (body.editing — admin noise, not visits), and the
-  // analytics page itself (/_a), even though fetch-navigation treats it
-  // like a normal article.
+  // editor is open (body.editing — admin noise, not visits), and
+  // navigations TO the analytics page (/_a — admin machinery, and the
+  // server rejects it as a ping target anyway). Navigations AWAY from /_a
+  // must ping: load() already fetched the target page without the preload
+  // header, and without the ping that GET would flush to the crawler list.
   // Admins (when SSO is actually in use — with no auth proxy "admin" is
   // everyone's state) ping normally but with hide=1: the server then
   // records nothing and scrubs any session the same browser accumulated
@@ -395,7 +397,7 @@ import "overlayscrollbars/overlayscrollbars.css";
   // See docs/analytics.md.
   function ping(to, fr = currentPath, read = 0) {
     if (document.body.classList.contains("editing")) return;
-    if ((to && to === "/_a") || fr === "/_a") return;
+    if (to && to === "/_a") return;
     const hide = ssoAvailable && isAdmin ? 1 : 0;
     const body = JSON.stringify({
       fr, to, hide,

@@ -45,16 +45,19 @@ The client (`pagerite.js`) POSTs fire-and-forget pings to `/_a` with
   back), so the exit URL is not necessarily the last trail entry. Outbound
   links are stored by full URL so several links to the same domain remain
   distinct.
-- **Excluded**: back/forward (popstate) navigations, navigation involving
-  the analytics page itself (`/_a`), and everything while the user has the
-  editor open (`body.editing`). Admin noise, not visits.
+- **Excluded**: back/forward (popstate) navigations, navigating *to* the
+  analytics page (`/_a` — its GET is untracked, and the server rejects it
+  as a ping target anyway), and everything while the user has the editor
+  open (`body.editing`). Admin noise, not visits. Navigating *away* from
+  `/_a` does ping: the fetch-navigation already GET-ed the target page
+  without the preload header, and without the ping that GET would flush to
+  the crawler list.
 - **Admins**: when SSO is in use and the session is known to be an admin,
   the client still pings but adds `hide=1`. The server then records
   nothing — and if the same client session already had a visit from before
-  logging in, that visit is removed from the JSON along with the counts
-  recorded when it was created (site visit, entry view, entry transition).
-  Views/transitions logged by later pings inside such a visit lack
-  per-event timestamps and are left as-is. With no auth proxy (dev/test)
+  logging in, that visit is removed from the JSON along with every count
+  it recorded — an in-memory per-visit log of count events makes full
+  reversal possible. With no auth proxy (dev/test)
   "admin" is everyone's state, so `hide` stays 0 and everything is recorded.
 - The server validates `to`: internal paths must be valid slug paths
   ("/" or `[a-z0-9_-]` segments), external ones are re-derived to the

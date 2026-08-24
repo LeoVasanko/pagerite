@@ -316,6 +316,10 @@ class Store:
                 pass  # legacy schema / corrupt or unreadable file: start fresh
         #: client hash -> index of the current visit in data.visits
         self.sessions: dict[bytes, int] = {}
+        #: visit index -> count events recorded for that visit, so
+        #: ``_remove_visit`` can reverse all of them — not just the ones
+        #: from the visit's creation.  In-memory only, like ``sessions``.
+        self._count_log: dict[int, list[tuple]] = {}
         #: ip -> external https origin of the latest document GET carrying
         #: one, stashed for the visit the client's initial ping starts.
         #: Internal or absent referers never touch the table.
@@ -403,35 +407,44 @@ class Store:
                 del table[key]
 
     def _remove_visit(self, index: int) -> None:
-        """Delete a visit and reverse the counts its creation recorded.
+        """Delete a visit and reverse every count it recorded.
 
         Used when a known visitor turns out to be an admin (hide=1 ping):
-        the session is scrubbed from the stats.  Views/transitions logged
-        by later pings inside the visit lack per-event timestamps and are
-        left as-is.
+        the session is scrubbed from the stats.  The in-memory
+        ``_count_log`` tracks each site-visit/view/transition count the
+        visit produced, so the scrub reverses all of them — including the
+        ones logged by later pings inside the visit.
         """
-        visit = self.data.visits[index]
-        bucket = _bucket(visit.start)
-        self._uncount(self.data.site_visits, bucket)
-        views = self.data.views.get(visit.entry)
-        if views is not None:
-            self._uncount(views, bucket)
-            if not views:
-                del self.data.views[visit.entry]
-        fr_map = self.data.transitions.get(visit.referer or "(direct)")
-        if fr_map is not None:
-            buckets = fr_map.get(visit.entry)
-            if buckets is not None:
-                self._uncount(buckets, bucket)
-                if not buckets:
-                    del fr_map[visit.entry]
-            if not fr_map:
-                del self.data.transitions[visit.referer or "(direct)"]
+        for event in self._count_log.pop(index, ()):
+            kind = event[0]
+            if kind == "site":
+                self._uncount(self.data.site_visits, event[1])
+            elif kind == "view":
+                views = self.data.views.get(event[1])
+                if views is not None:
+                    self._uncount(views, event[2])
+                    if not views:
+                        del self.data.views[event[1]]
+            else:  # transition
+                _, fr, to, bucket = event
+                fr_map = self.data.transitions.get(fr)
+                if fr_map is not None:
+                    buckets = fr_map.get(to)
+                    if buckets is not None:
+                        self._uncount(buckets, bucket)
+                        if not buckets:
+                            del fr_map[to]
+                    if not fr_map:
+                        del self.data.transitions[fr]
         del self.data.visits[index]
-        # Sessions store list indices; shift the ones past the removed visit.
+        # Sessions and count logs store list indices; shift the ones past
+        # the removed visit.
         for key, i in list(self.sessions.items()):
             if i > index:
                 self.sessions[key] = i - 1
+        self._count_log = {
+            i - 1 if i > index else i: log for i, log in self._count_log.items()
+        }
 
     def _client_ip(self, client_hash: bytes) -> str:
         """Return the IP stored for ``client_hash``, or "" if missing."""
@@ -590,10 +603,18 @@ class Store:
         )
         visit.statuses[entry] = status
         self.data.visits.append(visit)
-        self.sessions[client_hash] = len(self.data.visits) - 1
-        self._count(self.data.site_visits, _bucket(now))
-        self._count(self.data.views.setdefault(entry, {}), _bucket(now))
-        self._count_transition(referer or "(direct)", entry, now)
+        index = len(self.data.visits) - 1
+        self.sessions[client_hash] = index
+        bucket = _bucket(now)
+        fr = referer or "(direct)"
+        self._count(self.data.site_visits, bucket)
+        self._count(self.data.views.setdefault(entry, {}), bucket)
+        self._count_transition(fr, entry, now)
+        self._count_log[index] = [
+            ("site", bucket),
+            ("view", entry, bucket),
+            ("transition", fr, entry, bucket),
+        ]
         return visit
 
     def track_entry(
@@ -763,9 +784,13 @@ class Store:
         else:
             visit = self.data.visits[index]
             now = datetime.now(UTC)
+            bucket = _bucket(now)
+            log = self._count_log.setdefault(index, [])
             if target.startswith("/"):
-                self._count(self.data.views.setdefault(target, {}), _bucket(now))
+                self._count(self.data.views.setdefault(target, {}), bucket)
+                log.append(("view", target, bucket))
             self._count_transition(fr, target, now)
+            log.append(("transition", fr, target, bucket))
             # First-seen only: repeat pages and repeated exits don't append.
             if visit.entry != target and target not in visit.trail:
                 visit.trail.append(target)
