@@ -697,7 +697,7 @@ class Store:
         if hide:
             # Admin ping: cancel pending crawler hits and scrub the session.
             self.pending_crawlers = [
-                hit for hit in self.pending_crawlers if hit.client == client_hash
+                hit for hit in self.pending_crawlers if hit.client != client_hash
             ]
             index = self.sessions.pop(client_hash, None)
             if index is not None and index < len(self.data.visits):
