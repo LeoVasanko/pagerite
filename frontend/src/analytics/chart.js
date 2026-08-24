@@ -9,8 +9,8 @@
 import { DAY, HOUR, MIN5, WEEK, mondayUTC } from './time.js'
 import { formatCount } from './format.js'
 
-export const CHART_W = 720
-export const CHART_H = 126
+export const CHART_W = 1000
+export const CHART_H = 150
 export const PAD_TOP = 14 // room above the highest point
 export const MARGIN_L = 40 // y tick labels + vertical axis label
 export const MARGIN_B = 24 // x tick labels

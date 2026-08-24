@@ -16,6 +16,11 @@ import {
 
 const DAY_REFRESH_MS = 15000
 
+// Keep the whole svg within page bounds: full width below the natural
+// size, centered with equal side margins above it (max() clamps the
+// centering margin to 0 at the breakpoint, so the rule is continuous).
+const CHART_MARGIN = `max(0px, calc(50% - ${VIEW_W / 2}px))`
+
 const props = defineProps({
   data: { type: Object, default: null },
   range: { type: String, required: true },
@@ -68,6 +73,7 @@ const viewChart = computed(() => buildChart(viewSeries.value, now.value))
     ]" :key="c.ylabel">
     <template v-if="c.chart">
       <svg class="chart" :viewBox="`${-MARGIN_L} 0 ${VIEW_W} ${VIEW_H}`"
+           :style="{ maxWidth: `${VIEW_W}px`, marginLeft: CHART_MARGIN }"
            role="img" :aria-label="axisLabel(c.chart.unit, c.ylabel)">
         <line v-for="g in c.chart.majors.slice(1)" :key="'j' + g.value"
               :x1="0" :x2="CHART_W" :y1="g.y" :y2="g.y" class="major" />
@@ -116,11 +122,18 @@ const viewChart = computed(() => buildChart(viewSeries.value, now.value))
 
 <style scoped>
 /* Each chart is a self-contained SVG: the viewBox includes the axis label
-   margins, so nothing is positioned with HTML overlays. */
+   margins, so nothing is positioned with HTML overlays. Never upscale past
+   the natural size (1 viewBox unit = 1 px, max-width set inline) — that
+   would blow up the constant-size text; smaller panels still scale the
+   chart down to fit. The margin-left (set inline) centers the chart above
+   its natural width; the svg always stays within page bounds.
+   overflow: visible lets wider fonts extend past the viewBox instead of
+   clipping. */
 .chart {
   display: block;
   width: 100%;
   height: auto;
+  overflow: visible;
 }
 
 .chart .ylab,

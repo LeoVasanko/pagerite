@@ -26,6 +26,11 @@ import TrailLink from './TrailLink.vue'
 import VisitorCell from './VisitorCell.vue'
 import TransitionGraph from './TransitionGraph.vue'
 import VisitorCharts from './VisitorCharts.vue'
+import { VIEW_W } from './analytics/chart.js'
+
+// Same centering margin as the charts, so the totals row's left edge
+// aligns with the chart svg above the natural width.
+const CHART_MARGIN = `max(0px, calc(50% - ${VIEW_W / 2}px))`
 
 const ABUSE_MAX_LINES = 5
 
@@ -148,7 +153,7 @@ const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], c
       <p v-if="error" class="error">⚠️ {{ error }}</p>
       <p v-else-if="!data" class="loading">loading…</p>
       <template v-else>
-        <section class="totals">
+        <section class="totals" :style="{ marginLeft: CHART_MARGIN }">
           <div><strong :title="String(visits.length)">{{ formatCount(visits.length) }}</strong> visits</div>
           <div><strong :title="String(totalViews)">{{ formatCount(totalViews) }}</strong> page views</div>
           <div><strong>{{ readStats.avgMinPerVisit }}</strong> min/visit</div>
@@ -288,6 +293,8 @@ const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], c
   width: 100%;
   /* Same 1.25rem side spacing as main's article padding. */
   padding: 1.5rem 1.25rem 4rem;
+  /* Container for cqw-based shrink-to-fit (see .totals). */
+  container-type: inline-size;
 }
 
 .analytics-panel header {
@@ -354,12 +361,15 @@ const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], c
 .analytics-view :deep(.muted) { color: var(--muted); }
 .analytics-view :deep(.small) { font-size: 0.75em; }
 
+/* One line at any width: the gap shrinks first, then the font (the number
+   scales along in em), both following the panel's container width. */
 .totals {
   display: flex;
-  gap: 2rem;
-  font-size: 1.1rem;
+  gap: clamp(0.5rem, 3cqw, 2rem);
+  font-size: clamp(0.6rem, 2.2cqw, 1.1rem);
+  white-space: nowrap;
 }
-.totals strong { font-size: 1.5rem; }
+.totals strong { font-size: 1.36em; }
 
 .visit-table-wrap {
   overflow-x: auto;
