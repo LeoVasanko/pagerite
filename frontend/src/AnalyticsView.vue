@@ -5,7 +5,13 @@
 // visit/crawler tables. Read-only.
 // See docs/analytics.md for the data format.
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { RANGES } from './analytics/time.js'
+import {
+  RANGES,
+  rangeWindow,
+  filterRecordsByRange,
+  filterTransitionsByRange,
+  filterViewsByRange,
+} from './analytics/time.js'
 import {
   calcReadStats,
   calcTotalViews,
@@ -90,8 +96,25 @@ onUnmounted(() => {
   }
 })
 
-const visits = computed(() => data.value?.visits || [])
-const totalViews = computed(() => calcTotalViews(data.value?.views))
+const window = computed(() => rangeWindow(range.value))
+
+// All non-chart stats follow the selected range; the charts keep their own
+// range-specific x windows (week overlays previous weeks aligned to Monday).
+const rangeData = computed(() => {
+  if (!data.value) return null
+  const { t0, t1 } = window.value
+  return {
+    ...data.value,
+    transitions: filterTransitionsByRange(data.value.transitions, t0, t1),
+    views: filterViewsByRange(data.value.views, t0, t1),
+    visits: filterRecordsByRange(data.value.visits, t0, t1),
+    crawlers: filterRecordsByRange(data.value.crawlers, t0, t1),
+    abuse: filterRecordsByRange(data.value.abuse, t0, t1),
+  }
+})
+
+const visits = computed(() => rangeData.value?.visits || [])
+const totalViews = computed(() => calcTotalViews(rangeData.value?.views))
 const readStats = computed(() => calcReadStats(visits.value))
 
 // Keep the URL shareable when the range changes.
@@ -103,9 +126,9 @@ watch(range, (r) => {
 
 const clients = computed(() => data.value?.clients || {})
 const visitRows = computed(() => formatVisitRows(visits.value, clients.value, pageTree.value, now.value))
-const crawlers = computed(() => data.value?.crawlers || [])
+const crawlers = computed(() => rangeData.value?.crawlers || [])
 const crawlerRows = computed(() => formatCrawlerRows(crawlers.value, clients.value, pageTree.value, now.value))
-const abuseRows = computed(() => formatAbuseRows(data.value?.abuse || [], clients.value, now.value))
+const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], clients.value, now.value))
 
 </script>
 
@@ -133,7 +156,7 @@ const abuseRows = computed(() => formatAbuseRows(data.value?.abuse || [], client
         </section>
 
         <VisitorCharts :data="data" :range="range" />
-        <TransitionGraph :data="data" :range="range" :page-tree="pageTree" />
+        <TransitionGraph :data="rangeData" :window="window" :page-tree="pageTree" />
 
         <section>
           <h2>Recent visits</h2>

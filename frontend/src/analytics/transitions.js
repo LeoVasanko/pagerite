@@ -678,52 +678,6 @@ function buildInternalEdges(pairs, byPath, visualScale = 1) {
   return { edges, flows }
 }
 
-/**
- * Sum the bucketed transition matrix (from -> to -> bucket ISO -> count)
- * into a plain from -> to -> count matrix for the window [t0, t1).
- */
-export function filterTransitionsByRange(transitions, t0, t1) {
-  const out = {}
-  for (const [fr, tos] of Object.entries(transitions || {})) {
-    for (const [to, buckets] of Object.entries(tos)) {
-      let n = 0
-      for (const [k, c] of Object.entries(buckets)) {
-        const t = Date.parse(k)
-        if ((t0 == null || t >= t0) && (t1 == null || t < t1)) n += c
-      }
-      if (n) {
-        out[fr] = out[fr] || {}
-        out[fr][to] = n
-      }
-    }
-  }
-  return out
-}
-
-/** Keep only the 5-minute view buckets that fall inside [t0, t1). */
-export function filterViewsByRange(views, t0, t1) {
-  const filtered = {}
-  for (const [path, buckets] of Object.entries(views || {})) {
-    const out = {}
-    for (const [k, c] of Object.entries(buckets)) {
-      const t = Date.parse(k)
-      if ((t0 == null || t >= t0) && (t1 == null || t < t1)) out[k] = c
-    }
-    if (Object.keys(out).length) filtered[path] = out
-  }
-  return filtered
-}
-
-/** Keep only visits whose start time falls inside [t0, t1). */
-export function filterVisitsByRange(visits, t0, t1) {
-  const out = []
-  for (const v of visits || []) {
-    const t = Date.parse(v.start)
-    if ((t0 == null || t >= t0) && (t1 == null || t < t1)) out.push(v)
-  }
-  return out
-}
-
 const UTM_PRIORITY = ['utm_campaign', 'utm_source']
 const UTM_FALLBACK = ['utm_medium', 'utm_content', 'utm_term', 'utm_id']
 

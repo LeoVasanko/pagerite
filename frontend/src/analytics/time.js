@@ -152,14 +152,16 @@ export function makeSeries(buckets, rangeKey) {
 
 /**
  * Absolute UTC time window for a given range key. Used to filter visits,
- * transitions and views to the same period the charts are showing.
+ * transitions and views for the non-chart stats on the analytics page.
+ * The week range is a rolling 7 days ending at now; the charts instead
+ * align to Monday 00:00 UTC and overlay previous weeks, so their x window
+ * differs from the stats range on purpose.
  * Returns { t0, t1 } where null means unbounded.
  */
 export function rangeWindow(rangeKey) {
   const now = Date.now()
   if (rangeKey === 'week') {
-    const start = mondayUTC(now)
-    return { t0: start, t1: start + WEEK }
+    return { t0: now - WEEK, t1: now }
   }
   if (rangeKey === 'all') {
     return { t0: null, t1: null }
@@ -167,4 +169,50 @@ export function rangeWindow(rangeKey) {
   const { span, bucket } = RANGES[rangeKey]
   const t1 = Math.floor(now / bucket) * bucket + bucket
   return { t0: t1 - span, t1 }
+}
+
+/**
+ * Sum the bucketed transition matrix (from -> to -> bucket ISO -> count)
+ * into a plain from -> to -> count matrix for the window [t0, t1).
+ */
+export function filterTransitionsByRange(transitions, t0, t1) {
+  const out = {}
+  for (const [fr, tos] of Object.entries(transitions || {})) {
+    for (const [to, buckets] of Object.entries(tos)) {
+      let n = 0
+      for (const [k, c] of Object.entries(buckets)) {
+        const t = Date.parse(k)
+        if ((t0 == null || t >= t0) && (t1 == null || t < t1)) n += c
+      }
+      if (n) {
+        out[fr] = out[fr] || {}
+        out[fr][to] = n
+      }
+    }
+  }
+  return out
+}
+
+/** Keep only the 5-minute view buckets that fall inside [t0, t1). */
+export function filterViewsByRange(views, t0, t1) {
+  const filtered = {}
+  for (const [path, buckets] of Object.entries(views || {})) {
+    const out = {}
+    for (const [k, c] of Object.entries(buckets)) {
+      const t = Date.parse(k)
+      if ((t0 == null || t >= t0) && (t1 == null || t < t1)) out[k] = c
+    }
+    if (Object.keys(out).length) filtered[path] = out
+  }
+  return filtered
+}
+
+/** Keep only records whose start time falls inside [t0, t1). */
+export function filterRecordsByRange(records, t0, t1) {
+  const out = []
+  for (const r of records || []) {
+    const t = Date.parse(r.start)
+    if ((t0 == null || t >= t0) && (t1 == null || t < t1)) out.push(r)
+  }
+  return out
 }

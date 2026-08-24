@@ -1,13 +1,13 @@
 <script setup>
 /**
- * Radial transition map filtered to the selected time range.
+ * Radial transition map for a pre-filtered time range.
  *
- * Transitions are stored per 5-minute bucket (from -> to -> bucket ->
- * count), so the graph sums the buckets falling inside the selected
- * range, exactly like the charts and per-page views do.
+ * The parent filters transitions, views and visits to the selected range
+ * before passing them in; `window` carries the absolute [t0, t1) window
+ * so the visual scale can normalize against a one-week reference.
  */
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import { rangeWindow, WEEK } from './analytics/time.js'
+import { WEEK } from './analytics/time.js'
 import { formatCount } from './analytics/format.js'
 import {
   TNODE_W,
@@ -15,21 +15,16 @@ import {
   BEAD_R,
   BEAD_SPEED,
   buildTransitionGraph,
-  filterTransitionsByRange,
-  filterViewsByRange,
-  filterVisitsByRange,
 } from './analytics/transitions.js'
 
 const props = defineProps({
   data: { type: Object, default: null },
-  range: { type: String, required: true },
+  window: { type: Object, required: true },
   pageTree: { type: Array, default: null },
 })
 
-const window = computed(() => rangeWindow(props.range))
-
 const visualScale = computed(() => {
-  const { t0, t1 } = window.value
+  const { t0, t1 } = props.window
   if (t0 != null && t1 != null) return WEEK / (t1 - t0)
   // 'all': scale by the actual data span.
   const times = new Set()
@@ -41,22 +36,9 @@ const visualScale = computed(() => {
   return WEEK / (Math.max(...arr) - Math.min(...arr))
 })
 
-const filteredData = computed(() => {
-  if (!props.data) return null
-  const { t0, t1 } = window.value
-  return {
-    transitions: filterTransitionsByRange(props.data.transitions, t0, t1),
-    views: filterViewsByRange(props.data.views, t0, t1),
-  }
-})
-
-const filteredVisits = computed(() =>
-  filterVisitsByRange(props.data?.visits, window.value.t0, window.value.t1),
-)
-
 const graph = computed(() =>
-  filteredData.value
-    ? buildTransitionGraph(filteredData.value, props.pageTree, filteredVisits.value, visualScale.value)
+  props.data
+    ? buildTransitionGraph(props.data, props.pageTree, props.data.visits || [], visualScale.value)
     : null,
 )
 
