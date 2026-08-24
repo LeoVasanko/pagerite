@@ -124,20 +124,22 @@ const pillTangent = (s, margin = 0) => {
 
 // Edge width (half-width of the thin middle) grows logarithmically with
 // the count. The constants are scaled down by ~10× so busy ranges (day,
-// year) do not overwhelm the graph with fat connectors. A single recorded
-// transition still renders as a faint ~0.4 px line. Connections carrying
-// less than PRUNE_FRACTION of the total traffic are not drawn at all (this
-// also keeps the graph under ~100 connections).
+// year) do not overwhelm the graph with fat connectors. Connections whose
+// thin middle would render below MIN_WMID are culled entirely: fainter
+// strands are practically invisible and only their wide end flares would
+// show. Connections carrying less than PRUNE_FRACTION of the total traffic
+// are likewise not drawn (this also keeps the graph under ~100 connections).
 const WMID_MIN = 0.2
 const WIDTH_GROWTH = 0.15
 const PRUNE_FRACTION = 0.01
+// ~0.8 px full width at natural size (1 viewBox unit = 1 px).
+const MIN_WMID = 0.4
 
 // Beads: each edge direction emits beads at count * BEAD_RATE beads per
 // second (linear in the count). The rate is reduced ~10× across all time
 // scales to keep the animation lightweight. The component simulates every
-// bead independently in JS at BEAD_SPEED along the edge, with no limit on
-// beads in flight.
-export const BEAD_SPEED = 180 // svg units per second
+// bead independently in JS with a constant traversal time per edge (speed
+// relative to span length), with no limit on beads in flight.
 export const BEAD_R = 3.2
 const BEAD_RATE = 0.012 // beads per second per recorded transition
 const FLOW_OFFSET = 3 // lane offset to the right of the travel direction
@@ -379,15 +381,23 @@ function layoutGroups(root) {
   // INDENT larger per parent level — concentric circles, so all lanes
   // share exactly one form. Lanes span their branch's nodes plus a
   // little extra tucked under the first/last pill (so the line caps are
-  // never visible) and run behind the pills. A separate short arc
-  // across the first inter-node gap carries the branch slug as a label,
-  // replacing per-node path crumbs. Hidden (unplaced) index pages still
+  // never visible) and run behind the pills. A label arc carries the
+  // branch slug, left-aligned just past the first pill and free to run
+  // to the lane's end — longer text simply passes under later pills,
+  // which are drawn on top. Hidden (unplaced) index pages still
   // define a lane: it follows their promoted children, so lanes reflect
   // the path structure rather than page existence.
   const INDENT = 20 // lane spacing (radius) per nesting level (> lane width)
   const END_TUCK = 22 // arc units tucked under the first/last pill
   const GAP_TRIM = 32 // label arc clearance from the pills
-  const LABEL_CHARS = 8 // ~13px glyphs fitting the gap
+  // Labels are left-aligned on their guide: the guide starts just past the
+  // source pill's edge, the earliest point where the text is visible.
+  const LABEL_PAD = 6
+  // The label guide rides GUIDE_OFF outward of the lane centerline: the
+  // text's alphabetic baseline sits on the guide, so this puts the
+  // glyph middle (not the baseline) on the lane center at any zoom —
+  // dominant-baseline tricks are em-based and break under downscale.
+  const GUIDE_OFF = 3.5
   const branches = []
   groups.forEach((members, gi) => {
     const g = groupRoots[gi]
@@ -427,26 +437,36 @@ function layoutGroups(root) {
       return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r.toFixed(2)} ${r.toFixed(2)} 0 0 0 ${x1.toFixed(2)} ${y1.toFixed(2)}`
     }
     const d = arc(th(first) + END_TUCK / R, th(last) - END_TUCK / R, R)
-    // The label guide rides GUIDE_OFF outward of the lane centerline: the
-    // text's alphabetic baseline sits on the guide, so this puts the
-    // glyph middle (not the baseline) on the lane center at any zoom —
-    // dominant-baseline tricks are em-based and break under downscale.
-    const GUIDE_OFF = 3.5
-    const ld = arc(th(first) - GAP_TRIM / R, th(first + 1) + GAP_TRIM / R, R + GUIDE_OFF)
+    // Start just past the first pill: lanes leave the source node nearly
+    // vertically, so the pill's extent along the arc is its half height.
+    // The guide runs to the lane's end so long slugs are never cut off.
+    const ld = arc(th(first) - (TNODE_H / 2 + LABEL_PAD) / R,
+      th(last) - END_TUCK / R, R + GUIDE_OFF)
     arcLeft = Math.min(arcLeft, pt(th(first) + END_TUCK / R, R)[0])
-    const label = name.length > LABEL_CHARS ? `${name.slice(0, LABEL_CHARS - 1)}…` : name
-    return { d, ld, label }
+    return { d, ld, label: name }
   })
-  // Top lane: an unlabeled arc along the top row's own circle, connecting
+  // Top lane: an arc along the top row's own circle, connecting
   // the top nodes of all groups and tucked under the first and last of
   // them (the arc bottoms at the last item, so it continues rightward
-  // under its pill). Drawn 50% thicker than branch lanes.
+  // under its pill). Drawn 50% thicker than branch lanes. A 🏠︎ label
+  // marks the lane right after the home pill, on a guide arc like
+  // the branch labels but with the offset and clearance scaled up by the
+  // same 50% to keep the glyph centered on the wider lane.
   if (span) {
+    const d = `M ${(-half - END_TUCK).toFixed(2)} ${topY(-half - END_TUCK).toFixed(2)} `
+      + `A ${R_T.toFixed(2)} ${R_T.toFixed(2)} 0 0 0 ${(half + END_TUCK).toFixed(2)} ${topY(half + END_TUCK).toFixed(2)}`
+    const rG = R_T + GUIDE_OFF * 1.5
+    const ptG = (x) => [x, topD - R_T + Math.sqrt(rG * rG - (x - half) ** 2)]
+    // Left-aligned like the branch labels: the guide starts just past the
+    // home pill's edge (scaled with the lane thickness).
+    const g0 = -half + TNODE_W / 2 + LABEL_PAD * 1.5
+    const g1 = SLOT - half - TNODE_W / 2 - GAP_TRIM * 1.5
+    const [gx0, gy0] = ptG(g0)
+    const [gx1, gy1] = ptG(g1)
     arcs.unshift({
-      d: `M ${(-half - END_TUCK).toFixed(2)} ${topY(-half - END_TUCK).toFixed(2)} `
-       + `A ${R_T.toFixed(2)} ${R_T.toFixed(2)} 0 0 0 ${(half + END_TUCK).toFixed(2)} ${topY(half + END_TUCK).toFixed(2)}`,
-      ld: null,
-      label: null,
+      d,
+      ld: `M ${gx0.toFixed(2)} ${gy0.toFixed(2)} A ${rG.toFixed(2)} ${rG.toFixed(2)} 0 0 0 ${gx1.toFixed(2)} ${gy1.toFixed(2)}`,
+      label: '🏠︎',
       top: true,
     })
   }
@@ -636,16 +656,18 @@ function buildFlows(a, b, ab, ba, visualScale = 1) {
     }
   }
   const flows = []
-  if (ab) flows.push(flow(ab, t0, t1))
-  if (ba) flows.push(flow(ba, t1, t0))
+  // Stable key per edge direction so the component's bead simulation can
+  // match flows across data reloads and keep bead phases/positions.
+  if (ab) flows.push({ ...flow(ab, t0, t1), key: `${a.path} ${b.path}` })
+  if (ba) flows.push({ ...flow(ba, t1, t0), key: `${b.path} ${a.path}` })
   return flows
 }
 
 /**
  * Half-width for a connection middle: logarithmic in the count, anchored
- * so a single count lands exactly at WMID_MIN (~1 px line), uncapped.
- * Absolute on purpose — cool routes stay visible regardless of how hot
- * the hottest connection is.
+ * at WMID_MIN, uncapped. Absolute on purpose — cool routes stay visible
+ * regardless of how hot the hottest connection is. Callers cull results
+ * below MIN_WMID.
  */
 const scaledWidth = (count) => {
   if (count <= 0) return 0
@@ -671,7 +693,7 @@ function buildInternalEdges(pairs, byPath, visualScale = 1) {
     const b = byPath.get(pt)
     if (a.hidden || b.hidden) continue // unplaced index pages are omitted
     const wMid = scaledWidth((ab + ba) * visualScale)
-    if (wMid <= 0) continue
+    if (wMid < MIN_WMID) continue
     edges.push(buildRibbon(a, b, ab, ba, wMid))
     flows.push(...buildFlows(a, b, ab, ba, visualScale))
   }
@@ -764,7 +786,8 @@ function buildExternal({ sources, exits }, byPath, innerBounds, visualScale = 1)
   const width = (count) => scaledWidth(count * visualScale)
 
   // Incoming: one source node per identified source, in a row centered
-  // above the map, with an edge to each page that source led to.
+  // above the map, with an edge to each page that source led to. A source
+  // whose connectors are all culled (below MIN_WMID) is dropped itself.
   const bySource = new Map() // source -> pairs, sorted by total incoming count
   for (const p of liveSources.filter((p) => p.in >= minCount)) {
     const g = bySource.get(p.source) || []
@@ -781,6 +804,8 @@ function buildExternal({ sources, exits }, byPath, innerBounds, visualScale = 1)
     }))
     .sort((a, b) => b.total - a.total)
     .slice(0, MAX_EXT_IN)
+    .filter(({ ps }) =>
+      ps.some((p) => !byPath.get(p.page).hidden && width(p.in) >= MIN_WMID))
   if (origins.length) {
     const cx = (innerBounds.x0 + innerBounds.x1) / 2
     const y = innerBounds.y0 - TNODE_BOUND - EXT_GAP
@@ -802,7 +827,7 @@ function buildExternal({ sources, exits }, byPath, innerBounds, visualScale = 1)
         const page = byPath.get(p.page)
         if (page.hidden) continue
         const wMid = width(p.in)
-        if (wMid <= 0) continue
+        if (wMid < MIN_WMID) continue
         edges.push(buildRibbon(xn, page, p.in, 0, wMid, true))
         flows.push(...buildFlows(xn, page, p.in, 0, visualScale))
       }
@@ -813,7 +838,8 @@ function buildExternal({ sources, exits }, byPath, innerBounds, visualScale = 1)
   // the same domain stay distinct), showing the total count across all
   // pages linking to it, in a row centered below the map (hottest
   // first), mirroring the source row above. Each (URL, page) pair
-  // contributes an edge from that page.
+  // contributes an edge from that page. An exit whose connectors are all
+  // culled (below MIN_WMID) is dropped itself.
   const byExt = new Map() // full URL -> { ext, out, pairs }
   for (const p of liveExits.filter((p) => p.out >= minCount)) {
     const g = byExt.get(p.ext) || { ext: p.ext, out: 0, pairs: [] }
@@ -824,6 +850,8 @@ function buildExternal({ sources, exits }, byPath, innerBounds, visualScale = 1)
   const targets = [...byExt.values()]
     .sort((a, b) => b.out - a.out)
     .slice(0, MAX_EXT_OUT)
+    .filter(({ pairs }) =>
+      pairs.some((p) => !byPath.get(p.page).hidden && width(p.out) >= MIN_WMID))
   if (targets.length) {
     const cx = (innerBounds.x0 + innerBounds.x1) / 2
     const y = innerBounds.y1 + TNODE_BOUND + EXT_GAP
@@ -844,7 +872,7 @@ function buildExternal({ sources, exits }, byPath, innerBounds, visualScale = 1)
         const page = byPath.get(p.page)
         if (page.hidden) continue
         const wMid = width(p.out)
-        if (wMid <= 0) continue
+        if (wMid < MIN_WMID) continue
         edges.push(buildRibbon(page, xn, p.out, 0, wMid, true))
         flows.push(...buildFlows(page, xn, p.out, 0, visualScale))
       }

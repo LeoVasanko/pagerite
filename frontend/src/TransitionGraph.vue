@@ -13,7 +13,6 @@ import {
   TNODE_W,
   TNODE_H,
   BEAD_R,
-  BEAD_SPEED,
   buildTransitionGraph,
 } from './analytics/transitions.js'
 
@@ -46,65 +45,97 @@ const graph = computed(() =>
 
 // Bead animation: every bead is simulated independently in JS. Each flow
 // (one per edge direction) emits a bead every `interval` seconds; beads
-// travel at BEAD_SPEED along the segment and are dropped at the end.
+// cross their segment in a constant TRAVERSAL_S seconds (speed relative
+// to span length) and are dropped at the end.
 // There is deliberately no cap on beads in flight.
+// Emitters persist across data reloads, keyed by flow.key: an unchanged
+// link keeps its emission phase and in-flight beads (tracked by progress,
+// not absolute time), so a count change elsewhere never reshuffles them.
 const beads = shallowRef([])
 let rafId = 0
+const emitters = new Map() // flow.key -> { flow, interval, next, alive }
+const live = [] // { e, p } — beads in flight, p = progress 0..1
+let lastTick = 0
 
 const MAX_BEAD_RATE = 120 // upper bound on total beads per second
+const TRAVERSAL_S = 1.5 // seconds to cross any segment, end to end
 
-const startBeads = (flows) => {
-  cancelAnimationFrame(rafId)
-  beads.value = []
-  if (!flows?.length) return
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return
-
+const syncBeads = (flows) => {
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
+  if (!flows?.length || reduced) {
+    emitters.clear()
+    live.length = 0
+    beads.value = []
+    return
+  }
   // Cap the total bead emission rate so a busy range cannot spawn enough
   // beads to kill the page. Existing per-range time scaling is preserved;
   // this is only a proportional emergency throttle when the limit is hit.
   const totalRate = flows.reduce((s, f) => s + 1 / f.interval, 0)
   const scale = totalRate > MAX_BEAD_RATE ? MAX_BEAD_RATE / totalRate : 1
 
-  const live = [] // { flow, t0 } — one entry per bead in flight
   const now = performance.now()
-  const emitters = flows.map((flow) => {
+  const seen = new Set()
+  for (const flow of flows) {
+    seen.add(flow.key)
     const interval = (flow.interval / scale) * 1000
-    // Pre-fill the traversal with evenly spaced beads (random phase), so
-    // the flow appears already running instead of starting empty.
+    const e = emitters.get(flow.key)
+    if (e) {
+      e.flow = flow // pick up new geometry/rate, keep the phase
+      e.interval = interval
+      continue
+    }
+    // New emitter: pre-fill the traversal with evenly spaced beads (random
+    // phase), so the flow appears already running instead of empty.
     const phase = Math.random() * interval
-    for (let t = now - (flow.len / BEAD_SPEED) * 1000 + phase; t <= now; t += interval) {
-      live.push({ flow, t0: t })
+    const dp = interval / 1000 / TRAVERSAL_S
+    const ne = { flow, interval, next: now + phase, alive: true }
+    for (let p = 1 - phase / 1000 / TRAVERSAL_S; p > 0; p -= dp) {
+      live.push({ e: ne, p })
     }
-    return { flow, interval, next: now + phase }
-  })
-
-  const tick = (t) => {
-    for (const e of emitters) {
-      while (e.next <= t) {
-        live.push({ flow: e.flow, t0: e.next })
-        e.next += e.interval
-      }
-    }
-    const out = []
-    for (let i = live.length - 1; i >= 0; i--) {
-      const b = live[i]
-      const p = ((t - b.t0) / 1000) * BEAD_SPEED / b.flow.len
-      if (p >= 1) {
-        live.splice(i, 1)
-        continue
-      }
-      out.push({
-        x: b.flow.x1 + (b.flow.x2 - b.flow.x1) * p,
-        y: b.flow.y1 + (b.flow.y2 - b.flow.y1) * p,
-      })
-    }
-    beads.value = out
-    rafId = requestAnimationFrame(tick)
+    emitters.set(flow.key, ne)
   }
+  for (const [key, e] of emitters) {
+    if (!seen.has(key)) {
+      e.alive = false
+      emitters.delete(key)
+    }
+  }
+  for (let i = live.length - 1; i >= 0; i--) {
+    if (!live[i].e.alive) live.splice(i, 1)
+  }
+}
+
+const tick = (t) => {
+  const dt = lastTick ? (t - lastTick) / 1000 : 0
+  lastTick = t
+  for (const e of emitters.values()) {
+    while (e.next <= t) {
+      live.push({ e, p: 0 })
+      e.next += e.interval
+    }
+  }
+  const out = []
+  for (let i = live.length - 1; i >= 0; i--) {
+    const b = live[i]
+    b.p += dt / TRAVERSAL_S
+    if (b.p >= 1) {
+      live.splice(i, 1)
+      continue
+    }
+    const f = b.e.flow
+    out.push({ x: f.x1 + (f.x2 - f.x1) * b.p, y: f.y1 + (f.y2 - f.y1) * b.p })
+  }
+  beads.value = out
   rafId = requestAnimationFrame(tick)
 }
 
-watch(() => graph.value?.flows, startBeads, { immediate: true })
+watch(() => graph.value?.flows, syncBeads, { immediate: true })
+onMounted(() => {
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    rafId = requestAnimationFrame(tick)
+  }
+})
 onBeforeUnmount(() => cancelAnimationFrame(rafId))
 
 // The svg never renders larger than its natural size (1 viewBox unit = 1
@@ -161,7 +192,7 @@ const countLabel = (n) =>
             :id="`tarc${i}`" :d="a.d" :class="['tarc', a.top && 'tarc-top']" />
       <template v-for="(a, i) in graph.arcs" :key="'t' + i">
         <path v-if="a.ld" :id="`tarcl${i}`" :d="a.ld" fill="none" stroke="none" />
-        <text v-if="a.ld" class="tarclabel"><textPath :href="`#tarcl${i}`" startOffset="50%">{{ a.label }}</textPath></text>
+        <text v-if="a.ld" class="tarclabel" :class="{ 'tarclabel-top': a.top }"><textPath :href="`#tarcl${i}`" startOffset="0">{{ a.label }}</textPath></text>
       </template>
       <path v-for="(e, i) in graph.edges" :key="'e' + i"
             :d="e.d" :class="['tconn', e.external && 'tconn-exit']">
@@ -237,10 +268,16 @@ const countLabel = (n) =>
   opacity: 0.25;
 }
 .tmap .tarc-top { stroke-width: 24; }
+/* Lane labels are left-aligned: each guide arc starts just past the source
+   pill's edge, the earliest point where the text is visible. */
 .tmap .tarclabel {
   fill: var(--muted);
   font-size: calc(13px / var(--u, 1));
-  text-anchor: middle;
+  text-anchor: start;
+}
+/* The top lane is 50% thicker; its 🏠︎ label scales along. */
+.tmap .tarclabel-top {
+  font-size: calc(19.5px / var(--u, 1));
 }
 .tmap .tnode {
   fill: var(--accent);

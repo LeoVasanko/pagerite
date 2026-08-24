@@ -250,7 +250,8 @@ younger than that, bucket size included) so the chart never collapses to a
 tiny sliver when the site is young. Below the charts: a **transition map** (all pages from
 `/_api/pages` — top-level menu items on a large-radius circular arc whose
 bottom point is the last item (each earlier item a bit higher), connected
-by an unlabeled top lane, each item's
+by a top lane labeled 🏠︎ beside the home pill (50% thicker than
+the branch lanes, its label font and guide offset scaled along), each item's
 subtree fanning out below it in menu order along a large-radius circular
 arc that leaves heading
 straight down and gradually bends right, index pages without views omitted
@@ -258,17 +259,24 @@ and their children promoted in their place. The submenu structure is drawn
 as wide branch lanes: one per path prefix with at least two visible
 nodes, running behind the branch's node pills as circle arcs concentric
 with the fan (parent levels one radius step outward, so all lanes of a
-group share exactly one form), each labeled with its branch slug along the
-first inter-node gap — so the lanes reflect the path
+group share exactly one form), each labeled with its branch slug
+left-aligned just past the first pill and allowed to run along the lane to
+its end, disappearing under later pills when long — so the lanes reflect
+the path
 structure even where index pages are omitted — opposite transition
 directions joined into organic
 tapered connections whose middle width grows logarithmically with the
-count (a single count renders as a ~1 px line, uncapped), connections
+count (uncapped), connections
 carrying less than 1% of the total traffic
-pruned; beads are simulated one by one in JS (requestAnimationFrame) and
-flow along each edge, emitted at a rate linearly proportional
+pruned, as are those whose thin middle would render below ~0.8 px —
+fainter strands are invisible and only their wide end flares would show; beads are simulated one by one in JS (requestAnimationFrame) and
+flow along each edge, persisting across data reloads (emitters are keyed
+per edge direction and beads tracked by progress, so an unrelated count
+change never reshuffles them), emitted at a rate linearly proportional
 to the directional count with no in-flight limit, opposing directions
-offset onto parallel lanes. External sources show as a node row above the
+offset onto parallel lanes. External sources and exits whose connectors are
+all culled by the width threshold are dropped from their rows themselves
+(the site's own page nodes always stay, connected or not). External sources show as a node row above the
 map: each visit is attributed to `utm_campaign`, then `utm_source`, then the
 referer origin, then any other `utm_*` tag, so UTM-tagged visits are grouped
 under their campaign/source value rather than the referer domain. A UTM
