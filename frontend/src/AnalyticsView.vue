@@ -233,7 +233,6 @@ const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], c
               </tbody>
             </table>
           </div>
-          <p v-else class="empty">no crawler hits recorded yet</p>
 
           <div v-if="abuseRows.length" class="visit-table-wrap">
             <table class="visit-table">

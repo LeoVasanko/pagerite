@@ -68,8 +68,8 @@ const viewChart = computed(() => buildChart(viewSeries.value, now.value))
 
 <template>
   <section v-for="c in [
-      { ylabel: 'visits', chart: visitChart, legend: true, empty: 'no visits recorded yet' },
-      { ylabel: 'views', chart: viewChart, legend: false, empty: 'no views recorded yet' },
+      { ylabel: 'visits', chart: visitChart, legend: true },
+      { ylabel: 'views', chart: viewChart, legend: false },
     ]" :key="c.ylabel">
     <template v-if="c.chart">
       <svg class="chart" :viewBox="`${-MARGIN_L} 0 ${VIEW_W} ${VIEW_H}`"
@@ -116,7 +116,6 @@ const viewChart = computed(() => buildChart(viewSeries.value, now.value))
         </g>
       </svg>
     </template>
-    <p v-else class="empty">{{ c.empty }}</p>
   </section>
 </template>
 

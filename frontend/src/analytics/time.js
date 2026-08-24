@@ -63,9 +63,24 @@ export function sumRange(raw, t0, t1) {
 export function weeklySeries(buckets) {
   const raw = rawTimes(buckets)
   const times = Object.keys(raw).map(Number)
-  if (!times.length) return null
   const now = Date.now()
   const thisMonday = mondayUTC(now)
+  if (!times.length) {
+    const points = []
+    const end = Math.min(thisMonday + WEEK, Math.floor(now / MIN5) * MIN5 + MIN5)
+    for (let t = thisMonday; t < end; t += MIN5) {
+      points.push({ t, count: 0 })
+    }
+    return {
+      series: [{ points, label: `Week ${isoWeek(thisMonday)}`, opacity: 1, area: true }],
+      t0: thisMonday,
+      t1: thisMonday + WEEK,
+      rate: HOUR / MIN5,
+      binMinutes: 5,
+      unitMinutes: 60,
+      unit: 'hour',
+    }
+  }
   const oldest = Math.min(...times)
   // Weeks back as far as the data reaches: difference in Monday indices.
   const available = (thisMonday - mondayUTC(oldest)) / WEEK + 1
@@ -113,13 +128,27 @@ export function weeklySeries(buckets) {
 export function rollingSeries(buckets, rangeKey) {
   const raw = rawTimes(buckets)
   const times = Object.keys(raw).map(Number)
-  if (!times.length) return null
   const { span, bucket, minSpan = 0 } = RANGES[rangeKey]
   const t1 = Date.now()
-  const earliest = Math.min(...times)
   const t0 = Math.floor((span != null
     ? t1 - span
-    : Math.min(earliest, t1 - minSpan)) / DAY) * DAY
+    : Math.min(times.length ? Math.min(...times) : Infinity, t1 - minSpan)) / DAY) * DAY
+  if (!times.length) {
+    const bucketMs = t1 - t0 <= 31 * DAY ? Math.min(bucket, 6 * HOUR) : bucket
+    const points = []
+    for (let t = t0; t < t1; t += bucketMs) {
+      points.push({ t, count: 0 })
+    }
+    return {
+      series: [{ points, label: '', opacity: 1, area: true }],
+      t0,
+      t1,
+      rate: DAY / bucketMs,
+      binMinutes: bucketMs / 60e3,
+      unitMinutes: 24 * 60,
+      unit: 'day',
+    }
+  }
   // The bucket follows the actual window length, not the range key: when
   // "all" is capped to its 30-day minimum it covers the very window "month"
   // does, and daily bins would draw a different curve over the same data
