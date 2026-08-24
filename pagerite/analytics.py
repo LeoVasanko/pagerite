@@ -109,6 +109,8 @@ class Visit(msgspec.Struct, omit_defaults=True):
     utm: dict[str, str] = {}
     #: Active reading time per path (seconds), keyed by path.
     read: dict[str, int] = {}
+    #: HTTP status of the response when the path was first seen (200 or 404).
+    statuses: dict[str, int] = {}
 
 
 class CrawlerHit(msgspec.Struct, omit_defaults=True):
@@ -125,6 +127,8 @@ class CrawlerHit(msgspec.Struct, omit_defaults=True):
     referer: str = ""
     #: Raw query string of the landing URL (UTM tags can be parsed from it).
     query: str = ""
+    #: HTTP status of the served response (200 or 404 for content pages).
+    status: int = 200
 
 
 class AbuseHit(msgspec.Struct, omit_defaults=True):
@@ -324,6 +328,9 @@ class Store:
         #: Document GETs that have not yet been matched by a ping.  Kept
         #: in RAM only; expired entries are written to ``data.crawlers``.
         self.pending_crawlers: list[CrawlerHit] = []
+        #: client hash -> {path: status} for recent document GETs, consumed
+        #: by the matching ping to record the status of each visited path.
+        self.pending_statuses: dict[bytes, dict[str, int]] = {}
         #: ip -> number of plain (non-telltale) 404s seen, in RAM only;
         #: reaching ``_ABUSE_404_THRESHOLD`` classifies the IP as abuse.
         self.not_found_counts: dict[str, int] = {}
@@ -571,6 +578,7 @@ class Store:
         referer: str,
         client_hash: bytes,
         utm: dict[str, str] | None = None,
+        status: int = 200,
     ) -> Visit:
         now = datetime.now(UTC)
         visit = Visit(
@@ -580,6 +588,7 @@ class Store:
             client=client_hash,
             utm=utm or {},
         )
+        visit.statuses[entry] = status
         self.data.visits.append(visit)
         self.sessions[client_hash] = len(self.data.visits) - 1
         self._count(self.data.site_visits, _bucket(now))
@@ -595,6 +604,8 @@ class Store:
         ua: str,
         full_path: str,
         accept_language: str = "",
+        *,
+        status: int = 200,
     ) -> list[bytes]:
         """Stash the entry referer/UTM tags and queue a pending crawler hit.
 
@@ -642,8 +653,10 @@ class Store:
                 client=client_hash,
                 referer=self.pending_referers.get(ip, ""),
                 query=query,
+                status=status,
             )
         )
+        self.pending_statuses.setdefault(client_hash, {})[entry] = status
         return flushed
 
     def _add_read(self, client_hash: bytes, path: str, seconds: int) -> None:
@@ -699,6 +712,7 @@ class Store:
             self.pending_crawlers = [
                 hit for hit in self.pending_crawlers if hit.client != client_hash
             ]
+            self.pending_statuses.pop(client_hash, None)
             index = self.sessions.pop(client_hash, None)
             if index is not None and index < len(self.data.visits):
                 self._remove_visit(index)
@@ -730,6 +744,10 @@ class Store:
             return None, flushed
         index = self.sessions.get(client_hash)
         fr = fr_path or "(direct)"
+        statuses = self.pending_statuses.setdefault(client_hash, {})
+        target_status = statuses.pop(target, None) or 200
+        if not statuses:
+            self.pending_statuses.pop(client_hash, None)
         if index is None or index >= len(self.data.visits):
             # No known session: the initial ping of a fresh page load (or
             # missing data after a server restart) — start a visit.
@@ -740,6 +758,7 @@ class Store:
                 self.pending_referers.pop(ip, ""),
                 client_hash,
                 utm=self.pending_utms.pop(ip, {}),
+                status=target_status,
             )
         else:
             visit = self.data.visits[index]
@@ -750,6 +769,7 @@ class Store:
             # First-seen only: repeat pages and repeated exits don't append.
             if visit.entry != target and target not in visit.trail:
                 visit.trail.append(target)
+            visit.statuses[target] = target_status
         self._save()
         visit_index = index if index is not None and index < len(self.data.visits) else None
         return visit_index, flushed

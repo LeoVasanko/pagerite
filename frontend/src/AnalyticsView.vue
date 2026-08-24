@@ -425,6 +425,11 @@ const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], c
   margin-left: 0.5rem;
 }
 
+.analytics-view :deep(.trail-link.error),
+.analytics-view :deep(.trail-link.error:hover) {
+  color: var(--error, #c00);
+}
+
 .visit-table .utm-tag {
   display: inline-block;
   max-width: 100%;

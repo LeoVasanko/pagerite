@@ -853,7 +853,7 @@ async def analytics_ping(ping: AnalyticsPing, request: Request) -> None:
     _schedule_client_enrichment(flushed_clients)
 
 
-def _track_entry(path: str, request: Request) -> list[bytes]:
+def _track_entry(path: str, request: Request, *, status: int = 200) -> list[bytes]:
     """Stash the referer/UTM tags and queue a pending crawler hit for the GET.
 
     Nothing is counted on the GET itself — the client's /_a ping starts the
@@ -890,6 +890,7 @@ def _track_entry(path: str, request: Request) -> list[bytes]:
         request.headers.get("user-agent", ""),
         full_path,
         request.headers.get("accept-language", ""),
+        status=status,
     )
 
 
@@ -1228,7 +1229,7 @@ async def show_page(request: Request, path: str) -> Response:
         # Category label without a landing page: placeholder with the pen
         # to create it (404 — no page here, but the node is real).
         if _is_trackable_path(path):
-            flushed = _track_entry(path, request)
+            flushed = _track_entry(path, request, status=404)
             _schedule_client_enrichment(flushed)
         return _html_response(
             request,
@@ -1254,6 +1255,6 @@ async def show_page(request: Request, path: str) -> Response:
             accept_language,
         )
         asyncio.create_task(_enrich_client(client_hash))
-        flushed = _track_entry(path, request)
+        flushed = _track_entry(path, request, status=404)
         _schedule_client_enrichment(flushed)
     return _html_response(request, "not-found", path, 404)

@@ -147,6 +147,8 @@ Each `Visit` record:
   does not append.
 - `utm` — `utm_*` query parameters from the landing URL, as a dict.
 - `read` — active reading time per path (seconds), keyed by path.
+- `statuses` — HTTP status of the response when each path was first seen
+  (200 or 404), keyed by path.
 
 Each `CrawlerHit` record:
 
@@ -154,7 +156,9 @@ Each `CrawlerHit` record:
 - `entry` — page path requested,
 - `client` — 6-byte blake3 hash referencing `Analytics.clients`,
 - `referer` — external https origin of the request, `""` for direct/none,
-- `query` — raw query string of the request.
+- `query` — raw query string of the request,
+- `status` — HTTP status of the served response (200 for a real page, 404
+  for a category placeholder or missing page).
 
 Each `AbuseHit` record:
 
@@ -172,6 +176,10 @@ Abuse table identical paths are collapsed with their counts; flagged paths
 that triggered classification are lifted to the top, followed by other 404s
 and then document GETs from the abuser.  Within each category paths are
 sorted by count descending, then by their earliest hit.
+
+In the visitor and crawler tables, internal paths that returned a 404 status
+are shown in red and the link title includes the status code, so it is easy
+to tell misses from real pages at a glance.
 
 ## Aggregates
 

@@ -241,6 +241,14 @@ export function formatWhenIso(ts) {
 }
 
 /**
+ * Compact read time for tooltips: "50s" under a minute, "1m23s" otherwise.
+ */
+export function formatReadTime(seconds) {
+  if (seconds < 60) return `${seconds}s`
+  return `${Math.floor(seconds / 60)}m${seconds % 60}s`
+}
+
+/**
  * Compact visitor counts: plain below 1k, then 1.2k / 10k / 1.2M.
  * Truncated, not rounded.
  */
@@ -359,13 +367,16 @@ export function formatCrawlerRows(crawlers, clients, pageTree, now = Date.now())
     const start = new Date(c.start).getTime()
     if (start > g.lastStart) g.lastStart = start
     if (c.entry?.startsWith('/')) {
-      g.pages.set(c.entry, (g.pages.get(c.entry) || 0) + 1)
+      const existing = g.pages.get(c.entry) || { count: 0, status: c.status || 200 }
+      existing.count += 1
+      if (c.status != null) existing.status = c.status
+      g.pages.set(c.entry, existing)
     }
     groups.set(c.client, g)
   }
   const totalHits = (g) => {
     let n = 0
-    for (const c of g.pages.values()) n += c
+    for (const p of g.pages.values()) n += p.count
     return n
   }
   return [...groups.values()]
@@ -380,8 +391,8 @@ export function formatCrawlerRows(crawlers, clients, pageTree, now = Date.now())
         lastSeenIso: formatWhenIso(g.lastStart),
         lastSeenLocal: formatWhenLocal(g.lastStart),
         pages: [...g.pages.entries()]
-          .sort((a, b) => b[1] - a[1])
-          .map(([path, count]) => ({ ...stepOf(path, titles), count })),
+          .sort((a, b) => b[1].count - a[1].count)
+          .map(([path, info]) => ({ ...stepOf(path, titles), count: info.count, status: info.status })),
         ip: client.ip || '',
         ipDisplay: isHost ? mainDomain(host) : hostIP(client.ip) || client.ip || '—',
         isHost,
@@ -499,8 +510,17 @@ export function formatVisitRows(visits, clients, pageTree, now = Date.now()) {
   const titles = buildTitleMap(pageTree)
   return [...(visits || [])].reverse().slice(0, 20).map((v) => {
     const client = (clients || {})[v.client] || {}
+    const read = v.read || {}
+    const statuses = v.statuses || {}
     const trail = [v.entry, ...(v.trail || [])]
-      .map((p) => stepOf(p, titles))
+      .map((p) => {
+        const step = stepOf(p, titles)
+        if (step) {
+          if (read[p]) step.readSeconds = read[p]
+          if (statuses[p]) step.status = statuses[p]
+        }
+        return step
+      })
       .filter(Boolean)
     const utmKeys = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content']
     const utmValues = utmKeys.map((k) => (v.utm || {})[k]).filter(Boolean)
