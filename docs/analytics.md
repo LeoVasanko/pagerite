@@ -240,10 +240,21 @@ month view labels days the same lineless way — day numbers at noon UTC,
 with the month name substituted for the 1st. Year is a rolling 365-day window ending at now, re-bucketed to daily points,
 with boundary lines at months/years.  All uses the full data reach, but keeps
 at least the past 30 days so the chart never collapses to a tiny sliver when
-the site is young. Below the charts: a radial **transition map** (all pages from
-`/_api/pages` — front page at the center, each slug level on its own ring,
-siblings clockwise in navigation order from the top, radial gap equal to
-the arc spacing — opposite transition directions joined into organic
+the site is young. Below the charts: a **transition map** (all pages from
+`/_api/pages` — top-level menu items on a large-radius circular arc whose
+bottom point is the last item (each earlier item a bit higher), connected
+by an unlabeled top lane, each item's
+subtree fanning out below it in menu order along a large-radius circular
+arc that leaves heading
+straight down and gradually bends right, index pages without views omitted
+and their children promoted in their place. The submenu structure is drawn
+as wide branch lanes: one per path prefix with at least two visible
+nodes, running behind the branch's node pills as circle arcs concentric
+with the fan (parent levels one radius step outward, so all lanes of a
+group share exactly one form), each labeled with its branch slug along the
+first inter-node gap — so the lanes reflect the path
+structure even where index pages are omitted — opposite transition
+directions joined into organic
 tapered connections whose middle width grows logarithmically with the
 count (a single count renders as a ~1 px line, uncapped), connections
 carrying less than 1% of the total traffic
@@ -255,8 +266,8 @@ map: each visit is attributed to `utm_campaign`, then `utm_source`, then the
 referer origin, then any other `utm_*` tag, so UTM-tagged visits are grouped
 under their campaign/source value rather than the referer domain. A UTM
 source node only links to its referer when every visit carrying that tag
-came from the same origin. External exits are small nodes fanned outwards
-from their source page), per-page view
+came from the same origin. External exits are full-size nodes in a matching
+row centered below the map, so the site itself stays in the middle), per-page view
 counts, the top transitions and the 50 most recent visit trails. Data is
 streamed live over `WebSocket /_api/ws/analytics`, which pushes the latest
 JSON snapshot on connect and again whenever the analytics file is updated

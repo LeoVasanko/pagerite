@@ -123,8 +123,11 @@ const startBeads = (flows) => {
 watch(() => graph.value?.flows, startBeads, { immediate: true })
 onBeforeUnmount(() => cancelAnimationFrame(rafId))
 
-// Text in the graph must render at a constant screen size regardless of
-// how far the enlarged graph's viewBox is scaled down to fit the panel:
+// The svg never renders larger than its natural size (1 viewBox unit = 1
+// px, max-width below): the layout geometry is designed in pixel-like
+// units, and upscaling would blow the pills up around their constant-size
+// text. Narrow panels still scale the graph down to fit (width: 100%).
+// Text renders at a constant screen size regardless of that downscale:
 // measure the unit→pixel ratio and expose it as --u on the svg, which the
 // font-size rules divide by. Falls back to 1 (raw units) until measured.
 const svgEl = ref(null)
@@ -148,18 +151,34 @@ watch(svgEl, (el) => {
 watch(() => graph.value?.bounds, updateScale)
 onBeforeUnmount(() => resizeObs?.disconnect())
 
-// Font size (px) that fits a label inside the pill width at the current
-// zoom: ~0.52 em average glyph width, 12 px padding per side, capped.
-const fitPx = (label) =>
-  Math.min(15, (TNODE_W * pxPerUnit.value - 24) / (0.52 * Math.max(label.length, 1)))
+// Label text shortened to fit inside the pill at the current zoom (fonts
+// are fixed screen sizes): drop whole trailing words first, then hard-cut
+// with an ellipsis. Width estimate: ~0.52 em per glyph, 12 px padding
+// per side.
+const fitLabel = (label, fontPx = 15) => {
+  const budget = Math.max(2, (TNODE_W * pxPerUnit.value - 24) / (0.52 * fontPx))
+  if (label.length <= budget) return label
+  const words = label.split(' ')
+  while (words.length > 1 && words.join(' ').length + 1 > budget) words.pop()
+  let out = words.join(' ')
+  if (out.length + 1 > budget) out = out.slice(0, Math.floor(budget) - 1)
+  return `${out}…`
+}
+
+const countLabel = (n) =>
+  n.readMin ? `${formatCount(n.views)}×${n.readMin}m` : formatCount(n.views)
 </script>
 
 <template>
   <section v-if="graph">
-    <svg ref="svgEl" class="tmap" :style="{ '--u': pxPerUnit }" :viewBox="`${graph.bounds.x0} ${graph.bounds.y0} ${graph.bounds.x1 - graph.bounds.x0} ${graph.bounds.y1 - graph.bounds.y0}`"
+    <svg ref="svgEl" class="tmap" :style="{ '--u': pxPerUnit, maxWidth: `${graph.bounds.x1 - graph.bounds.x0}px` }" :viewBox="`${graph.bounds.x0} ${graph.bounds.y0} ${graph.bounds.x1 - graph.bounds.x0} ${graph.bounds.y1 - graph.bounds.y0}`"
          role="img" aria-label="map of transitions between pages">
       <path v-for="(a, i) in graph.arcs" :key="'a' + i"
-            :d="a.d" class="tarc" />
+            :id="`tarc${i}`" :d="a.d" :class="['tarc', a.top && 'tarc-top']" />
+      <template v-for="(a, i) in graph.arcs" :key="'t' + i">
+        <path v-if="a.ld" :id="`tarcl${i}`" :d="a.ld" fill="none" stroke="none" />
+        <text v-if="a.ld" class="tarclabel"><textPath :href="`#tarcl${i}`" startOffset="50%">{{ a.label }}</textPath></text>
+      </template>
       <path v-for="(e, i) in graph.edges" :key="'e' + i"
             :d="e.d" :class="['tconn', e.external && 'tconn-exit']">
         <title>{{ e.title }}</title>
@@ -171,31 +190,26 @@ const fitPx = (label) =>
           <title>{{ x.path }}</title>
           <rect :x="x.x - TNODE_W/2" :y="x.y - TNODE_H/2" :width="TNODE_W" :height="TNODE_H" :rx="TNODE_H/2"
                 :class="['txnode', x.kind === 'source' ? 'txnode-source' : 'txnode-exit']" />
-          <text :x="x.x" :y="x.y - TNODE_H*0.16" class="tnodeslug" dominant-baseline="middle"
-                :style="{ '--slug-px': `${fitPx(x.label)}px` }">{{ x.label }}</text>
-          <text :x="x.x" :y="x.y + TNODE_H*0.24" class="tnodecount" dominant-baseline="middle">{{ formatCount(x.count) }}</text>
+          <text :x="x.x" :y="x.y - TNODE_H*0.16" class="tnodeslug" dominant-baseline="middle">{{ fitLabel(x.label) }}</text>
+          <text :x="x.x" :y="x.y + TNODE_H*0.24" class="tnodecount" dominant-baseline="middle">{{ fitLabel(formatCount(x.count), 13) }}</text>
         </a>
         <g v-else>
           <title>{{ x.path }}</title>
           <rect :x="x.x - TNODE_W/2" :y="x.y - TNODE_H/2" :width="TNODE_W" :height="TNODE_H" :rx="TNODE_H/2"
                 :class="['txnode', x.kind === 'source' ? 'txnode-source' : 'txnode-exit']" />
-          <text :x="x.x" :y="x.y - TNODE_H*0.16" class="tnodeslug" dominant-baseline="middle"
-                :style="{ '--slug-px': `${fitPx(x.label)}px` }">{{ x.label }}</text>
-          <text :x="x.x" :y="x.y + TNODE_H*0.24" class="tnodecount" dominant-baseline="middle">{{ formatCount(x.count) }}</text>
+          <text :x="x.x" :y="x.y - TNODE_H*0.16" class="tnodeslug" dominant-baseline="middle">{{ fitLabel(x.label) }}</text>
+          <text :x="x.x" :y="x.y + TNODE_H*0.24" class="tnodecount" dominant-baseline="middle">{{ fitLabel(formatCount(x.count), 13) }}</text>
         </g>
       </g>
       <g v-for="n in graph.nodes" :key="n.path">
         <a :href="n.path">
           <title>{{ n.title }}</title>
           <rect :x="n.x - TNODE_W/2" :y="n.y - TNODE_H/2" :width="TNODE_W" :height="TNODE_H" :rx="TNODE_H/2" class="tnode" />
-          <text :x="n.x" :y="n.y - TNODE_H*0.16" class="tnodeslug" dominant-baseline="middle"
-                :style="{ '--slug-px': `${fitPx(n.label)}px` }">{{ n.label }}</text>
+          <text :x="n.x" :y="n.y - TNODE_H*0.16" class="tnodeslug" dominant-baseline="middle">{{ fitLabel(n.label) }}</text>
           <text :x="n.x" :y="n.y + TNODE_H*0.24" class="tnodecount" dominant-baseline="middle">
-            {{ n.readMin ? `${formatCount(n.views)}×${n.readMin}m` : formatCount(n.views) }}
+            {{ fitLabel(countLabel(n), 13) }}
           </text>
         </a>
-        <text v-if="n.crumb" :x="n.x" :y="n.y - TNODE_H/2 - 10"
-              :class="['tnodepath', n.path === '/' && 'tnodepath-home']">{{ n.crumb }}</text>
       </g>
     </svg>
   </section>
@@ -206,7 +220,9 @@ const fitPx = (label) =>
 .tmap {
   display: block;
   width: 100%;
-  max-width: 100%;
+  /* max-width is set inline to the natural content width (px = viewBox
+     units), so wide panels never upscale the graph beyond 1:1. */
+  margin: 0 auto;
 }
 .tmap .tconn {
   fill: var(--accent);
@@ -226,10 +242,21 @@ const fitPx = (label) =>
 }
 .tmap .txnode-source { fill: var(--text); }
 .tmap .txnode-exit { fill: var(--text); }
+/* Branch lanes: one wide concentric arc per path prefix, running behind
+   the node pills around the fan's circle center; parent levels sit one
+   indent (radius step) outward. Each lane's label follows a short guide
+   arc across the first inter-node gap (the part pills never cover). */
 .tmap .tarc {
   fill: none;
-  stroke: var(--line);
-  stroke-width: 1;
+  stroke: var(--muted);
+  stroke-width: 16;
+  opacity: 0.25;
+}
+.tmap .tarc-top { stroke-width: 24; }
+.tmap .tarclabel {
+  fill: var(--muted);
+  font-size: calc(13px / var(--u, 1));
+  text-anchor: middle;
 }
 .tmap .tnode {
   fill: var(--accent);
@@ -237,10 +264,11 @@ const fitPx = (label) =>
 }
 /* Text renders at a constant screen size: --u (set from JS) is the
    viewBox-unit → pixel ratio of the rendered svg, so dividing by it makes
-   the sizes independent of how far the graph is scaled down. */
+   the sizes independent of how far the graph is scaled down. Labels are
+   shortened in JS to fit the pill instead of shrinking the font. */
 .tmap .tnodeslug {
   fill: var(--bg, Canvas);
-  font-size: calc(var(--slug-px, 15px) / var(--u, 1));
+  font-size: calc(15px / var(--u, 1));
   text-anchor: middle;
 }
 .tmap a { cursor: pointer; }
@@ -250,12 +278,6 @@ const fitPx = (label) =>
   font-size: calc(13px / var(--u, 1));
   text-anchor: middle;
 }
-.tmap .tnodepath {
-  fill: var(--muted);
-  font-size: calc(11px / var(--u, 1));
-  text-anchor: middle;
-}
-.tmap .tnodepath-home { font-size: calc(17px / var(--u, 1)); }
 
 section { margin-top: 1.8rem; }
 </style>

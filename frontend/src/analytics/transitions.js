@@ -22,9 +22,10 @@
  * referer, then other utm_* tags. Visits with a UTM tag are grouped under
  * that tag's value, not under the referer domain. A UTM source node only
  * becomes a clickable link when every visit carrying that UTM tag came
- * from the same referer. External exits are full-size nodes just outside
- * their source page, angled away from the center. Each distinct full exit
- * URL is its own node. Self-loops (reload pings) are skipped.
+ * from the same referer. External exits are full-size nodes in a row below
+ * the map, mirroring the source row, so the site itself stays in the
+ * middle. Each distinct full exit URL is its own node. Self-loops (reload
+ * pings) are skipped.
  */
 
 import { MIN_READ_SECONDS } from './format.js'
@@ -142,8 +143,8 @@ const BEAD_RATE = 0.012 // beads per second per recorded transition
 const FLOW_OFFSET = 3 // lane offset to the right of the travel direction
 
 const MAX_EXT_IN = 8 // referer nodes in the top row
-const MAX_EXT_OUT = 12 // exit nodes, at most MAX_EXT_OUT_PER_PAGE per page
-const MAX_EXT_OUT_PER_PAGE = 3
+const MAX_EXT_OUT = 12 // exit nodes in the bottom row
+const EXT_GAP = 12 // vertical margin of the source/exit rows to the map
 
 /** Flatten the site tree into navigation order via DFS. */
 function buildNavigationOrder(pageTree) {
@@ -287,16 +288,10 @@ function annotateNodes(nodes, viewsData, titles, readMinutes) {
     n.views = viewCount(n.path)
     n.readMin = readMinutes[n.path] || 0
     // Article title inside the pill (shortened with ellipsis as needed),
-    // slug as fallback for pages missing from the site tree. The short
-    // path (last two segments, no leading /) renders above the pill; the
-    // front page shows a home symbol there instead (larger).
+    // slug as fallback for pages missing from the site tree.
     const slug = n.path.split('/').pop()
     const label = titles.get(n.path) || (n.path === '/' ? '🏠︎' : slug)
     n.label = label.length > 24 ? `${label.slice(0, 23)}…` : label
-    const segs = n.path.split('/').filter(Boolean)
-    n.crumb = n.path === '/'
-      ? '🏠︎'
-      : segs.length > 2 ? `…/${segs.slice(-2).join('/')}` : segs.join('/')
     n.title = titles.get(n.path) || ''
     // Category (non-leaf) pages with no views in this window are omitted:
     // their children move up in their place (see layoutGroups).
@@ -310,15 +305,13 @@ function annotateNodes(nodes, viewsData, titles, readMinutes) {
  * the row following a shallow circular sag (center lowest) so connections
  * between neighbors do not overlap the pills in between. Each top item's
  * whole subtree fans out from it in menu (DFS preorder) order along a
- * parabola that leaves the parent heading straight down and gradually
- * bends to the right — no horizontal space is reserved for fans, they
+ * large-radius circular arc that leaves the parent heading straight down
+ * and gradually bends to the right — no horizontal space is reserved for fans, they
  * extend under the slots to their right. Hidden index pages are omitted
  * from the fan; when the top item itself is hidden, the fan shifts one
- * slot up, the first visible child taking the top position. The short
- * path shown above each pill (last two segments) keeps the omitted menu
- * level visible.
- * Also returns curved spoke paths tracing each fan: top slot to first
- * member, then member to member in menu order, each bowed to the right.
+ * slot up, the first visible child taking the top position. Branch lanes
+ * labeled with the branch slug (see the branch-lane pass at the end)
+ * keep the omitted menu levels visible.
  */
 function layoutGroups(root) {
   // Top slots are spaced well over one pill width apart regardless of
@@ -328,8 +321,10 @@ function layoutGroups(root) {
 
   // First pass: visible members per group, in menu order. Hidden index
   // pages are skipped, but their children still appear. The front page
-  // forms its own group.
+  // forms its own group. groupRoots keeps each group's subtree root for
+  // the branch-curve pass below.
   const groups = []
+  const groupRoots = []
   for (const g of [root, ...root.children]) {
     const members = []
     if (g === root) {
@@ -341,53 +336,121 @@ function layoutGroups(root) {
       }
       walk(g)
     }
-    if (members.length) groups.push(members)
+    if (members.length) {
+      groups.push(members)
+      groupRoots.push(g)
+    }
   }
 
-  // Top row on a true circular sag: center lowest, edges raised by SAG.
+  // Top row on a large-radius circular arc whose bottom point is the
+  // LAST top item: each earlier item sits a bit higher (drop = 15% of
+  // the row span). Flat row when there is a single group.
   const half = ((groups.length - 1) * SLOT) / 2 || 1
-  const SAG = TNODE_H * 0.6
-  const Rc = (half * half + SAG * SAG) / (2 * SAG)
-  const topY = (x) => SAG - Rc + Math.sqrt(Rc * Rc - x * x)
+  const span = (groups.length - 1) * SLOT
+  const topD = span * 0.15
+  const R_T = span ? (span * span + topD * topD) / (2 * topD) : 0
+  const topY = span
+    ? (x) => topD - R_T + Math.sqrt(R_T * R_T - (x - half) * (x - half))
+    : () => 0
 
-  // Second pass: place groups. Fan members follow a right-opening cubic
-  // p(t) = (gx + B t³, y0 + t): the tangent stays vertical near the
-  // parent (leaving almost straight down) and bends right gently,
-  // reaching ~50° from vertical at the last member. Member spacing along
-  // the curve is the pill clearance (dt integrated against curve speed).
-  const spokePairs = [] // [from node, to node] — paths emitted below
+  // Second pass: place groups. Fan members follow a circular arc of
+  // large radius FAN_R centered at (gx + FAN_R, y0): the trail leaves
+  // the top node heading straight down (vertical tangent) and bends
+  // right gently, member i at arc angle π − i·CLEAR/FAN_R (spaced by
+  // arc length CLEAR). A circle — not a spline — so the branch lanes
+  // below can be concentric arcs: identical forms, only radii differ.
+  const FAN_R = 1000
   groups.forEach((members, gi) => {
     const gx = gi * SLOT - half
     const y0 = topY(gx)
     members[0].x = gx
     members[0].y = y0
-    const m = members.length - 1
-    if (!m) return
-    const tMax = m * CLEAR * 0.9
-    const B = 0.4 / (tMax * tMax)
-    let t = 0
-    for (let i = 1; i <= m; i++) {
-      const bend = 3 * B * t * t
-      t += CLEAR / Math.hypot(bend, 1)
-      const n = members[i]
-      n.x = gx + B * t * t * t
-      n.y = y0 + t
-      spokePairs.push([members[i - 1], n])
+    for (let i = 1; i < members.length; i++) {
+      const th = Math.PI - (i * CLEAR) / FAN_R
+      members[i].x = gx + FAN_R * (1 + Math.cos(th))
+      members[i].y = y0 + FAN_R * Math.sin(th)
     }
   })
 
-  // Fan spokes bow to the right via a quadratic control point pushed
-  // rightward from the segment midpoint.
-  const spokes = spokePairs.map(([p, n]) => {
-    const mx = (p.x + n.x) / 2
-    const my = (p.y + n.y) / 2
-    const bow = Math.hypot(n.x - p.x, n.y - p.y) * 0.18
-    return {
-      d: `M ${p.x.toFixed(2)} ${p.y.toFixed(2)} `
-       + `Q ${(mx + bow).toFixed(2)} ${my.toFixed(2)} ${n.x.toFixed(2)} ${n.y.toFixed(2)}`,
+  // Branch lanes: one wide arc per path prefix (slug depth ≥ 1) whose
+  // subtree holds at least two visible nodes (a branch's visible nodes
+  // form one contiguous run in the fan's DFS preorder). Every lane of a
+  // group is an arc around the group's fan center with a radius one
+  // INDENT larger per parent level — concentric circles, so all lanes
+  // share exactly one form. Lanes span their branch's nodes plus a
+  // little extra tucked under the first/last pill (so the line caps are
+  // never visible) and run behind the pills. A separate short arc
+  // across the first inter-node gap carries the branch slug as a label,
+  // replacing per-node path crumbs. Hidden (unplaced) index pages still
+  // define a lane: it follows their promoted children, so lanes reflect
+  // the path structure rather than page existence.
+  const INDENT = 20 // lane spacing (radius) per nesting level (> lane width)
+  const END_TUCK = 22 // arc units tucked under the first/last pill
+  const GAP_TRIM = 32 // label arc clearance from the pills
+  const LABEL_CHARS = 8 // ~13px glyphs fitting the gap
+  const branches = []
+  groups.forEach((members, gi) => {
+    const g = groupRoots[gi]
+    if (g === root || members.length < 2) return
+    const idx = new Map(members.map((n, i) => [n, i]))
+    const C = [gi * SLOT - half + FAN_R, topY(gi * SLOT - half)]
+    const walk = (n) => {
+      let first = Infinity
+      let last = -1
+      const span = (m) => {
+        const k = idx.get(m)
+        if (k !== undefined) {
+          first = Math.min(first, k)
+          last = Math.max(last, k)
+        }
+        m.children.forEach(span)
+      }
+      span(n)
+      if (n.depth >= 1 && last > first) {
+        branches.push({ depth: n.depth, name: n.path.split('/').pop(), C, first, last })
+      }
+      n.children.forEach(walk)
     }
+    walk(g)
   })
-  return { GAP: TNODE_H * 2.6, spokes }
+  const depthMax = branches.reduce((d, b) => Math.max(d, b.depth), 1)
+  let arcLeft = Infinity // leftmost lane point, for the bounding box
+  const arcs = branches.map(({ depth, name, C, first, last }) => {
+    const R = FAN_R + (depthMax - depth) * INDENT
+    const th = (i) => Math.PI - (i * CLEAR) / FAN_R
+    const pt = (a, r) => [C[0] + r * Math.cos(a), C[1] + r * Math.sin(a)]
+    // Arc from angle a down to angle b (a > b; visually counterclockwise
+    // from the west point downward, hence sweep flag 0).
+    const arc = (a, b, r) => {
+      const [x0, y0] = pt(a, r)
+      const [x1, y1] = pt(b, r)
+      return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r.toFixed(2)} ${r.toFixed(2)} 0 0 0 ${x1.toFixed(2)} ${y1.toFixed(2)}`
+    }
+    const d = arc(th(first) + END_TUCK / R, th(last) - END_TUCK / R, R)
+    // The label guide rides GUIDE_OFF outward of the lane centerline: the
+    // text's alphabetic baseline sits on the guide, so this puts the
+    // glyph middle (not the baseline) on the lane center at any zoom —
+    // dominant-baseline tricks are em-based and break under downscale.
+    const GUIDE_OFF = 3.5
+    const ld = arc(th(first) - GAP_TRIM / R, th(first + 1) + GAP_TRIM / R, R + GUIDE_OFF)
+    arcLeft = Math.min(arcLeft, pt(th(first) + END_TUCK / R, R)[0])
+    const label = name.length > LABEL_CHARS ? `${name.slice(0, LABEL_CHARS - 1)}…` : name
+    return { d, ld, label }
+  })
+  // Top lane: an unlabeled arc along the top row's own circle, connecting
+  // the top nodes of all groups and tucked under the first and last of
+  // them (the arc bottoms at the last item, so it continues rightward
+  // under its pill). Drawn 50% thicker than branch lanes.
+  if (span) {
+    arcs.unshift({
+      d: `M ${(-half - END_TUCK).toFixed(2)} ${topY(-half - END_TUCK).toFixed(2)} `
+       + `A ${R_T.toFixed(2)} ${R_T.toFixed(2)} 0 0 0 ${(half + END_TUCK).toFixed(2)} ${topY(half + END_TUCK).toFixed(2)}`,
+      ld: null,
+      label: null,
+      top: true,
+    })
+  }
+  return { arcs, arcLeft }
 }
 
 /** Collapse opposite transition directions into one unordered pair per page pair. */
@@ -726,11 +789,13 @@ function collectSourcePairs(visits) {
  * flows.
  * Sources (incoming links) are derived from visit UTM/referer data and form
  * a row centered above the map, hottest first; exits come from the
- * transition matrix and sit just outside their source page.
+ * transition matrix and form a matching row centered below the map, so
+ * the site itself stays in the middle. Both rows sit EXT_GAP beyond the
+ * map's bounds.
  * Widths and pruning use the same log scale and traffic-share rule as
  * internal connections.
  */
-function buildExternal({ sources, exits }, byPath, gap, innerBounds, visualScale = 1) {
+function buildExternal({ sources, exits }, byPath, innerBounds, visualScale = 1) {
   const extNodes = []
   const edges = []
   const flows = []
@@ -743,15 +808,6 @@ function buildExternal({ sources, exits }, byPath, gap, innerBounds, visualScale
   if (!liveSources.length && !liveExits.length) return { extNodes, edges, flows }
 
   const width = (count) => scaledWidth(count * visualScale)
-
-  // Pill-shape overlap test (axis-aligned pills): much tighter than the
-  // bounding-circle test, so diagonal placements can sit close.
-  const overlaps = (x, y) =>
-    [...byPath.values(), ...extNodes].some(
-      (n) => !n.hidden
-        && Math.abs(n.x - x) < TNODE_W + 12
-        && Math.abs(n.y - y) < TNODE_H + 12,
-    )
 
   // Incoming: one source node per identified source, in a row centered
   // above the map, with an edge to each page that source led to.
@@ -773,7 +829,7 @@ function buildExternal({ sources, exits }, byPath, gap, innerBounds, visualScale
     .slice(0, MAX_EXT_IN)
   if (origins.length) {
     const cx = (innerBounds.x0 + innerBounds.x1) / 2
-    const y = innerBounds.y0 - TNODE_BOUND - 64
+    const y = innerBounds.y0 - TNODE_BOUND - EXT_GAP
     const spacing = TNODE_W + 44
     const x0 = cx - ((origins.length - 1) * spacing) / 2
     origins.forEach(({ source, ps, total, href, isUtm }, i) => {
@@ -799,72 +855,46 @@ function buildExternal({ sources, exits }, byPath, gap, innerBounds, visualScale
     })
   }
 
-  // Outgoing: group by full URL so several links to the same domain stay
-  // distinct; each shows the total count across all pages linking to it.
-  // Placement looks for empty space around the source page, always
-  // leftward: diagonal down-left first (often right beside the source,
-  // no need to drop below the fans), then left, up-left, and steeper
-  // fallbacks; the distance grows until a spot is free. Several exits of
-  // one page start at different directions.
-  const GAP = gap
-  const DIRS = [
-    (3 * Math.PI) / 4,         // diagonal down-left
-    Math.PI,                   // left
-    (5 * Math.PI) / 4,         // diagonal up-left
-    Math.PI / 2 + 0.35,        // steep down-left
-    Math.PI - 0.35,            // shallow up-left
-    (3 * Math.PI) / 4 + 0.5,   // far down-left
-  ]
-  const outgoing = liveExits.filter((p) => p.out >= minCount)
-    .sort((a, b) => b.out - a.out)
-  const perPage = new Map()
-  const selected = []
-  for (const p of outgoing) {
-    const used = perPage.get(p.page) || 0
-    if (used >= MAX_EXT_OUT_PER_PAGE) continue
-    perPage.set(p.page, used + 1)
-    selected.push(p)
-    if (selected.length >= MAX_EXT_OUT) break
+  // Outgoing: one exit node per distinct full URL (so several links to
+  // the same domain stay distinct), showing the total count across all
+  // pages linking to it, in a row centered below the map (hottest
+  // first), mirroring the source row above. Each (URL, page) pair
+  // contributes an edge from that page.
+  const byExt = new Map() // full URL -> { ext, out, pairs }
+  for (const p of liveExits.filter((p) => p.out >= minCount)) {
+    const g = byExt.get(p.ext) || { ext: p.ext, out: 0, pairs: [] }
+    g.out += p.out
+    g.pairs.push(p)
+    byExt.set(p.ext, g)
   }
-
-  const exitNodes = new Map() // full URL -> node
-  const placedPerPage = new Map() // for the placement direction offset
-  for (const p of selected) {
-    const page = byPath.get(p.page)
-    if (page.hidden) continue
-    let xn = exitNodes.get(p.ext)
-    if (!xn) {
-      const used = placedPerPage.get(p.page) || 0
-      placedPerPage.set(p.page, used + 1)
-      let x = 0
-      let y = 0
-      let found = false
-      for (let di = 0; di < DIRS.length && !found; di++) {
-        const ang = DIRS[(used + di) % DIRS.length]
-        for (let dist = GAP; dist <= GAP * 3.5; dist += GAP * 0.4) {
-          x = page.x + Math.cos(ang) * dist
-          y = page.y + Math.sin(ang) * dist
-          if (!overlaps(x, y)) { found = true; break }
-        }
-      }
-      if (!found) continue // no empty space near the page: leave it out
-      xn = {
-        path: p.ext,
-        href: p.ext,
-        label: extLabel(p.ext),
-        x,
+  const targets = [...byExt.values()]
+    .sort((a, b) => b.out - a.out)
+    .slice(0, MAX_EXT_OUT)
+  if (targets.length) {
+    const cx = (innerBounds.x0 + innerBounds.x1) / 2
+    const y = innerBounds.y1 + TNODE_BOUND + EXT_GAP
+    const spacing = TNODE_W + 44
+    const x0 = cx - ((targets.length - 1) * spacing) / 2
+    targets.forEach(({ ext, out, pairs }, i) => {
+      const xn = {
+        path: ext,
+        href: ext,
+        label: extLabel(ext),
+        x: x0 + i * spacing,
         y,
-        count: 0,
+        count: out,
         kind: 'exit',
       }
-      exitNodes.set(p.ext, xn)
       extNodes.push(xn)
-    }
-    xn.count += p.out
-    const wMid = width(p.out)
-    if (wMid <= 0) continue
-    edges.push(buildRibbon(page, xn, p.out, 0, wMid, true))
-    flows.push(...buildFlows(page, xn, p.out, 0, visualScale))
+      for (const p of pairs) {
+        const page = byPath.get(p.page)
+        if (page.hidden) continue
+        const wMid = width(p.out)
+        if (wMid <= 0) continue
+        edges.push(buildRibbon(page, xn, p.out, 0, wMid, true))
+        flows.push(...buildFlows(page, xn, p.out, 0, visualScale))
+      }
+    })
   }
 
   return { extNodes, edges, flows }
@@ -873,7 +903,7 @@ function buildExternal({ sources, exits }, byPath, gap, innerBounds, visualScale
 /**
  * Build the transition map model.
  * Returns { nodes, edges, flows, extNodes, arcs, bounds } or null when
- * there is nothing to show. `arcs` holds the family spokes; `nodes` only
+ * there is nothing to show. `arcs` holds the branch curves; `nodes` only
  * contains placed (visible) nodes.
  */
 export function buildTransitionGraph(data, pageTree, visits = [], visualScale = 1) {
@@ -889,23 +919,24 @@ export function buildTransitionGraph(data, pageTree, visits = [], visualScale = 
   const { nodes, byPath, root } = buildNodeTree(internal, navOrder)
   sortByNav(root, navOrder)
   annotateNodes(nodes, data?.views, titles, readMinutes)
-  const { GAP, spokes } = layoutGroups(root)
+  const { arcs, arcLeft } = layoutGroups(root)
   const placed = nodes.filter((n) => !n.hidden)
   const pairs = aggregatePairs(internal)
   const { edges, flows } = buildInternalEdges(pairs, byPath, visualScale)
 
-  // Tight bounding box of the placed page nodes; external nodes extend it.
+  // Tight bounding box of the placed page nodes, extended to cover the
+  // branch curves running left of the pills; external nodes extend it.
   const pad = 16
   const xs = placed.map((n) => n.x)
   const ys = placed.map((n) => n.y)
   const bounds = {
-    x0: Math.min(...xs) - TNODE_BOUND - pad,
+    x0: Math.min(Math.min(...xs) - TNODE_BOUND, arcLeft) - pad,
     y0: Math.min(...ys) - TNODE_BOUND - pad,
     x1: Math.max(...xs) + TNODE_BOUND + pad,
     y1: Math.max(...ys) + TNODE_BOUND + pad,
   }
 
-  const ext = buildExternal({ sources, exits }, byPath, GAP, bounds, visualScale)
+  const ext = buildExternal({ sources, exits }, byPath, bounds, visualScale)
   for (const xn of ext.extNodes) {
     bounds.x0 = Math.min(bounds.x0, xn.x - TNODE_BOUND - pad)
     bounds.y0 = Math.min(bounds.y0, xn.y - TNODE_BOUND - pad)
@@ -918,7 +949,7 @@ export function buildTransitionGraph(data, pageTree, visits = [], visualScale = 
     edges: [...edges, ...ext.edges],
     flows: [...flows, ...ext.flows],
     extNodes: ext.extNodes,
-    arcs: spokes,
+    arcs,
     bounds,
   }
 }
