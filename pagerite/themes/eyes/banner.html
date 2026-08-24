@@ -27,15 +27,30 @@
   let my = 0
   let lastMove = 0
 
-  addEventListener('mousemove', e => {
+  // Mouse and touch tracked with separate listeners (pointer events arrive
+  // too late on some mobile browsers). Passive listeners: a drag on the
+  // banner still scrolls the page — on browsers that stop delivering
+  // touchmove once scrolling takes over, the gaze just follows until then.
+  const track = (x, y) => {
     const r = c.getBoundingClientRect()
 
     // Convert viewport coordinates into the canvas' CSS-pixel coordinate
     // system. This remains correct with browser zoom, CSS transforms, etc.
-    mx = (e.clientX - r.left) * c.clientWidth / r.width
-    my = (e.clientY - r.top) * c.clientHeight / r.height
+    mx = (x - r.left) * c.clientWidth / r.width
+    my = (y - r.top) * c.clientHeight / r.height
     lastMove = performance.now()
-  })
+  }
+
+  addEventListener('mousemove', e => track(e.clientX, e.clientY))
+
+  const trackTouch = e => {
+    const t = e.touches[0]
+
+    if (t) track(t.clientX, t.clientY)
+  }
+
+  addEventListener('touchstart', trackTouch, { passive: true })
+  addEventListener('touchmove', trackTouch, { passive: true })
 
   let gx = 0.5
   let gy = 0.5
