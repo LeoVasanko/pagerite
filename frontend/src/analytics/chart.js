@@ -37,24 +37,19 @@ export function yScale(maxValue) {
 }
 
 /**
- * Edge-aware adaptive Gaussian smoothing. A change-point detector first
- * finds traffic-level shifts (two-unit totals compared on both sides of
- * each bucket; strong ratio + significance marks a candidate, and each run
- * of candidates keeps only its best-scoring bucket as an edge). Each
- * edge-delimited segment is then smoothed independently: a broad two-unit
- * pilot estimates the local traffic rate, which ramps the Gaussian sigma
- * from ~0.4 units (isolated events stay narrow, peaking at ~1 event/unit)
- * up to 1 unit (busy traffic gets full smoothing), and every bucket spreads
- * its count with its local sigma, clipped to the segment and renormalized
- * so total visitor count is preserved exactly. The unit is one hour on the
- * week view and one day on the month+ views, so the smoothing time scale
- * follows the range (month+ sigmas are 24x the hourly ones). The raw series
- * is drawn faintly behind the curve for reference. Operates on raw counts.
+ * Edge-aware Gaussian smoothing with a fixed bandwidth. A change-point
+ * detector first finds traffic-level shifts (two-unit totals compared on
+ * both sides of each bucket; strong ratio + significance marks a candidate,
+ * and each run of candidates keeps only its best-scoring bucket as an
+ * edge). Each edge-delimited segment is then smoothed independently: every
+ * bucket spreads its count with a fixed Gaussian sigma chosen so N events
+ * in a single bucket peak at N events per unit, clipped to the segment and
+ * renormalized so total visitor count is preserved exactly. The unit is
+ * one hour on the week view and one day on the month+ views, so the
+ * smoothing time scale follows the range. The raw series is drawn faintly
+ * behind the curve for reference. Operates on raw counts.
  */
 export function smooth(counts, binMinutes, unitMinutes, {
-  minSigmaMinutes = unitMinutes / Math.sqrt(2 * Math.PI),
-  maxSigmaMinutes = unitMinutes,
-  pilotSigmaMinutes = 2 * unitMinutes,
   detectorWindowMinutes = 2 * unitMinutes,
   // Count thresholds are defined per hour and scale with the unit, so
   // "low traffic" means the same thing on hourly and daily views
@@ -62,8 +57,6 @@ export function smooth(counts, binMinutes, unitMinutes, {
   highTrafficEvents = 10 * unitMinutes / 60,
   minRatio = 2.5,
   minSignificance = 4,
-  sigmaRampStart = 5 * unitMinutes / 60,
-  sigmaRampEnd = 20 * unitMinutes / 60,
 } = {}) {
   const n = counts.length
   if (!n) return counts
@@ -105,68 +98,25 @@ export function smooth(counts, binMinutes, unitMinutes, {
     i = j
   }
 
-  const reflectIndex = (i, length) => {
-    while (i < 0 || i >= length) {
-      i = i < 0 ? -i - 1 : 2 * length - i - 1
-    }
-    return i
-  }
+  // Fixed sigma: N events in one bucket peak at N events per unit.
+  // sigma_bins * sqrt(2*pi) = rate = unitMinutes / binMinutes.
+  const sigmaBins = unitMinutes / (binMinutes * Math.sqrt(2 * Math.PI))
+  const radius = Math.ceil(4 * sigmaBins)
 
-  const gaussianFilterReflect = (values, sigmaBins) => {
-    const length = values.length
-    const radius = Math.ceil(4 * sigmaBins)
-    const kernel = new Float64Array(radius * 2 + 1)
-    let sum = 0
-    for (let k = -radius; k <= radius; k++) {
-      const w = Math.exp(-0.5 * (k / sigmaBins) ** 2)
-      kernel[k + radius] = w
-      sum += w
-    }
-    for (let i = 0; i < kernel.length; i++) kernel[i] /= sum
-    const out = new Float64Array(length)
-    for (let i = 0; i < length; i++) {
-      let value = 0
-      for (let k = -radius; k <= radius; k++) {
-        value += values[reflectIndex(i + k, length)] * kernel[k + radius]
-      }
-      out[i] = value
-    }
-    return out
-  }
-
-  // Process each discontinuity-delimited regime independently so neither
-  // the pilot nor the final Gaussian can see through a detected boundary.
+  // Process each discontinuity-delimited regime independently so the
+  // Gaussian cannot see through a detected boundary. Each input bin spreads
+  // its count with the fixed sigma; the kernel is renormalized after
+  // clipping to the segment, preserving total visitor count apart from
+  // floating-point error.
   const bounds = [0, ...edges, n]
   const smoothed = new Float64Array(n)
   for (let b = 0; b < bounds.length - 1; b++) {
     const lo = bounds[b]
     const length = bounds[b + 1] - lo
     const segment = counts.slice(lo, lo + length)
-
-    // Broad pilot estimates only the generic local traffic level used for
-    // choosing sigma; it is not the final displayed curve.
-    const pilot = gaussianFilterReflect(segment, pilotSigmaMinutes / binMinutes)
-
-    // Keep isolated/sparse traffic at the minimum bandwidth through
-    // sigmaRampStart events, then ramp toward maxSigmaMinutes (thresholds
-    // are per-hour rates scaled to the unit: low traffic is low traffic
-    // on every range).
-    const sigmaMinutes = new Float64Array(length)
-    for (let i = 0; i < length; i++) {
-      const ratePerUnit = pilot[i] * unitMinutes / binMinutes
-      let mix = (ratePerUnit - sigmaRampStart) / (sigmaRampEnd - sigmaRampStart)
-      mix = Math.sqrt(Math.max(0, Math.min(1, mix)))
-      sigmaMinutes[i] = minSigmaMinutes + mix * (maxSigmaMinutes - minSigmaMinutes)
-    }
-
-    // Each input bin spreads its own count using its local sigma. The
-    // per-bin kernel is renormalized after clipping to the segment,
-    // preserving total visitor count apart from floating-point error.
     for (let j = 0; j < length; j++) {
       const count = segment[j]
       if (!count) continue
-      const sigmaBins = sigmaMinutes[j] / binMinutes
-      const radius = Math.ceil(4 * sigmaBins)
       const start = Math.max(0, j - radius)
       const end = Math.min(length, j + radius + 1)
       let weightSum = 0

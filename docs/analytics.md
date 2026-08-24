@@ -216,12 +216,11 @@ spans less than 24 hours, otherwise `week`.
 `AnalyticsView.vue` is no longer a full-screen overlay; the `body.analytics-open`
 page-chrome hiding and `#/analytics/<range>` hash routing have been removed.
 
-Charts are SVG curves (Catmull-Rom over an edge-aware adaptive Gaussian —
-a change-point detector splits the series at traffic-level shifts, then
-each segment is smoothed with a bandwidth that ramps with a broad pilot
-estimate of the local rate: isolated events stay narrow (~0.4-unit sigma,
-peaking at ~1 event/unit), busy traffic widens to a 1-unit sigma. The raw
-series is drawn faint underneath). Values are
+Charts are SVG curves (Catmull-Rom over an edge-aware Gaussian — a
+change-point detector splits the series at traffic-level shifts, then each
+segment is smoothed independently with a fixed sigma chosen so N events in
+a single bucket peak at N events per unit. The raw series is drawn faint
+underneath). Values are
 **per-unit rates** — per hour on the week view (5-minute bucket counts × 12,
 plotted at native 5-minute resolution), per day on the month+ ranges — and
 the smoothing time scale follows the unit: the month+ sigmas are 24× the
