@@ -231,9 +231,13 @@ labeled intervals, minor lines at fifths when integral; the minimum y-axis
 range is 10 so tiny values such as a single visit are not stretched to a
 fractional scale).
 The week range is aligned to Monday 00:00 UTC and overlays up to 8 previous
-weeks in the same accent color at decreasing opacity (the current week is
+weeks in the muted color at decreasing opacity (the current week keeps the
+accent color and is
 truncated at the current bucket, never drawing fake zeroes for the future);
-its x labels are weekday names centered at midday UTC, without vertical grid
+a compact legend inside the top right of the visits chart marks the current
+ISO week in accent and the overlaid past weeks as "Week M" or "Week M–N" on
+a muted specimen. Its x labels are weekday names centered at midday UTC, without
+vertical grid
 lines (day boundaries would be misleading in the viewer's timezone). The
 month view labels days the same lineless way — day numbers at noon UTC,
 with the month name substituted for the 1st. Month, year and all are

@@ -37,6 +37,12 @@ function freqLabel(unit) {
   return unit === '5min' ? '5 min' : unit === 'hour' ? 'hourly' : 'daily'
 }
 
+/** Legend label for the overlaid past weeks: "Week M" or "Week M–N". */
+function pastLabel(series) {
+  const oldest = series.at(-1).label.slice(5) // strip "Week "
+  return series.length > 2 ? `Week ${oldest}–${series[1].label.slice(5)}` : `Week ${oldest}`
+}
+
 const now = ref(Date.now())
 let refreshInterval = null
 onMounted(() => {
@@ -52,8 +58,8 @@ const viewChart = computed(() => buildChart(viewSeries.value, now.value))
 
 <template>
   <section v-for="c in [
-      { ylabel: 'visits', chart: visitChart, empty: 'no visits recorded yet' },
-      { ylabel: 'views', chart: viewChart, empty: 'no views recorded yet' },
+      { ylabel: 'visits', chart: visitChart, legend: true, empty: 'no visits recorded yet' },
+      { ylabel: 'views', chart: viewChart, legend: false, empty: 'no views recorded yet' },
     ]" :key="c.ylabel">
     <template v-if="c.chart">
       <svg class="chart" :viewBox="`${-MARGIN_L} 0 ${VIEW_W} ${VIEW_H}`"
@@ -70,9 +76,11 @@ const viewChart = computed(() => buildChart(viewSeries.value, now.value))
           <path :d="c.chart.skyline" class="line" />
         </template>
         <template v-else>
-          <template v-for="(s, i) in c.chart.series" :key="i">
+          <!-- Oldest overlay weeks first so the current week paints on top. -->
+          <template v-for="(s, i) in [...c.chart.series].reverse()" :key="i">
             <path v-if="s.area" :d="s.area" class="area" />
-            <path :d="s.line" class="line" :style="{ opacity: s.opacity }" />
+            <path :d="s.line" class="line" :class="{ past: s.past }"
+                  :style="{ opacity: s.opacity }" />
           </template>
         </template>
         <line :x1="0" :x2="CHART_W" :y1="CHART_H - 0.5" :y2="CHART_H - 0.5"
@@ -84,12 +92,18 @@ const viewChart = computed(() => buildChart(viewSeries.value, now.value))
               class="yaxis-label">{{ freqLabel(c.chart.unit) }} {{ c.ylabel }}</text>
         <text v-for="t in c.chart.xticks" :key="'x' + t.x" :x="t.x" :y="CHART_H + MARGIN_B - 8"
               text-anchor="middle" class="xlab">{{ t.label }}</text>
+        <!-- Week overlay legend, top right inside the plot: current week in
+             accent, one muted specimen for the whole past range. -->
+        <g v-if="c.legend && c.chart.series.length > 1">
+          <line :x1="CHART_W - 86" :x2="CHART_W - 66" y1="10" y2="10" class="line" />
+          <text :x="CHART_W - 60" y="10" dominant-baseline="middle"
+                class="leglab">{{ c.chart.series[0].label }}</text>
+          <line :x1="CHART_W - 86" :x2="CHART_W - 66" y1="23" y2="23"
+                class="line past" style="opacity: 0.6" />
+          <text :x="CHART_W - 60" y="23" dominant-baseline="middle"
+                class="leglab">{{ pastLabel(c.chart.series) }}</text>
+        </g>
       </svg>
-      <div v-if="c.chart.series && c.chart.series.length > 1" class="legend">
-        <span v-for="(s, i) in c.chart.series" :key="i" :style="{ opacity: s.opacity }">
-          ● {{ s.label }}
-        </span>
-      </div>
     </template>
     <p v-else class="empty">{{ c.empty }}</p>
   </section>
@@ -113,6 +127,11 @@ const viewChart = computed(() => buildChart(viewSeries.value, now.value))
 
 .chart .ylab {
   font-variant-numeric: tabular-nums;
+}
+
+.chart .leglab {
+  font-size: 10px;
+  fill: var(--muted);
 }
 
 .chart .minor {
@@ -159,15 +178,10 @@ const viewChart = computed(() => buildChart(viewSeries.value, now.value))
   stroke-linecap: round;
 }
 
-.legend {
-  display: flex;
-  gap: 1.2rem;
-  margin-top: 0.4rem;
-  font-size: 0.75rem;
-  color: var(--muted);
+/* Past overlay weeks contrast with the current week's accent color. */
+.chart .line.past {
+  stroke: var(--muted);
 }
-
-.legend span { color: var(--accent); }
 
 section { margin-top: 1.8rem; }
 

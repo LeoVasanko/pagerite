@@ -26,6 +26,15 @@ export function mondayUTC(t) {
   return (d - ((d + 3) % 7)) * DAY
 }
 
+/** ISO 8601 week number of the week containing t (via its Thursday). */
+export function isoWeek(t) {
+  const d = new Date(t)
+  d.setUTCHours(0, 0, 0, 0)
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7))
+  const yearStart = Date.UTC(d.getUTCFullYear(), 0, 1)
+  return Math.ceil(((d - yearStart) / DAY + 1) / 7)
+}
+
 /** Parse sparse timestamp buckets into a { epochMs: count } map. */
 export function rawTimes(buckets) {
   const raw = {}
@@ -44,7 +53,9 @@ export function sumRange(raw, t0, t1) {
 /**
  * One series per overlaid week: [this week, 1 week ago, ...], at native
  * 5-minute resolution, up to 8 weeks back (and only weeks that overlap the
- * recorded data at all). The current week is truncated at the current bucket
+ * recorded data at all). Each older week's timestamps are shifted forward
+ * onto the current week's axis so all curves overlay inside the plot.
+ * The current week is truncated at the current bucket
  * — no fake zeroes drawn for the future. Counts are rates per hour
  * (bucket count * 12): a lone visit in a 5-minute bucket reads as "12/h".
  * The coarser ranges use per-day rates instead (unitMinutes = 24*60).
@@ -67,12 +78,13 @@ export function weeklySeries(buckets) {
       : start + WEEK
     const points = []
     for (let t = start; t < end; t += MIN5) {
-      points.push({ t, count: raw[t] || 0 })
+      points.push({ t: t + back * WEEK, count: raw[t] || 0 })
     }
     out.push({
       points,
-      label: back === 0 ? 'this week' : `${back}w ago`,
+      label: `Week ${isoWeek(start)}`,
       opacity: Math.max(0.15, 1 - back * 0.25),
+      past: back > 0,
       area: back === 0,
     })
   }
