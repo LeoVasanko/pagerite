@@ -53,6 +53,7 @@ import "overlayscrollbars/overlayscrollbars.css";
   // pageshow handler below re-probes auth to refresh the pens).
   let ssoAvailable = false;
   let isAdmin = false;
+  let authReady = false;
   let editorMeta = null;
 
   // Asset URLs for the on-demand bundles. Dev renders them as
@@ -106,7 +107,19 @@ import "overlayscrollbars/overlayscrollbars.css";
     return a;
   }
 
+  function removePens() {
+    document.querySelectorAll(".editor-pens, #main article button.edit-link")
+      .forEach((el) => el.remove());
+  }
+
   function renderAuthUi() {
+    // Always start from a clean slate: if the auth probe is still running we
+    // must not show any admin UI, and if it came back negative we must drop
+    // pens that may have been injected while the browser cache made us look
+    // authenticated.
+    removePens();
+    if (!authReady) return;
+
     // Editing is open for admins and, as a dev/no-proxy fallback, when no
     // Paskia SSO is detected at all.
     const canEdit = isAdmin || !ssoAvailable;
@@ -115,8 +128,6 @@ import "overlayscrollbars/overlayscrollbars.css";
     const onAnalytics = currentPath === "/_a";
     const banner = document.getElementById("page-banner");
     if (banner) {
-      const old = banner.parentElement.querySelector(".editor-pens");
-      if (old) old.remove();
       const pens = document.createElement("div");
       pens.className = "editor-pens";
       if (canEdit && !onAnalytics) {
@@ -137,8 +148,11 @@ import "overlayscrollbars/overlayscrollbars.css";
   }
 
   async function setupAuth() {
+    authReady = false;
+    renderAuthUi();
+
     const src = assets["pagerite:editor-src"];
-    if (!src) { pingEntryOnce(); return; }
+    if (!src) { authReady = true; renderAuthUi(); pingEntryOnce(); return; }
     editorMeta = {
       src,
       css: assets["pagerite:editor-css"],
@@ -180,7 +194,9 @@ import "overlayscrollbars/overlayscrollbars.css";
       }
     }
 
+    authReady = true;
     renderAuthUi();
+    placeEditPen();
     pingEntryOnce();
   }
 
