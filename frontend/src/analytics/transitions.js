@@ -187,14 +187,13 @@ function collectInternalTransitions(transitions) {
   return internal
 }
 
-/** Domain-only label for an external origin (path and www. removed). */
+/** Domain-only label for an external origin (path and www. removed).
+ *  Pills clip the text at their border; no length cap needed. */
 function extLabel(ext) {
   try {
-    const host = new URL(ext).hostname.replace(/^www\./, '')
-    return host.length > 25 ? `${host.slice(0, 24)}…` : host
+    return new URL(ext).hostname.replace(/^www\./, '')
   } catch {
-    const s = ext.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0]
-    return s.length > 25 ? `${s.slice(0, 24)}…` : s
+    return ext.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0]
   }
 }
 
@@ -289,11 +288,9 @@ function annotateNodes(nodes, viewsData, titles, readMinutes) {
   for (const n of nodes) {
     n.views = viewCount(n.path)
     n.readMin = readMinutes[n.path] || 0
-    // Article title inside the pill (shortened with ellipsis as needed),
-    // slug as fallback for pages missing from the site tree.
-    const slug = n.path.split('/').pop()
-    const label = titles.get(n.path) || (n.path === '/' ? '🏠︎' : slug)
-    n.label = label.length > 24 ? `${label.slice(0, 23)}…` : label
+    // Article title inside the pill (clipped at the pill border on
+    // render), slug as fallback for pages missing from the site tree.
+    n.label = titles.get(n.path) || (n.path === '/' ? '🏠︎' : n.path.split('/').pop())
     n.title = titles.get(n.path) || ''
     // Category (non-leaf) pages with no views in this window are omitted:
     // their children move up in their place (see layoutGroups).
@@ -816,7 +813,7 @@ function buildExternal({ sources, exits }, byPath, innerBounds, visualScale = 1)
       const xn = {
         path: source,
         href,
-        label: label.length > 25 ? `${label.slice(0, 24)}…` : label,
+        label, // clipped at the pill border on render
         x: x0 + i * spacing,
         y,
         count: total,
@@ -908,22 +905,27 @@ export function buildTransitionGraph(data, pageTree, visits = [], visualScale = 
 
   // Tight bounding box of the placed page nodes, extended to cover the
   // branch curves running left of the pills; external nodes extend it.
-  const pad = 16
+  // Margins cover just the ribbon surround (pill outline + flare margin
+  // S=4) plus a small pad: the pill's half width/height, not its diagonal
+  // radius, so the map crops tight especially at top and bottom.
+  const pad = 8
+  const MX = TNODE_W / 2 + 4 + pad
+  const MY = TNODE_H / 2 + 4 + pad
   const xs = placed.map((n) => n.x)
   const ys = placed.map((n) => n.y)
   const bounds = {
-    x0: Math.min(Math.min(...xs) - TNODE_BOUND, arcLeft) - pad,
-    y0: Math.min(...ys) - TNODE_BOUND - pad,
-    x1: Math.max(...xs) + TNODE_BOUND + pad,
-    y1: Math.max(...ys) + TNODE_BOUND + pad,
+    x0: Math.min(Math.min(...xs) - MX, arcLeft - pad),
+    y0: Math.min(...ys) - MY,
+    x1: Math.max(...xs) + MX,
+    y1: Math.max(...ys) + MY,
   }
 
   const ext = buildExternal({ sources, exits }, byPath, bounds, visualScale)
   for (const xn of ext.extNodes) {
-    bounds.x0 = Math.min(bounds.x0, xn.x - TNODE_BOUND - pad)
-    bounds.y0 = Math.min(bounds.y0, xn.y - TNODE_BOUND - pad)
-    bounds.x1 = Math.max(bounds.x1, xn.x + TNODE_BOUND + pad)
-    bounds.y1 = Math.max(bounds.y1, xn.y + TNODE_BOUND + pad)
+    bounds.x0 = Math.min(bounds.x0, xn.x - MX)
+    bounds.y0 = Math.min(bounds.y0, xn.y - MY)
+    bounds.x1 = Math.max(bounds.x1, xn.x + MX)
+    bounds.y1 = Math.max(bounds.y1, xn.y + MY)
   }
 
   return {

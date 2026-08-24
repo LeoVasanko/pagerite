@@ -6,7 +6,7 @@
  * before passing them in; `window` carries the absolute [t0, t1) window
  * so the visual scale can normalize against a one-week reference.
  */
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
 import { DAY, WEEK } from './analytics/time.js'
 import { formatCount } from './analytics/format.js'
 import {
@@ -140,45 +140,14 @@ onBeforeUnmount(() => cancelAnimationFrame(rafId))
 
 // The svg never renders larger than its natural size (1 viewBox unit = 1
 // px, max-width below): the layout geometry is designed in pixel-like
-// units, and upscaling would blow the pills up around their constant-size
-// text. Narrow panels still scale the graph down to fit (width: 100%).
-// Text renders at a constant screen size regardless of that downscale:
-// measure the unit→pixel ratio and expose it as --u on the svg, which the
-// font-size rules divide by. Falls back to 1 (raw units) until measured.
-const svgEl = ref(null)
-const pxPerUnit = ref(1)
-let resizeObs = null
+// units, and upscaling would blow up the pills around their text. Narrow
+// panels scale the graph down to fit (width: 100%), text along with it.
 
-function updateScale() {
-  const el = svgEl.value
-  if (el && el.viewBox.baseVal.width) {
-    pxPerUnit.value = el.clientWidth / el.viewBox.baseVal.width
-  }
-}
-
-onMounted(() => {
-  resizeObs = new ResizeObserver(updateScale)
-})
-watch(svgEl, (el) => {
-  resizeObs?.disconnect()
-  if (el) resizeObs?.observe(el)
-})
-watch(() => graph.value?.bounds, updateScale)
-onBeforeUnmount(() => resizeObs?.disconnect())
-
-// Label text shortened to fit inside the pill at the current zoom (fonts
-// are fixed screen sizes): drop whole trailing words first, then hard-cut
-// with an ellipsis. Width estimate: ~0.52 em per glyph, 12 px padding
-// per side.
-const fitLabel = (label, fontPx = 15) => {
-  const budget = Math.max(2, (TNODE_W * pxPerUnit.value - 24) / (0.52 * fontPx))
-  if (label.length <= budget) return label
-  const words = label.split(' ')
-  while (words.length > 1 && words.join(' ').length + 1 > budget) words.pop()
-  let out = words.join(' ')
-  if (out.length + 1 > budget) out = out.slice(0, Math.floor(budget) - 1)
-  return `${out}…`
-}
+// Pill text is not truncated: text is clipped at the pill's rounded border
+// (clipPath per node, inset a few units for padding). Captions center when
+// they fit; overlong ones anchor left so their beginning (not their
+// middle) survives the clip. Width estimate: ~0.52 em per glyph.
+const fitsPill = (label, fontPx = 19) => label.length * 0.52 * fontPx <= TNODE_W - 16
 
 const countLabel = (n) =>
   n.readMin ? `${formatCount(n.views)}×${n.readMin}m` : formatCount(n.views)
@@ -186,7 +155,7 @@ const countLabel = (n) =>
 
 <template>
   <section v-if="graph">
-    <svg ref="svgEl" class="tmap" :style="{ '--u': pxPerUnit, maxWidth: `${graph.bounds.x1 - graph.bounds.x0}px` }" :viewBox="`${graph.bounds.x0} ${graph.bounds.y0} ${graph.bounds.x1 - graph.bounds.x0} ${graph.bounds.y1 - graph.bounds.y0}`"
+    <svg class="tmap" :style="{ maxWidth: `${graph.bounds.x1 - graph.bounds.x0}px` }" :viewBox="`${graph.bounds.x0} ${graph.bounds.y0} ${graph.bounds.x1 - graph.bounds.x0} ${graph.bounds.y1 - graph.bounds.y0}`"
          role="img" aria-label="map of transitions between pages">
       <path v-for="(a, i) in graph.arcs" :key="'a' + i"
             :id="`tarc${i}`" :d="a.d" :class="['tarc', a.top && 'tarc-top']" />
@@ -201,29 +170,43 @@ const countLabel = (n) =>
       <circle v-for="(b, i) in beads" :key="'b' + i"
               :cx="b.x" :cy="b.y" :r="BEAD_R" class="tbead" />
       <g v-for="(x, i) in graph.extNodes" :key="'x' + i">
+        <clipPath :id="`xclip${i}`">
+          <rect :x="x.x - TNODE_W/2 + 6" :y="x.y - TNODE_H/2" :width="TNODE_W - 12"
+                :height="TNODE_H" :rx="TNODE_H/2 - 4" />
+        </clipPath>
         <a v-if="x.href" :href="x.href" target="_blank" rel="noopener">
           <title>{{ x.path }}</title>
           <rect :x="x.x - TNODE_W/2" :y="x.y - TNODE_H/2" :width="TNODE_W" :height="TNODE_H" :rx="TNODE_H/2"
                 :class="['txnode', x.kind === 'source' ? 'txnode-source' : 'txnode-exit']" />
-          <text :x="x.x" :y="x.y - TNODE_H*0.16" class="tnodeslug" dominant-baseline="middle">{{ fitLabel(x.label) }}</text>
-          <text :x="x.x" :y="x.y + TNODE_H*0.24" class="tnodecount" dominant-baseline="middle">{{ fitLabel(formatCount(x.count), 13) }}</text>
+          <g :clip-path="`url(#xclip${i})`">
+            <text :x="fitsPill(x.label) ? x.x : x.x - TNODE_W/2 + 8" :y="x.y - TNODE_H*0.16" class="tnodeslug" dominant-baseline="middle" :style="{ textAnchor: fitsPill(x.label) ? 'middle' : 'start' }">{{ x.label }}</text>
+            <text :x="x.x" :y="x.y + TNODE_H*0.24" class="tnodecount" dominant-baseline="middle">{{ formatCount(x.count) }}</text>
+          </g>
         </a>
         <g v-else>
           <title>{{ x.path }}</title>
           <rect :x="x.x - TNODE_W/2" :y="x.y - TNODE_H/2" :width="TNODE_W" :height="TNODE_H" :rx="TNODE_H/2"
                 :class="['txnode', x.kind === 'source' ? 'txnode-source' : 'txnode-exit']" />
-          <text :x="x.x" :y="x.y - TNODE_H*0.16" class="tnodeslug" dominant-baseline="middle">{{ fitLabel(x.label) }}</text>
-          <text :x="x.x" :y="x.y + TNODE_H*0.24" class="tnodecount" dominant-baseline="middle">{{ fitLabel(formatCount(x.count), 13) }}</text>
+          <g :clip-path="`url(#xclip${i})`">
+            <text :x="fitsPill(x.label) ? x.x : x.x - TNODE_W/2 + 8" :y="x.y - TNODE_H*0.16" class="tnodeslug" dominant-baseline="middle" :style="{ textAnchor: fitsPill(x.label) ? 'middle' : 'start' }">{{ x.label }}</text>
+            <text :x="x.x" :y="x.y + TNODE_H*0.24" class="tnodecount" dominant-baseline="middle">{{ formatCount(x.count) }}</text>
+          </g>
         </g>
       </g>
-      <g v-for="n in graph.nodes" :key="n.path">
+      <g v-for="(n, i) in graph.nodes" :key="n.path">
+        <clipPath :id="`nclip${i}`">
+          <rect :x="n.x - TNODE_W/2 + 6" :y="n.y - TNODE_H/2" :width="TNODE_W - 12"
+                :height="TNODE_H" :rx="TNODE_H/2 - 4" />
+        </clipPath>
         <a :href="n.path">
           <title>{{ n.title }}</title>
           <rect :x="n.x - TNODE_W/2" :y="n.y - TNODE_H/2" :width="TNODE_W" :height="TNODE_H" :rx="TNODE_H/2" class="tnode" />
-          <text :x="n.x" :y="n.y - TNODE_H*0.16" class="tnodeslug" dominant-baseline="middle">{{ fitLabel(n.label) }}</text>
-          <text :x="n.x" :y="n.y + TNODE_H*0.24" class="tnodecount" dominant-baseline="middle">
-            {{ fitLabel(countLabel(n), 13) }}
-          </text>
+          <g :clip-path="`url(#nclip${i})`">
+            <text :x="fitsPill(n.label) ? n.x : n.x - TNODE_W/2 + 8" :y="n.y - TNODE_H*0.16" class="tnodeslug" dominant-baseline="middle" :style="{ textAnchor: fitsPill(n.label) ? 'middle' : 'start' }">{{ n.label }}</text>
+            <text :x="n.x" :y="n.y + TNODE_H*0.24" class="tnodecount" dominant-baseline="middle">
+              {{ countLabel(n) }}
+            </text>
+          </g>
         </a>
       </g>
     </svg>
@@ -272,31 +255,29 @@ const countLabel = (n) =>
    pill's edge, the earliest point where the text is visible. */
 .tmap .tarclabel {
   fill: var(--muted);
-  font-size: calc(13px / var(--u, 1));
+  font-size: 13px;
   text-anchor: start;
 }
 /* The top lane is 50% thicker; its 🏠︎ label scales along. */
 .tmap .tarclabel-top {
-  font-size: calc(19.5px / var(--u, 1));
+  font-size: 19.5px;
 }
 .tmap .tnode {
   fill: var(--accent);
   stroke: none;
 }
-/* Text renders at a constant screen size: --u (set from JS) is the
-   viewBox-unit → pixel ratio of the rendered svg, so dividing by it makes
-   the sizes independent of how far the graph is scaled down. Labels are
-   shortened in JS to fit the pill instead of shrinking the font. */
+/* Text sizes are viewBox units: they shrink along with the graph on
+   narrow panels. Overlong labels are clipped at the pill border. */
 .tmap .tnodeslug {
   fill: var(--bg, Canvas);
-  font-size: calc(15px / var(--u, 1));
-  text-anchor: middle;
+  font-size: 19px;
+  text-anchor: start;
 }
 .tmap a { cursor: pointer; }
 .tmap .tnodecount {
   fill: var(--bg, Canvas);
   opacity: 0.75;
-  font-size: calc(13px / var(--u, 1));
+  font-size: 15px;
   text-anchor: middle;
 }
 
