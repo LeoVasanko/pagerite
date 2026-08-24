@@ -12,7 +12,7 @@ import { formatCount } from './format.js'
 export const CHART_W = 720
 export const CHART_H = 126
 export const PAD_TOP = 14 // room above the highest point
-export const MARGIN_L = 56 // y tick labels + vertical axis label
+export const MARGIN_L = 40 // y tick labels + vertical axis label
 export const MARGIN_B = 24 // x tick labels
 export const VIEW_W = MARGIN_L + CHART_W + 8
 export const VIEW_H = CHART_H + MARGIN_B
@@ -156,7 +156,7 @@ export function spline(pts) {
     const c1y = clampY(p1.y + (p2.y - p0.y) / 6)
     const c2y = clampY(p2.y - (p3.y - p1.y) / 6)
     d += `C${p1.x + (p2.x - p0.x) / 6},${c1y} `
-       + `${p2.x - (p3.x - p1.x) / 6},${c2y} ${p2.x},${p2.y}`
+      + `${p2.x - (p3.x - p1.x) / 6},${c2y} ${p2.x},${p2.y}`
   }
   return d
 }
@@ -339,7 +339,7 @@ export function xticksFor(t0, t1) {
   if (span <= 4 * 365 * DAY) {
     const d = new Date(t0)
     let t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1)
-    for (; t <= t1; ) {
+    for (; t <= t1;) {
       ticks.push(t)
       const m = new Date(t)
       t = Date.UTC(m.getUTCFullYear(), m.getUTCMonth() + 1, 1)

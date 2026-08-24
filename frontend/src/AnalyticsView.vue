@@ -152,7 +152,7 @@ const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], c
           <div><strong :title="String(visits.length)">{{ formatCount(visits.length) }}</strong> visits</div>
           <div><strong :title="String(totalViews)">{{ formatCount(totalViews) }}</strong> page views</div>
           <div><strong>{{ readStats.avgMinPerVisit }}</strong> min/visit</div>
-          <div><strong>{{ readStats.avgArticleMedianMin }}</strong> min article read</div>
+          <div><strong>{{ readStats.avgArticleMedianMin }}</strong> min/read</div>
         </section>
 
         <VisitorCharts :data="data" :range="range" />
