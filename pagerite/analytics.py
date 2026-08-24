@@ -246,15 +246,15 @@ def _utm_tags(query: str) -> dict[str, str]:
 _CRAWLER_TIMEOUT = timedelta(seconds=10)
 
 #: UAs of JS-running crawlers, which would register as visitors on their
-#: ping.  Anything calling itself a "bot" matches; known crawlers without
-#: that token (GoogleOther) are listed as extra alternates.  No source
-#: verification: a spoofed bot UA just lands in the crawler list, and
+#: ping.  Anything calling itself a "bot" or "spider" matches; known crawlers
+#: without those tokens (GoogleOther) are listed as extra alternates.  No
+#: source verification: a spoofed bot UA just lands in the crawler list, and
 #: scanners that probe telltale paths are caught by the abuse rules anyway.
-_BOT_UA = re.compile(r"bot|googleother", re.IGNORECASE)
+_BOT_UA = re.compile(r"bot|spider|googleother", re.IGNORECASE)
 
 
 def _is_bot_ua(ua: str) -> bool:
-    """True when the UA claims a crawler identity (Googlebot, Applebot, ...)."""
+    """True when the UA claims a crawler identity (bot or spider)."""
     return bool(_BOT_UA.search(ua))
 
 #: Plain-404 count per IP that classifies it as abuse even without a
