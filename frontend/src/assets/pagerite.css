@@ -192,6 +192,10 @@ body {
   /* One line always: pagerite.js shrinks the font size to fit instead of
      wrapping (the themed size is the maximum). */
   white-space: nowrap;
+  /* Shrink-wrap to the text: as a flex child of the column-direction
+     #banner it would otherwise stretch full-width, making the empty banner
+     area beside the text a link to the front page. */
+  align-self: flex-start;
   margin: auto 1.25rem 0;
   padding-top: 1.5rem;
   color: var(--text);
