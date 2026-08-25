@@ -43,7 +43,7 @@
   font-size: clamp(4rem, 11vw, 8.5rem);
   font-weight: 800;
   letter-spacing: -0.04em;
-  line-height: 1;
+  line-height: 1.1;
   white-space: nowrap;
   color: var(--accent2);
   filter: drop-shadow(0 0.4rem 1.4rem rgb(10 92 255 / 0.3));

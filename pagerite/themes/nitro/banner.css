@@ -5,7 +5,6 @@
 /* Bezier-swept banner with wide orange stripes (inlined SVG), separated
    from the page by a straight orange blade. */
 #banner {
-  height: 13rem;
   border-bottom: 4px solid var(--accent);
 }
 
@@ -44,6 +43,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
+
   /* Banner dark tones tinted to the same violet family as the page. */
   .nb-base {
     fill: #100d18;

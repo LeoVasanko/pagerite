@@ -1,7 +1,3 @@
 /* Eyes banner design: a canvas critter watching the cursor from the
    grass (banner.html — markup + styles + script inlined by the backend
    into #page-banner). Fixed-height stage matching the canvas. */
-
-#banner {
-  height: 240px;
-}

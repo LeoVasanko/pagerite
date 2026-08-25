@@ -122,7 +122,8 @@ body {
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  min-height: 11rem;
+  height: 13rem;
+  box-sizing: content-box;
   background: linear-gradient(135deg, var(--surface), var(--bg));
   border-bottom: 1px solid var(--line);
 }
@@ -287,7 +288,8 @@ body.editing #sidebar {
    The panel scrolls internally. */
 .editor-host {
   position: fixed;
-  top: 0; /* main.js: banner bottom while visible, else 0 */
+  top: 0;
+  /* main.js: banner bottom while visible, else 0 */
   bottom: 0;
   left: 0;
   width: var(--editor-w);
@@ -894,6 +896,7 @@ article h2 {
    (explicit img widths still shrink-wrap), while .wide keeps its full
    viewport bleed. */
 @media (max-width: 48rem) {
+
   /* Nav type shrinks fluidly as space runs out. The nav font-size is
      em-based both in base and in every theme override, so scaling the
      banner's font-size (nothing else in the banner is em-sized — brand and
@@ -938,7 +941,7 @@ article h2 {
 
   /* Only the main level becomes a horizontal wrapping strip; submenus stay
      vertical blocks attached under their parent item. */
-  #sidebar > ul {
+  #sidebar>ul {
     flex-direction: row;
     flex-wrap: wrap;
     gap: 0.3rem 0.75rem;

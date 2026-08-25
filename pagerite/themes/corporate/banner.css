@@ -3,11 +3,6 @@
    SVG from the active palette (var(--accent)), so one SVG serves light
    and dark — and other themes too. */
 
-#banner {
-  min-height: 15rem;
-  border-bottom: none;
-}
-
 /* Artwork colors, light mode */
 .cb-bg0 {
   stop-color: #ffffff;

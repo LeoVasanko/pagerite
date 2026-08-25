@@ -2,10 +2,6 @@
    backend into #page-banner) — rolling hills, leafy bushes, swaying
    flowers, drifting clouds and a sun that rises as you scroll. */
 
-#banner {
-  min-height: 15rem;
-}
-
 /* The artwork fades into the page background at its bottom edge. */
 .summer-fade {
   stop-color: var(--bg);
@@ -44,9 +40,17 @@
     animation: summer-sun 9s ease-in-out infinite alternate;
   }
 
-  #page-banner .cloud-a { animation: summer-drift 56s ease-in-out infinite alternate; }
-  #page-banner .cloud-b { animation: summer-drift 73s ease-in-out infinite alternate-reverse; }
-  #page-banner .cloud-c { animation: summer-drift 64s ease-in-out infinite alternate; }
+  #page-banner .cloud-a {
+    animation: summer-drift 56s ease-in-out infinite alternate;
+  }
+
+  #page-banner .cloud-b {
+    animation: summer-drift 73s ease-in-out infinite alternate-reverse;
+  }
+
+  #page-banner .cloud-c {
+    animation: summer-drift 64s ease-in-out infinite alternate;
+  }
 
   #page-banner .flower {
     transform-box: fill-box;
@@ -55,21 +59,42 @@
   }
 
   /* Stagger the sway so the meadow doesn't move in lockstep. */
-  #page-banner .flower:nth-child(3n) { animation-delay: -1.7s; }
-  #page-banner .flower:nth-child(3n + 1) { animation-delay: -3.1s; animation-duration: 6s; }
+  #page-banner .flower:nth-child(3n) {
+    animation-delay: -1.7s;
+  }
+
+  #page-banner .flower:nth-child(3n + 1) {
+    animation-delay: -3.1s;
+    animation-duration: 6s;
+  }
 }
 
 @keyframes summer-sun {
-  from { opacity: 0.22; }
-  to { opacity: 0.38; }
+  from {
+    opacity: 0.22;
+  }
+
+  to {
+    opacity: 0.38;
+  }
 }
 
 @keyframes summer-drift {
-  from { transform: translateX(-1.6%); }
-  to { transform: translateX(1.6%); }
+  from {
+    transform: translateX(-1.6%);
+  }
+
+  to {
+    transform: translateX(1.6%);
+  }
 }
 
 @keyframes summer-sway {
-  from { transform: rotate(-2.6deg); }
-  to { transform: rotate(2.6deg); }
+  from {
+    transform: rotate(-2.6deg);
+  }
+
+  to {
+    transform: rotate(2.6deg);
+  }
 }

@@ -15,7 +15,3 @@
 .banner-fade {
   stop-color: var(--bg);
 }
-
-#banner {
-  min-height: 13rem;
-}
