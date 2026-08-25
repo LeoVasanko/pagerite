@@ -535,6 +535,13 @@ article dd {
 .multicol .colseg {
   margin-bottom: 1rem;
 
+  h3,
+  h4,
+  h5,
+  h6 {
+    break-after: avoid-column;
+  }
+
   p,
   li {
     break-inside: avoid-column;
