@@ -92,6 +92,7 @@ def main() -> None:
         "pagerite.app:app",
         listen=args.listen,
         default_port=DEFAULT_PORT,
+        server_header=False,
         **dev,
     )
 
