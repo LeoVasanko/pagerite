@@ -370,7 +370,7 @@ body.editing #sidebar {
 #sidebar ul ul {
   gap: 0.5em;
   margin-top: 0.5em;
-  padding-inline-start: 1em;
+  padding-inline-start: 1.8em;
 }
 
 #sidebar ul ul li::before {
@@ -437,7 +437,7 @@ article h3 {
    lines align. */
 article ul {
   list-style: none;
-  padding-inline-start: 1em;
+  padding-inline-start: 1.8em;
 }
 
 article ul li::before {
