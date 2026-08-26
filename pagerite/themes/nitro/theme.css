@@ -206,7 +206,3 @@ pre {
 img {
   border-radius: 3px;
 }
-
-::view-transition {
-  background: var(--bg);
-}

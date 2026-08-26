@@ -1026,11 +1026,11 @@ footer {
   padding: 0;
 }
 
-/* Rotating-cube page transition, adapted from termotohtori.fi.
-   FRAGILE: do not tweak; the view-transition pseudo-tree is picky. */
+/* Rotating-cube page transition. */
 ::view-transition {
   perspective: 1000px;
   inset: 0;
+  background: color-mix(var(--bg) 50%, black 50%);
 }
 
 ::view-transition-group(root),

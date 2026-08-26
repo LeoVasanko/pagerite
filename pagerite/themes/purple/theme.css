@@ -91,7 +91,3 @@ blockquote {
 pre {
   --code-bg: var(--surface);
 }
-
-::view-transition {
-  background: #000;
-}

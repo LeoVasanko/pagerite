@@ -8,6 +8,7 @@
 
   /* Every color is sampled (or text-darkened) from banner.svg. */
   --bg: #e6f4cf;
+  --sky: #d9f1ff;
   /* pale meadow — the banner fades into this */
   --surface: #f8fbf0;
   --text: #2c4a2f;
@@ -260,8 +261,7 @@ figcaption,
   background: linear-gradient(160deg, #eef7dd, #d9eec5);
 }
 
-/* The page transition exposes summer color around the rotating
-   snapshots. */
 ::view-transition {
-  background: var(--bg);
+  /* Override to mid sky shade instead of the darker --bg we otherwise get */
+  background: var(--sky);
 }

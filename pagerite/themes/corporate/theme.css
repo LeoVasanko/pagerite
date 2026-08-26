@@ -140,7 +140,3 @@ pre {
 img {
   border-radius: 4px;
 }
-
-::view-transition {
-  background: var(--bg);
-}
