@@ -269,7 +269,52 @@ import "overlayscrollbars/overlayscrollbars.css";
     // created page has no pen for commitPending's handover click.
     renderAuthUi();
     placeEditPen();
+    // Preview swaps also wipe the .colseg wrappers (the server render has
+    // none), which would drop the multi-column layout until a full reload;
+    // re-split so columns survive both live editing and closing the editor.
+    const main = document.getElementById("main");
+    if (main) applyMulticol(main);
   });
+
+  // Multi-column layout only when there is enough text to justify it.
+  // Split the body into columned segments: h1s, h2s and wide figures are
+  // full-width separators and never go inside columns.
+  function applyMulticol(main) {
+    const article = main.querySelector("article");
+    if (!article) return;
+    const body = article.querySelector(".body");
+    article.classList.toggle(
+      "multicol",
+      !!body && body.textContent.trim().length > 1800,
+    );
+    if (body && article.classList.contains("multicol")
+        && !body.querySelector(".colseg")) {
+      // h1s, h2s and anything holding a wide image are full-width
+      // separators
+      const isSeparator = (el) =>
+        el.tagName === "H1" || el.tagName === "H2"
+        || el.querySelector("img.wide") !== null;
+      let seg = null;
+      for (const el of [...body.children]) {
+        if (isSeparator(el)) {
+          seg = null;
+          body.append(el);
+        } else {
+          if (!seg) {
+            seg = document.createElement("div");
+            seg.className = "colseg";
+            body.append(seg);
+          }
+          seg.append(el);
+        }
+      }
+      // Columns are per section: only segments with enough text get them,
+      // so a short ingress or a brief section stays single-column.
+      for (const s of body.querySelectorAll(".colseg")) {
+        s.classList.toggle("cols", s.textContent.trim().length > 600);
+      }
+    }
+  }
 
   function applyEffects() {
     (window.requestIdleCallback || setTimeout)(preload);
@@ -280,44 +325,7 @@ import "overlayscrollbars/overlayscrollbars.css";
     renderAuthUi();
     placeEditPen();
     fitNav();
-    // Multi-column layout only when there is enough text to justify it.
-    // Split the body into columned segments: h1s, h2s and wide figures are
-    // full-width separators and never go inside columns.
-    const article = main.querySelector("article");
-    if (article) {
-      const body = article.querySelector(".body");
-      article.classList.toggle(
-        "multicol",
-        !!body && body.textContent.trim().length > 1800,
-      );
-      if (body && article.classList.contains("multicol")
-          && !body.querySelector(".colseg")) {
-        // h1s, h2s and anything holding a wide image are full-width
-        // separators
-        const isSeparator = (el) =>
-          el.tagName === "H1" || el.tagName === "H2"
-          || el.querySelector("img.wide") !== null;
-        let seg = null;
-        for (const el of [...body.children]) {
-          if (isSeparator(el)) {
-            seg = null;
-            body.append(el);
-          } else {
-            if (!seg) {
-              seg = document.createElement("div");
-              seg.className = "colseg";
-              body.append(seg);
-            }
-            seg.append(el);
-          }
-        }
-        // Columns are per section: only segments with enough text get them,
-        // so a short ingress or a brief section stays single-column.
-        for (const s of body.querySelectorAll(".colseg")) {
-          s.classList.toggle("cols", s.textContent.trim().length > 600);
-        }
-      }
-    }
+    applyMulticol(main);
     if (reduceMotion.matches) return;
     for (const el of main.querySelectorAll(
       "h2, h3, figure, img, pre, blockquote, table, dl, .task-list-item",
