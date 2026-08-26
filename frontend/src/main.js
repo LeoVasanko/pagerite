@@ -51,10 +51,15 @@ function setEditingClass(enable) {
 // the page: its top is the banner's bottom edge while the banner is visible
 // (= #content's top edge), and the viewport top once the banner has
 // scrolled away. The window keeps scrolling normally while editing.
+// Below 48rem the panel covers the entire viewport (pagerite.css), so its
+// top stays 0 regardless of the banner.
+const narrow = matchMedia('(max-width: 48rem)')
 function trackPanelTop() {
   const content = document.getElementById('content')
   if (host && content) {
-    host.style.top = `${Math.max(0, content.getBoundingClientRect().top)}px`
+    host.style.top = narrow.matches
+      ? '0px'
+      : `${Math.max(0, content.getBoundingClientRect().top)}px`
   }
 }
 

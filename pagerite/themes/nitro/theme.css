@@ -73,7 +73,9 @@
 /* Oversized outlined brand, spilling off the banner edge: orange stroke,
    solid black fill. */
 #brand {
-  font-size: 10rem;
+  /* Scales down proportionally below ~1000px: 10rem at a 62.5rem viewport,
+     shrinking with vmin (smaller of viewport width/height) below that. */
+  font-size: clamp(2.5rem, 16vmin, 10rem);
   line-height: 1.2;
   font-weight: 700;
   letter-spacing: 0.04em;

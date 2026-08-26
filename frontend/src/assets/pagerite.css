@@ -131,7 +131,10 @@ body {
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  height: 13rem;
+  /* Height scales down proportionally on small screens: 13rem at 800px
+     (50rem) viewport, shrinking with the smaller of viewport width/height
+     (vmin) below that, floored at 8rem. */
+  height: clamp(8rem, 26vmin, 13rem);
   box-sizing: content-box;
   background: linear-gradient(135deg, var(--surface), var(--bg));
   border-bottom: 1px solid var(--line);
@@ -197,7 +200,9 @@ body {
 #brand {
   font-family: var(--font-brand);
   font-weight: 700;
-  font-size: 2.4rem;
+  /* Scales down proportionally on small screens, same curve as the banner
+     height: 2.4rem at 800px, shrinking with vmin below that. */
+  font-size: clamp(1.4rem, 4.8vmin, 2.4rem);
   text-decoration: none;
   /* One line always: pagerite.js shrinks the font size to fit instead of
      wrapping (the themed size is the maximum). */
@@ -300,9 +305,10 @@ body.editing #sidebar {
   bottom: 0;
   left: 0;
   width: var(--editor-w);
-  /* Above the sidebar and .edit-link while sliding in/out (the host now
-     lives at the end of <body>, so it needs its own stacking level). */
-  z-index: 3;
+  /* Above the sidebar, .edit-link and the banner's top-right pens
+     (z-index 10) while sliding in/out (the host now lives at the end of
+     <body>, so it needs its own stacking level). */
+  z-index: 10;
 }
 
 .editor-root.overlay {
@@ -934,6 +940,17 @@ article h2 {
 
   #nav ul {
     gap: 0.15rem 0.9rem;
+  }
+
+  /* The editor panel takes over the entire viewport: no space left for
+     the banner or the page content (main.js pins its top to 0 at these
+     widths). */
+  body.editing #content {
+    margin-left: 0;
+  }
+
+  .editor-host {
+    width: 100vw;
   }
 
   #content {
