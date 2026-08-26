@@ -1,3 +1,12 @@
 /* Eyes banner design: a canvas critter watching the cursor from the
    grass (banner.html — markup + styles + script inlined by the backend
-   into #page-banner). Fixed-height stage matching the canvas. */
+   into #page-banner). The canvas fills the banner; the scene composes
+   against the 13rem layout box and extends flat grass into any overflow
+   a theme adds below (summer's cross-fade strip). */
+
+/* Opt out of the base parallax (scale overscan + --pry drift): scaling
+   from the bottom edge would crop the top of the composed scene — pushing
+   the critter out of view — and this canvas animates on its own. */
+#page-banner>#eyes {
+  transform: none;
+}

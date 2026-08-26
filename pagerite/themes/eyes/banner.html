@@ -2,7 +2,7 @@
 <style>
   #eyes {
     width: 100%;
-    height: 240px;
+    height: 100%;
     display: block;
   }
 </style>
@@ -10,18 +10,22 @@
 (() => {
   const c = document.getElementById('eyes')
   const ctx = c.getContext('2d')
-  const DPR = devicePixelRatio || 1
 
-  const fit = () => {
-    const w = Math.max(1, c.clientWidth)
-    const h = Math.max(1, c.clientHeight)
-    c.width = Math.round(w * DPR)
-    c.height = Math.round(h * DPR)
+  // Sync the backing store to the canvas' laid-out size. Checked every
+  // frame: this inline script runs before the stylesheets that size
+  // #page-banner, so observers/load events can still miss the transition.
+  // Assigning width/height also clears the canvas. DPR is read here, not
+  // captured: it changes with browser zoom.
+  const syncSize = () => {
+    const DPR = devicePixelRatio || 1
+    const w = Math.round(Math.max(1, c.clientWidth) * DPR)
+    const h = Math.round(Math.max(1, c.clientHeight) * DPR)
+    if (c.width !== w || c.height !== h) {
+      c.width = w
+      c.height = h
+    }
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0)
   }
-
-  fit()
-  addEventListener('resize', fit)
 
   let mx = 0
   let my = 0
@@ -69,7 +73,7 @@
   ]
 
   const ridgeY = (x, w, h) =>
-    h * 0.72 +
+    h * 0.83 +
     Math.sin(x * 0.012) * 10 +
     Math.sin(x * 0.003 + 1.4) * 16 +
     Math.sin(x * 0.02 + 0.7) * 3
@@ -129,7 +133,7 @@
 
     for (let i = 0; i < 5; i++) {
       const x = (i + 0.5) * w / 5
-      const y = h * 0.58 + Math.sin(i * 1.7) * 8
+      const y = h * 0.69 + Math.sin(i * 1.7) * 8
 
       ctx.fillStyle = '#5f8d4e'
       ctx.beginPath()
@@ -377,8 +381,17 @@
     const dt = Math.min(now - prev, 100) / 16.7
     prev = now
 
+    syncSize()
+
     const w = c.clientWidth
-    const h = c.clientHeight
+    // Compose the scene against the banner's layout box, not the canvas:
+    // a theme may extend #page-banner past #banner (e.g. summer overflows
+    // the artwork into the page for a masked cross-fade), and the critter
+    // must stay in the visible part. The overflow strip is filled with the
+    // flat meadow color below — a hard canvas edge would show through the
+    // fade, a grass extension just blends.
+    const h = Math.min(c.clientHeight,
+      c.closest('#banner')?.clientHeight || c.clientHeight)
     const R = Math.min(h * 0.11, 38)
 
     if (now > nextMove && !hidePhase) {
@@ -414,6 +427,16 @@
     vy *= Math.pow(0.85, dt)
     yoff += vy * dt
 
+    // Clip the scene to the composed area: the ducking critter travels
+    // below it, and the overflow strip is only flat meadow painted after —
+    // without the clip the critter would leave trails there as it sinks.
+    // Clipping against grass-on-grass is invisible, so the duck still
+    // reads as sinking into the meadow.
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(0, 0, w, h)
+    ctx.clip()
+
     drawBackground(w, h)
 
     const cx0 = gx * w
@@ -429,6 +452,18 @@
 
     drawCritter(cx0, eyeY, R, now, dt)
     drawForeground(w, h)
+
+    ctx.restore()
+
+    // Extend the meadow into any overflow below the composed scene, with
+    // the same two layers drawForeground leaves at the bottom (base grass
+    // plus the dark under-band) so the joint is invisible.
+    if (c.clientHeight > h) {
+      ctx.fillStyle = '#69ae4b'
+      ctx.fillRect(0, h, w, c.clientHeight - h)
+      ctx.fillStyle = 'rgba(48,102,34,0.18)'
+      ctx.fillRect(0, h, w, c.clientHeight - h)
+    }
 
     requestAnimationFrame(frame)
   }

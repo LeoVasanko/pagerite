@@ -62,10 +62,29 @@ body {
   color: #3d5223;
 }
 
-/* The banner frame ties into the meadow beneath it. */
+/* No separation between banner and page: the frame loses its background,
+   border and shadow, and the artwork overflows into the document below,
+   masked by a transparency gradient so it cross-fades into the body's fixed
+   meadow gradient. A plain color match is impossible — both sides are
+   gradients, and the parallax drift keeps the banner side moving. */
 #banner {
-  border-bottom-color: #4f913b30;
-  box-shadow: 0 0.3rem 1rem #4f913b22;
+  background: none;
+  border-bottom: 0;
+  box-shadow: none;
+}
+
+#page-banner {
+  inset: 0 0 -6rem;
+  /* Paints over the page background in the overlap, but never swallows its
+     clicks. */
+  pointer-events: none;
+  mask-image: linear-gradient(180deg, #000 calc(100% - 6rem), transparent);
+}
+
+/* The mask above replaced the SVG's flat-color bottom fade (meadowFade) —
+   fading to a single --bg would reintroduce a seam against the gradient. */
+#page-banner .summer-fade {
+  stop-opacity: 0;
 }
 
 /* Cheerful oversized tilted brand in a sky→grass→flower gradient. */
@@ -115,14 +134,26 @@ body {
 }
 
 /* Content sits in a soft wash of sunlit meadow rather than on a white
-   card. */
+   card. The wash lives on a pseudo-element so it can carry a vertical
+   mask: it fades in from transparent over the strip where the banner
+   artwork overflows into the page, so the two never fight — no matter
+   which side paints on top. */
 main {
+  position: relative;
+}
+
+main::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
   background: linear-gradient(90deg,
       transparent,
       #f0f8dc80 15%,
       #f0f8dc8c 50%,
       #f0f8dc80 85%,
       transparent);
+  mask-image: linear-gradient(180deg, transparent, #000 6rem);
 }
 
 /* The sidebar is a piece of the same meadow: glassy green with a light
@@ -132,6 +163,8 @@ main {
   border-right: 1px solid #ffffff80;
   border-bottom: 1px solid var(--line);
   box-shadow: 0 0.3rem 1rem #4f913b1f;
+  border-radius: 1rem;
+  margin-inline: 0.5rem;
 }
 
 #sidebar a {
