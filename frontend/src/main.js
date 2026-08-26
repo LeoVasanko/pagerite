@@ -104,6 +104,9 @@ export function closeEditor() {
   const h = host
   setTimeout(() => { h.style.display = 'none' }, 250)
   dispatchEvent(new CustomEvent('pagerite:editor-hidden'))
+  // The editor may have dropped the prefetch cache; warm it again for the
+  // now-final page so navigation stays instant.
+  dispatchEvent(new CustomEvent('pagerite:preload-pages'))
   // Restore the server-rendered title for the current URL. Re-fetching makes
   // sure a brand change in the site editor or an in-place navigation leaves
   // the correct public title behind.

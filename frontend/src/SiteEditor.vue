@@ -8,7 +8,7 @@ import { EditorState } from '@codemirror/state'
 import { css } from '@codemirror/lang-css'
 import { html } from '@codemirror/lang-html'
 import { cmHighlight, cmTheme } from './cmtheme'
-import { loadPlain, runScripts } from './swapdoc'
+import { dropPageCache, loadPlain, runScripts } from './swapdoc'
 
 const props = defineProps({
   pagePath: { type: String, default: '' },
@@ -110,6 +110,7 @@ async function uploadFavicon(file) {
     const { path: url } = await res.json()
     favicon.value = url
     applyFavicon(url)
+    dropPageCache()
   } else {
     saveError.value = `⚠️ ${await errorDetail(res)}`
   }
@@ -234,6 +235,7 @@ async function saveSettings(opts = {}) {
   })
   if (res.ok) {
     saveError.value = ''
+    dropPageCache()
   } else {
     saveError.value = '⚠️ changes could not be saved'
   }

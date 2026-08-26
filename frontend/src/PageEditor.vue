@@ -15,7 +15,7 @@ import { EditorView, basicSetup } from 'codemirror'
 import { EditorState } from '@codemirror/state'
 import { markdown } from '@codemirror/lang-markdown'
 import { cmHighlight, cmTheme } from './cmtheme'
-import { loadPlain } from './swapdoc'
+import { dropPageCache, loadPlain } from './swapdoc'
 
 const props = defineProps({
   pagePath: { type: String, default: '' },
@@ -113,7 +113,9 @@ async function saveAndRefresh() {
   await save()
   dirty.value = false
   // Refresh the page regions from the server so nav/sidebar changes apply
-  // (never a reload: the editor keeps its state).
+  // (never a reload: the editor keeps its state). Drop the prefetch cache
+  // first: heading/title changes affect navigation on every page.
+  dropPageCache()
   loadPlain(path.value)
 }
 

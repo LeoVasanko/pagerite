@@ -3,6 +3,14 @@
 // Used by BannerEditor (banner design changes), SiteEditor (theme changes)
 // and StructureEditor (tree navigation).
 
+// Drop the public page runtime's in-memory prefetch cache. Editors call this
+// whenever a site-wide or page change invalidates the cached HTML of other
+// pages (theme, headings, structure, banner, etc.). The cache is rebuilt by
+// re-preloading visible links once the editor panel closes.
+export function dropPageCache() {
+  dispatchEvent(new CustomEvent('pagerite:drop-page-cache'))
+}
+
 export function runScripts(root) {
   // Scripts injected via innerHTML do not execute; re-create them.
   if (!root) return

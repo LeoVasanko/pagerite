@@ -6,7 +6,7 @@ import { EditorView, basicSetup } from 'codemirror'
 import { EditorState } from '@codemirror/state'
 import { html } from '@codemirror/lang-html'
 import { cmHighlight, cmTheme } from './cmtheme'
-import { loadPlain, runScripts } from './swapdoc'
+import { dropPageCache, loadPlain, runScripts } from './swapdoc'
 
 const props = defineProps({
   pagePath: { type: String, default: '' },
@@ -215,6 +215,8 @@ function onMessage(ev) {
   } else if (msg.type === 'saved') {
     saveError.value = ''
     pendingSave = null
+    // Banner HTML/design changes affect the rendered page; invalidate prefetches.
+    dropPageCache()
     refreshOnSave?.()
     refreshOnSave = null
   } else if (msg.type === 'error') {

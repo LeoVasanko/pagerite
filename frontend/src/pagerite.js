@@ -352,6 +352,21 @@ import "overlayscrollbars/overlayscrollbars.css";
     pageCache.set(new URL(ev.detail.url, location.href).pathname, ev.detail.html);
   });
 
+  // Editors mutate site-wide state (theme, structure, headings, banners),
+  // which can change the rendered HTML of every cached page. Drop the whole
+  // cache so stale prefetches are never served; the current page is re-fetched
+  // by the editor's own loadPlain and re-cached afterwards. Re-preloading is
+  // deferred until the editor panel closes to avoid hammering the server.
+  addEventListener("pagerite:drop-page-cache", () => {
+    pageCache.clear();
+  });
+
+  // When the editor panel closes, warm the cache again for the visible links
+  // on the (now final) page so subsequent navigation stays instant.
+  addEventListener("pagerite:preload-pages", () => {
+    preload();
+  });
+
   function preload() {
     const urls = new Set();
     for (const a of document.querySelectorAll(
@@ -562,14 +577,17 @@ import "overlayscrollbars/overlayscrollbars.css";
   // --- Fetch navigation ------------------------------------------------
   async function load(url, push = true, back = false) {
     // Navigating with the editor open closes it; unsaved edits are lost
-    // (the region swap discards the previewed changes anyway).
-    if (document.body.classList.contains("editing")) {
+    // (the region swap discards the previewed changes anyway). Cache must be
+    // bypassed for this navigation because the editor may have invalidated
+    // the prefetched copies of other pages.
+    const editing = document.body.classList.contains("editing");
+    if (editing) {
       editorModule?.then((m) => m.closeEditor());
     }
     teardownAnalytics();
     let doc;
     let finalUrl = url;
-    const cached = pageCache.get(new URL(url, location.href).pathname);
+    const cached = !editing && pageCache.get(new URL(url, location.href).pathname);
     if (cached) {
       doc = new DOMParser().parseFromString(cached, "text/html");
     } else {

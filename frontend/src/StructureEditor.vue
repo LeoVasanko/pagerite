@@ -10,7 +10,7 @@
 import { inject, onActivated, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import StructureTree from './StructureTree.vue'
 import { slugify } from './slugify'
-import { loadPlain } from './swapdoc'
+import { dropPageCache, loadPlain } from './swapdoc'
 
 const props = defineProps({
   pagePath: { type: String, default: '' },
@@ -144,6 +144,7 @@ async function commitPending() {
   }
   pending.value = null
   await refreshPages()
+  dropPageCache()
   await navigate(newPath)
   // Hand over to the page editor tab for the actual writing.
   shell?.switchMode('page')
@@ -171,6 +172,8 @@ async function postStructure(op) {
   })
   if (res.ok) {
     saveError.value = ''
+    // Structure changes alter navigation on every page; drop prefetches.
+    dropPageCache()
     loadPlain(path.value) // refresh menus and content from the server
   } else {
     saveError.value = `⚠️ ${await errorDetail(res)}`
@@ -234,6 +237,7 @@ async function removePage(node) {
   if (res.ok) {
     saveError.value = ''
     refreshPages()
+    dropPageCache()
     const p = node.path
     if (p === path.value || (p && path.value.startsWith(`${p}/`))) {
       // The current page was deleted — or reduced to a category, which now
