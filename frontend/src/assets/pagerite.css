@@ -254,8 +254,6 @@ body {
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 78rem) minmax(0, 1fr);
-  /* The docked editor pushes the content (not the header) right. */
-  transition: margin-left 0.25s ease;
 }
 
 /* Long articles (.multicol is added by pagerite.js based on content length)
@@ -293,6 +291,9 @@ body.editing #sidebar {
   bottom: 0;
   left: 0;
   width: var(--editor-w);
+  /* Above the sidebar and .edit-link while sliding in/out (the host now
+     lives at the end of <body>, so it needs its own stacking level). */
+  z-index: 3;
 }
 
 .editor-root.overlay {
@@ -801,8 +802,6 @@ div.wide {
   width: 100vw;
   max-width: none;
   margin-inline: calc(50% - 50vw);
-  /* Follow the docked editor's margin-left transition smoothly. */
-  transition: margin-left 0.25s ease;
 }
 
 /* Full bleed means edge to edge — no rounded corners. */

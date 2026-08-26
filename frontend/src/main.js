@@ -22,6 +22,30 @@ let host = null
 let app = null
 let savedTitle = null
 let visible = false
+let slideAnimation = null
+
+const SLIDE_MS = 250  // keep in sync with the panel slide in pagerite.css
+
+// The layout switches instantly when .editing toggles — no margin/width
+// transitions anywhere, so viewport resizes (and the vw-based .wide bleed)
+// always stay instant. The visible slide is a compositor-only FLIP
+// transform on #content, running in sync with the panel's own slide
+// (editor-slide-in / .closing in pagerite.css): both move by --editor-w
+// over the same duration and easing, so .wide's left edge tracks the
+// panel's right edge exactly throughout.
+function setEditingClass(enable) {
+  const content = document.getElementById('content')
+  const before = content.getBoundingClientRect().left
+  document.body.classList.toggle('editing', enable)
+  const delta = before - content.getBoundingClientRect().left
+  slideAnimation?.cancel()
+  if (delta) {
+    slideAnimation = content.animate(
+      { transform: [`translateX(${delta}px)`, 'translateX(0)'] },
+      { duration: SLIDE_MS, easing: 'ease' }
+    )
+  }
+}
 
 // The panel is fixed to the viewport's left edge (pagerite.css) but tracks
 // the page: its top is the banner's bottom edge while the banner is visible
@@ -58,8 +82,12 @@ export function openEditor(path, { mode = 'page' } = {}) {
   savedTitle = document.title
   host = document.createElement('div')
   host.className = 'editor-host'
-  document.getElementById('content').prepend(host)
-  document.body.classList.add('editing')
+  // Appended to <body>, not #content: the open/close slide transforms
+  // #content (setEditingClass), and a transformed element becomes the
+  // containing block for fixed-position descendants — the panel would be
+  // dragged along with the content instead of sliding on its own.
+  document.body.append(host)
+  setEditingClass(true)
   startTrackingPanel()
   // Which tab is active; pagerite.js uses this to decide whether a pen click
   // closes the panel or switches tabs.
@@ -86,7 +114,7 @@ function showEditor() {
   savedTitle = document.title
   host.style.display = ''
   host.firstElementChild?.classList.remove('closing')
-  document.body.classList.add('editing')
+  setEditingClass(true)
   startTrackingPanel()
   visible = true
   dispatchEvent(new CustomEvent('pagerite:editor-shown'))
@@ -96,7 +124,7 @@ export function closeEditor() {
   if (!visible) return
   visible = false
   stopTrackingPanel()
-  document.body.classList.remove('editing')
+  setEditingClass(false)
   // dataset.editorMode is kept while hidden: the tabs use it to tell whether
   // a pagerite:editor-shown event targets them.
   // Slide the panel out in sync with the page shifting back, then hide it.
