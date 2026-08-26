@@ -48,8 +48,10 @@ export function yScale(maxValue) {
  * and each run of candidates keeps only its best-scoring bucket as an
  * edge). Each edge-delimited segment is then smoothed independently: every
  * bucket spreads its count with a fixed Gaussian sigma chosen so N events
- * in a single bucket peak at N events per unit, clipped to the segment and
- * renormalized so total visitor count is preserved exactly. The unit is
+ * in a single bucket peak at N events per unit. Mass past a detected change
+ * point is dropped (kernel renormalized); mass past a true series edge is
+ * mirrored back, so the curve doesn't fall where data simply ends. Either
+ * way total visitor count is preserved exactly. The unit is
  * one hour on the week view and one day on the month+ views, so the
  * smoothing time scale follows the range. The raw series is drawn faintly
  * behind the curve for reference. Operates on raw counts.
@@ -110,28 +112,42 @@ export function smooth(counts, binMinutes, unitMinutes, {
 
   // Process each discontinuity-delimited regime independently so the
   // Gaussian cannot see through a detected boundary. Each input bin spreads
-  // its count with the fixed sigma; the kernel is renormalized after
-  // clipping to the segment, preserving total visitor count apart from
-  // floating-point error.
+  // its count with the fixed sigma. Mass that would fall past a detected
+  // change point is dropped and the kernel renormalized; mass that would
+  // fall past a true series edge (first/last bin) is mirrored back into the
+  // segment, as if the data continued as its own reflection, so constant or
+  // rising data doesn't produce a spurious falling edge. Total visitor count
+  // is preserved apart from floating-point error.
   const bounds = [0, ...edges, n]
   const smoothed = new Float64Array(n)
   for (let b = 0; b < bounds.length - 1; b++) {
     const lo = bounds[b]
     const length = bounds[b + 1] - lo
+    const mirrorLeft = lo === 0
+    const mirrorRight = lo + length === n
     const segment = counts.slice(lo, lo + length)
     for (let j = 0; j < length; j++) {
       const count = segment[j]
       if (!count) continue
-      const start = Math.max(0, j - radius)
-      const end = Math.min(length, j + radius + 1)
+      // Collect (target bin, weight) pairs over the full kernel, folding
+      // mirrored mass at series edges and dropping mass past change points.
+      const spread = new Map()
       let weightSum = 0
-      for (let i = start; i < end; i++) {
-        const d = i - j
-        weightSum += Math.exp(-0.5 * (d / sigmaBins) ** 2)
+      for (let i = j - radius; i <= j + radius; i++) {
+        let k = i
+        // Fold repeatedly for segments shorter than the kernel radius.
+        while (k < 0 || k >= length) {
+          if (k < 0 && mirrorLeft) k = -k - 1
+          else if (k >= length && mirrorRight) k = 2 * length - 1 - k
+          else { k = null; break }
+        }
+        if (k === null) continue
+        const w = Math.exp(-0.5 * ((i - j) / sigmaBins) ** 2)
+        spread.set(k, (spread.get(k) || 0) + w)
+        weightSum += w
       }
-      for (let i = start; i < end; i++) {
-        const d = i - j
-        smoothed[lo + i] += count * Math.exp(-0.5 * (d / sigmaBins) ** 2) / weightSum
+      for (const [k, w] of spread) {
+        smoothed[lo + k] += count * w / weightSum
       }
     }
   }
