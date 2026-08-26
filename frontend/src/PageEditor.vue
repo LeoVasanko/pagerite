@@ -312,10 +312,14 @@ function onEditorShown() {
 // directions apply instantly (never smooth — a smooth window scroll feeds
 // its intermediate positions back into the editor and fights the user's
 // scrolling) and coalesce to one update per frame. Loops are broken two
-// ways: a one-frame driver flag, and a 1px tolerance so the scroll events
-// caused by our own writes are no-ops. When the panel's height changes
-// mid-scroll (its top tracks the banner), the page is the driver: the
-// editor is re-matched to the page's position, never vice versa.
+// ways: a driver flag held until one frame AFTER the write (the scroll
+// event a programmatic write dispatches arrives asynchronously — clearing
+// the flag in the writing frame would let the echo through and the two
+// directions would chase each other, which showed up as random jumping
+// whenever layout shifted the proportional targets mid-scroll), and a 1px
+// tolerance so residual rounding is a no-op. When the panel's height
+// changes mid-scroll (its top tracks the banner), the page is the driver:
+// the editor is re-matched to the page's position, never vice versa.
 function syncWindowToEditor() {
   if (syncingScroll || !view) return
   syncingScroll = true
@@ -325,7 +329,7 @@ function syncWindowToEditor() {
     const pct = max > 0 ? scroller.scrollTop / max : 0
     const y = pct * Math.max(0, document.documentElement.scrollHeight - innerHeight)
     if (Math.abs(scrollY - y) > 1) scrollTo({ top: y, behavior: 'instant' })
-    syncingScroll = false
+    requestAnimationFrame(() => { syncingScroll = false })
   })
 }
 
@@ -338,7 +342,7 @@ function syncEditorToWindow() {
     const pct = pageMax > 0 ? scrollY / pageMax : 0
     const top = pct * Math.max(0, scroller.scrollHeight - scroller.clientHeight)
     if (Math.abs(scroller.scrollTop - top) > 1) scroller.scrollTop = top
-    syncingScroll = false
+    requestAnimationFrame(() => { syncingScroll = false })
   })
 }
 
