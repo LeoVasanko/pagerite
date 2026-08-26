@@ -4,8 +4,17 @@ Raw HTML (including inline scripts) is passed through unfiltered: the
 single author is trusted. Extensions: tables and strikethrough (from the
 "default" preset), footnotes, definition lists, task lists,
 brace-attributes (`{.class width=300}` on any element, images in
-particular) and admonitions (``!!! note Title`` with an indented body —
-note/tip/warning/etc., the title optional). Bare URLs autolink (GFM), with
+particular), admonitions (``!!! note Title`` with an indented body —
+note/tip/warning/etc., the title optional) and GitHub-style alerts
+(``> [!NOTE]`` / TIP / IMPORTANT / WARNING / CAUTION, rendered in the
+same callout styling). ``::: name`` opens a generic container rendered
+as ``<div class="name">`` and closed by a matching ``:::`` (nest by
+giving the outer container more colons, e.g. `::::`); ``::: aside``
+floats as a side box beside the text and ``::: nocols`` opts its
+section out of the column layout. A brace-attribute
+line as a block's last line (no blank line between) applies to the whole
+block, e.g. a paragraph ending with ``{.wide}`` breaks out of the column
+layout as a full-width element. Bare URLs autolink (GFM), with
 the ``https://`` scheme hidden in the link text (``http://`` and other
 schemes stay visible; manually labelled links are untouched), and
 ``H~2~O`` / ``x^2^`` give sub/superscripts.
@@ -33,6 +42,8 @@ from markdown_it.common.utils import escapeHtml
 from markdown_it.renderer import RendererHTML
 from mdit_py_plugins.admon import admon_plugin
 from mdit_py_plugins.attrs import attrs_plugin
+from mdit_py_plugins.attrs.parse import ParseError, parse as parse_attrs
+from mdit_py_plugins.container import container_plugin
 from mdit_py_plugins.deflist import deflist_plugin
 from mdit_py_plugins.footnote import footnote_plugin
 from mdit_py_plugins.gfm_autolink import gfm_autolink_plugin
@@ -107,6 +118,14 @@ def _unwrap_lone_figures(state) -> None:
         if child and child.type == "image":
             if (tokens[i - 1].type == "paragraph_open"
                     and tokens[i + 1].type == "paragraph_close"):
+                # A lone image becomes a <figure> (see _image_rule); block
+                # attrs on the paragraph (e.g. a trailing {.wide} line) move
+                # onto the image so they survive the unwrap.
+                for key, value in (tokens[i - 1].attrs or {}).items():
+                    if key == "class":
+                        child.attrJoin("class", value)
+                    else:
+                        child.attrSet(key, value)
                 tokens[i - 1].hidden = True
                 tokens[i + 1].hidden = True
 
@@ -149,6 +168,72 @@ def _shorten_autolinks(state) -> None:
                     text.content = text.content.removeprefix("https://")
 
 
+_CONTAINER_NAME_RE = re.compile(r"\s*[a-zA-Z][\w-]*\s*$")
+
+
+def _container_render(self, tokens, idx, options, env):
+    """Render `::: name` containers as `<div class="name">`."""
+    token = tokens[idx]
+    if token.nesting == 1:
+        token.attrJoin("class", token.info.strip())
+    return self.renderToken(tokens, idx, options, env)
+
+
+def _block_attrs(state) -> None:
+    """Apply `{.class key=value}` on a block's last line to the block.
+
+    The inline attrs plugin only covers attributes right after an image,
+    code span or link; this extends the same brace syntax to whole blocks,
+    e.g. a paragraph ending with a `{.wide}` line (no blank line between)
+    gets the `wide` class and thereby breaks out of the column layout.
+    A lone `{...}` paragraph applies to the previous block instead (this
+    is how headings take attributes, since a heading's next line always
+    starts a new paragraph). Runs before the typographer so quotes inside
+    attributes stay straight.
+    """
+    tokens = state.tokens
+    for i, token in enumerate(tokens):
+        if token.type != "inline" or not token.children:
+            continue
+        text = token.children[-1]
+        if (text.type != "text" or not text.content.startswith("{")
+                or not text.content.endswith("}")):
+            continue
+        try:
+            _, attrs = parse_attrs(text.content.strip())
+        except ParseError:
+            continue
+        standalone = len(token.children) == 1
+        if not standalone and token.children[-2].type != "softbreak":
+            continue
+        # The target: the enclosing block for a trailing attrs line, or the
+        # previous same-level block for a standalone attrs paragraph. Never
+        # a hidden token (tight-list paragraphs render no tag to hold the
+        # attributes) — in that case leave the text untouched instead of
+        # silently swallowing it.
+        own = i - 1  # standalone: the attrs paragraph's own opening token
+        j = i - 1
+        while j >= 0:
+            if (tokens[j].nesting == 1 and not tokens[j].hidden
+                    and (not standalone or (j != own
+                                            and tokens[j].level == tokens[own].level))):
+                break
+            j -= 1
+        if j < 0:
+            continue
+        for key, value in attrs.items():
+            if key == "class":
+                tokens[j].attrJoin("class", value)
+            else:
+                tokens[j].attrSet(key, value)
+        if standalone:
+            tokens[own].hidden = True
+            token.children = []
+            tokens[i + 1].hidden = True
+        else:
+            del token.children[-2:]
+
+
 md = (
     MarkdownIt(
         "default",
@@ -161,6 +246,8 @@ md = (
     )
     .use(attrs_plugin)
     .use(admon_plugin)
+    .use(container_plugin, "block", validate=lambda params, _markup:
+         bool(_CONTAINER_NAME_RE.fullmatch(params)), render=_container_render)
     .use(footnote_plugin)
     .use(deflist_plugin)
     .use(tasklists_plugin, enabled=True)
@@ -169,6 +256,10 @@ md = (
     .use(superscript_plugin)
 )
 md.add_render_rule("image", _image_rule)
+# GFM alerts (`> [!NOTE]` etc.), built into markdown-it-py's blockquote rule.
+md.options["alerts"] = True
+# Block attrs must be stripped before the typographer curlifies their quotes.
+md.core.ruler.before("replacements", "block_attrs", _block_attrs)
 md.core.ruler.push("unwrap_lone_figures", _unwrap_lone_figures)
 md.core.ruler.push("tag_task_checkboxes", _tag_task_checkboxes)
 md.core.ruler.push("shorten_autolinks", _shorten_autolinks)

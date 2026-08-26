@@ -419,7 +419,10 @@ main {
 
 article h1,
 article h2,
-article h3 {
+article h3,
+article h4,
+article h5,
+article h6 {
   font-family: var(--font-heading);
   font-weight: 600;
   line-height: 1.25;
@@ -439,13 +442,31 @@ article dl,
 article blockquote,
 article pre,
 article figure,
-article table {
+article table,
+article h3,
+article h4,
+article h5,
+article h6 {
   margin-top: 0;
   margin-bottom: 1rem;
 }
 
-article h3 {
-  margin: 1.4rem 0 0.4rem;
+/* Headings separate from the text above via a top margin on the sibling
+   combinator: a heading that is the first child of a container (e.g. the
+   top of a .colseg column segment) gets no gap, and browsers truncate the
+   margin at column breaks, so column tops stay aligned. */
+article h3,
+article h4,
+article h5,
+article h6 {
+  margin-bottom: 0.4rem;
+}
+
+article * + h3,
+article * + h4,
+article * + h5,
+article * + h6 {
+  margin-top: 1.4rem;
 }
 
 /* Lists: small diamond emoji markers — blue 🔹 on odd nesting levels,
@@ -536,9 +557,10 @@ article dd {
 }
 
 /* Multi-column reading, but only for long articles (pagerite.js adds
-   .multicol based on content length and splits the body into .colseg segments
-   separated by full-width h2s and wide figures; only segments with enough
-   text get .cols). No fixed breakpoint: `columns: 30rem` lets CSS fit as
+   .multicol based on content length — code blocks excluded — and splits
+   the body into .colseg segments separated by full-width h2s and .wide
+   elements; only segments with enough text get .cols, and a ::: nocols
+   container opts its section out). No fixed breakpoint: `columns: 30rem` lets CSS fit as
    many columns of at least 30rem as the article's current width allows —
    since .multicol also uncaps the article width (see #content above), a
    wider window simply yields more columns. */
@@ -567,7 +589,9 @@ article dd {
   pre,
   blockquote,
   table,
-  dl {
+  dl,
+  .admonition,
+  .markdown-alert {
     break-inside: avoid;
   }
 }
@@ -587,10 +611,11 @@ article a:hover {
   color: var(--accent);
 }
 
-/* Blockquotes: inner paragraphs carry no margins (spacing comes from the
-   blockquote itself, bottom-only like everything else in articles). The
-   negative left margin pushes the bar out past the text edge, so quoted
-   text aligns with the surrounding paragraphs — same trick as code blocks. */
+/* Blockquotes: spacing comes from the blockquote itself (bottom-only like
+   everything else in articles); inner paragraphs keep only the gap between
+   them. The negative left margin pushes the bar out past the text edge, so
+   quoted text aligns with the surrounding paragraphs — same trick as code
+   blocks. */
 blockquote {
   margin: 0 0 1rem -0.5rem;
   padding: 0 0 0 0.25rem;
@@ -602,40 +627,126 @@ blockquote p {
   margin: 0;
 }
 
-/* Admonitions (markdown !!! note/warning/...): a lightweight callout in
-   the blockquote idiom — accent bar and a faint wash, recolored per type.
+blockquote p + p {
+  margin-top: 0.6rem;
+}
+
+/* Admonitions (markdown !!! note/warning/...) and GitHub-style alerts
+   (> [!NOTE] ...): a lightweight callout in the blockquote idiom — accent
+   bar and a faint wash, recolored per type, with a type emoji on the
+   title. The negative left margin pushes bar and wash out past the text
+   edge so the inner text aligns with surrounding paragraphs — same trick
+   as blockquotes and code blocks (margin-left = border + padding-left).
    Bottom-only margins like everything else in articles; inner paragraphs
    carry no margins of their own. */
-.admonition {
-  margin: 0 0 1rem;
+.admonition,
+.markdown-alert {
+  margin: 0 0 1rem -1.15rem;
   padding: 0.4rem 0.9rem;
   border-left: 0.25rem solid var(--admonition-color, var(--accent));
   border-radius: 0 0.3rem 0.3rem 0;
   background: color-mix(in srgb, var(--admonition-color, var(--accent)) 7%, transparent);
 }
 
-.admonition> :last-child {
+.admonition> :last-child,
+.markdown-alert> :last-child {
   margin-bottom: 0;
 }
 
-.admonition-title {
+.admonition-title,
+.markdown-alert-title {
   margin: 0 0 0.2rem;
   font-weight: 600;
   color: var(--admonition-color, var(--accent));
 }
 
+.admonition-title::before,
+.markdown-alert-title::before {
+  padding-right: 0.35em;
+}
+
+.admonition.note .admonition-title::before,
+.markdown-alert-note .markdown-alert-title::before {
+  content: "ℹ️";
+}
+
+.admonition.tip .admonition-title::before,
+.admonition.hint .admonition-title::before,
+.markdown-alert-tip .markdown-alert-title::before {
+  content: "✨";
+}
+
+.admonition.important .admonition-title::before,
+.markdown-alert-important .markdown-alert-title::before {
+  content: "❗";
+}
+
+.admonition.success .admonition-title::before {
+  content: "✅";
+}
+
+.admonition.warning .admonition-title::before,
+.markdown-alert-warning .markdown-alert-title::before {
+  content: "⚠️";
+}
+
+.admonition.caution .admonition-title::before,
+.markdown-alert-caution .markdown-alert-title::before {
+  content: "🔥";
+}
+
+.admonition.danger .admonition-title::before,
+.admonition.failure .admonition-title::before {
+  content: "⛔";
+}
+
 .admonition.tip,
 .admonition.important,
 .admonition.hint,
-.admonition.success {
+.admonition.success,
+.markdown-alert-tip,
+.markdown-alert-important {
   --admonition-color: var(--accent2);
 }
 
 .admonition.warning,
 .admonition.caution,
 .admonition.danger,
-.admonition.failure {
+.admonition.failure,
+.markdown-alert-warning,
+.markdown-alert-caution {
   --admonition-color: var(--accent3);
+}
+
+/* Asides (::: aside): a floated side box in the floated-figure idiom;
+   consecutive asides stack (clear: right). On wide single-column pages it
+   leans into the empty right gutter (below 104rem the gutter cannot hold
+   the box; multicol pages have no right gutter at all, and while editing
+   the docked panel reshapes the gutters — in all these it stays a plain
+   float). Headings already clear floats, so asides never bleed into the
+   next section. */
+.aside {
+  float: right;
+  clear: right;
+  width: 30%;
+  max-width: 20rem;
+  margin: 0.3rem 0 1rem 1.2rem;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border-radius: 0.3rem;
+}
+
+.aside> :last-child {
+  margin-bottom: 0;
+}
+
+@media (min-width: 104rem) {
+  body:not(.editing):not(:has(.multicol)) .aside {
+    width: 12rem;
+    margin-right: -13rem;
+  }
 }
 
 pre {

@@ -277,23 +277,32 @@ import "overlayscrollbars/overlayscrollbars.css";
   });
 
   // Multi-column layout only when there is enough text to justify it.
-  // Split the body into columned segments: h1s, h2s and wide figures are
+  // Split the body into columned segments: h1s, h2s and wide elements are
   // full-width separators and never go inside columns.
   function applyMulticol(main) {
     const article = main.querySelector("article");
     if (!article) return;
     const body = article.querySelector(".body");
+    // Code blocks don't read as flowing text and are often generated
+    // filler; exclude them when measuring whether the text justifies
+    // columns.
+    const textLen = (el) => {
+      let n = el.textContent.trim().length;
+      for (const pre of el.querySelectorAll("pre")) n -= pre.textContent.length;
+      return n;
+    };
     article.classList.toggle(
       "multicol",
-      !!body && body.textContent.trim().length > 1800,
+      !!body && textLen(body) > 1800,
     );
     if (body && article.classList.contains("multicol")
         && !body.querySelector(".colseg")) {
-      // h1s, h2s and anything holding a wide image are full-width
-      // separators
+      // h1s, h2s and wide elements (a {.wide} block or anything holding
+      // one, e.g. a figure with a wide image) are full-width separators
       const isSeparator = (el) =>
         el.tagName === "H1" || el.tagName === "H2"
-        || el.querySelector("img.wide") !== null;
+        || el.classList.contains("wide")
+        || el.querySelector(".wide") !== null;
       let seg = null;
       for (const el of [...body.children]) {
         if (isSeparator(el)) {
@@ -309,9 +318,13 @@ import "overlayscrollbars/overlayscrollbars.css";
         }
       }
       // Columns are per section: only segments with enough text get them,
-      // so a short ingress or a brief section stays single-column.
+      // so a short ingress or a brief section stays single-column. A
+      // .nocols container (::: nocols) opts its whole section out.
       for (const s of body.querySelectorAll(".colseg")) {
-        s.classList.toggle("cols", s.textContent.trim().length > 600);
+        s.classList.toggle(
+          "cols",
+          s.querySelector(".nocols") === null && textLen(s) > 600,
+        );
       }
     }
   }
