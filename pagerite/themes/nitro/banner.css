@@ -2,12 +2,6 @@
    (inlined by the backend into #page-banner), in neutral dark greys that
    follow the page's color scheme. */
 
-/* Bezier-swept banner with wide orange stripes (inlined SVG), separated
-   from the page by a straight orange blade. */
-#banner {
-  border-bottom: 4px solid var(--accent);
-}
-
 /* Banner artwork dark tones: neutral greys in light mode (retinted to the
    page's violet family by the dark-scheme block below). */
 .nb-base {

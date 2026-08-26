@@ -65,6 +65,11 @@
   background: var(--accent);
 }
 
+/* Any banner used is separated from page by a thick orange line */
+#banner {
+  border-bottom: 4px solid var(--accent);
+}
+
 /* Oversized outlined brand, spilling off the banner edge: orange stroke,
    solid black fill. */
 #brand {
