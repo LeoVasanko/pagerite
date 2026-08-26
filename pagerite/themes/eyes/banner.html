@@ -2,7 +2,13 @@
 <style>
   #eyes {
     width: 100%;
-    height: 100%;
+    /* 13rem — the banner's layout height, correct from the first frame,
+       before any external stylesheet has sized #page-banner. Themes that
+       extend the banner past the layout box (summer's overflow fade) raise
+       --eyes-h to 100% so the canvas follows the taller stage; the script
+       still composes the scene against the 13rem box and only extends the
+       meadow, so the scene itself never shifts. */
+    height: var(--eyes-h, 13rem);
     display: block;
   }
 </style>
@@ -326,7 +332,10 @@
     ctx.moveTo(0, h)
     ctx.lineTo(0, ridgeY(0, w, h))
 
-    for (let x = 0; x <= w; x += 8)
+    // Sample one step PAST the right edge (x <= w + 8): stopping at w would
+    // leave the path closing with a visible vertical drop at the edge
+    // whenever the width isn't a multiple of the 8px step.
+    for (let x = 0; x <= w + 8; x += 8)
       ctx.lineTo(x, ridgeY(x, w, h))
 
     ctx.lineTo(w, h)
@@ -338,7 +347,7 @@
     ctx.moveTo(0, h)
     ctx.lineTo(0, ridgeY(0, w, h) + 10)
 
-    for (let x = 0; x <= w; x += 8)
+    for (let x = 0; x <= w + 8; x += 8)
       ctx.lineTo(x, ridgeY(x, w, h) + 10)
 
     ctx.lineTo(w, h)

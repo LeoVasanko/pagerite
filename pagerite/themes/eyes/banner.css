@@ -4,9 +4,10 @@
    against the 13rem layout box and extends flat grass into any overflow
    a theme adds below (summer's cross-fade strip). */
 
-/* Opt out of the base parallax (scale overscan + --pry drift): scaling
-   from the bottom edge would crop the top of the composed scene — pushing
-   the critter out of view — and this canvas animates on its own. */
-#page-banner>#eyes {
+/* Opt out of the base parallax (scale overscan + --pry drift): it lands on
+   the design wrapper the backend puts around banner.html, and scaling from
+   the bottom edge would crop the top of the composed scene — pushing the
+   critter out of view — while this canvas animates on its own. */
+#page-banner>[data-design="eyes"] {
   transform: none;
 }
