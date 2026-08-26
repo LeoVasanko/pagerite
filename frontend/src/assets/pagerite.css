@@ -65,6 +65,11 @@
   box-sizing: border-box;
 }
 
+::selection {
+  background: color-mix(var(--accent) 30%, transparent);
+  color: inherit;
+}
+
 /* Links never underline — including SVG link text, which the UA stylesheet
    underlines by default. */
 a {

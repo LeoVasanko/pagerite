@@ -32,11 +32,6 @@
   }
 }
 
-::selection {
-  background: var(--accent);
-  color: #fff;
-}
-
 /* Genuinely large solid brand with a soft blue shadow overlapping the
    artwork — conservative, but unmissable. */
 #brand {

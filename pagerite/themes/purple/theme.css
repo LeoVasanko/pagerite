@@ -19,11 +19,6 @@
   --font-heading: var(--font-fraunces);
 }
 
-::selection {
-  background: var(--accent2);
-  color: #fff;
-}
-
 /* Oversized tilted brand in the sky→violet gradient. */
 #brand {
   font-size: clamp(3.2rem, 9vw, 7.5rem);

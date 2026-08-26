@@ -63,7 +63,6 @@
 
 ::selection {
   background: var(--accent);
-  color: var(--ink);
 }
 
 /* Oversized outlined brand, spilling off the banner edge: orange stroke,
