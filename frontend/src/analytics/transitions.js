@@ -11,8 +11,9 @@
  * directions into straight connections (middle width = total
  * count; connectors flare into the node pills at both ends and wrap
  * around their backs, surrounding them; the pills are drawn on top). Connection width grows
- * logarithmically with the count (a single count renders as a ~1 px
- * line, uncapped growth); connections carrying less than 1% of the total
+ * logarithmically with the daily hit rate (base-2 log, one hit/day
+ * renders zero width, each doubling adds a fixed step, uncapped);
+ * connections carrying less than 1% of the total
  * traffic are pruned, which naturally keeps the graph under ~100
  * connections. Animated beads flow along every edge in each direction,
  * emitted at time intervals inversely proportional (linear) to the
@@ -122,26 +123,28 @@ const pillTangent = (s, margin = 0) => {
   return [(x2 - x1) / m, (y2 - y1) / m]
 }
 
-// Edge width (half-width of the thin middle) grows logarithmically with
-// the count. The constants are scaled down by ~10× so busy ranges (day,
-// year) do not overwhelm the graph with fat connectors. Connections whose
-// thin middle would render below MIN_WMID are culled entirely: fainter
-// strands are practically invisible and only their wide end flares would
-// show. Connections carrying less than PRUNE_FRACTION of the total traffic
-// are likewise not drawn (this also keeps the graph under ~100 connections).
-const WMID_MIN = 0.2
-const WIDTH_GROWTH = 0.15
+// Edge width: half-width = WIDTH_GROWTH * log2(daily / DAILY_REF),
+// where `daily` is the connection's hit rate in hits/day (callers scale
+// raw counts by DAY / range). DAILY_REF hits/day renders zero width;
+// WIDTH_GROWTH is the half-width added per doubling of the rate.
+// Connections whose thin middle would render below MIN_WMID are culled
+// entirely (fainter strands are practically invisible), as are those
+// carrying less than PRUNE_FRACTION of the total traffic (this also
+// keeps the graph under ~100 connections).
+const WIDTH_GROWTH = 1.4 // half-width px per doubling of the daily rate
+const DAILY_REF = 0.8 // hits/day at which the width is zero
 const PRUNE_FRACTION = 0.01
 // ~0.8 px full width at natural size (1 viewBox unit = 1 px).
 const MIN_WMID = 0.4
 
-// Beads: each edge direction emits beads at count * BEAD_RATE beads per
-// second (linear in the count). The rate is reduced ~10× across all time
-// scales to keep the animation lightweight. The component simulates every
-// bead independently in JS with a constant traversal time per edge (speed
-// relative to span length), with no limit on beads in flight.
+// Beads: each edge direction emits beads at dailyRate * BEAD_RATE beads
+// per second (linear in the daily hit rate). The rate is much reduced
+// from real time to keep the animation lightweight. The component
+// simulates every bead independently in JS with a constant traversal
+// time per edge (speed relative to span length), with no limit on beads
+// in flight.
 export const BEAD_R = 3.2
-const BEAD_RATE = 0.012 // beads per second per recorded transition
+const BEAD_RATE = 0.0084 // beads per second per hit/day
 const FLOW_OFFSET = 3 // lane offset to the right of the travel direction
 
 const MAX_EXT_IN = 8 // referer nodes in the top row
@@ -262,7 +265,7 @@ function buildReadMinutes(visits) {
   for (const v of visits || []) {
     for (const [path, sec] of Object.entries(v.read || {})) {
       if (sec >= MIN_READ_SECONDS) {
-        ;(times[path] || (times[path] = [])).push(sec)
+        ; (times[path] || (times[path] = [])).push(sec)
       }
     }
   }
@@ -621,12 +624,12 @@ function buildRibbon(a, b, ab, ba, wMid, external = false) {
  * to inside the target node (beads render under the node pills, so
  * they emerge from and vanish beneath the nodes rather than popping in
  * at the surround), plus the emission interval (seconds between beads,
- * inverse of count * BEAD_RATE). Each segment is offset to the
+ * inverse of the daily hit rate * BEAD_RATE). Each segment is offset to the
  * right-hand side of its travel direction, so opposing flows on the same
  * edge run on parallel lanes instead of colliding. The component turns
  * these into independently simulated beads.
  */
-function buildFlows(a, b, ab, ba, visualScale = 1) {
+function buildFlows(a, b, ab, ba, dayScale = 1) {
   const len = Math.hypot(b.x - a.x, b.y - a.y) || 1
   const ux = (b.x - a.x) / len
   const uy = (b.y - a.y) / len
@@ -649,7 +652,7 @@ function buildFlows(a, b, ab, ba, visualScale = 1) {
       x2: a.x + toT * ux + s * rx,
       y2: a.y + toT * uy + s * ry,
       len: span,
-      interval: 1 / (count * BEAD_RATE * visualScale),
+      interval: 1 / (count * BEAD_RATE * dayScale),
     }
   }
   const flows = []
@@ -661,14 +664,14 @@ function buildFlows(a, b, ab, ba, visualScale = 1) {
 }
 
 /**
- * Half-width for a connection middle: logarithmic in the count, anchored
- * at WMID_MIN, uncapped. Absolute on purpose — cool routes stay visible
- * regardless of how hot the hottest connection is. Callers cull results
- * below MIN_WMID.
+ * Half-width for a connection middle: base-2 logarithmic in the daily
+ * hit rate, zero at DAILY_REF hits/day, uncapped. Absolute on purpose —
+ * cool routes stay visible regardless of how hot the hottest connection
+ * is. Callers cull results below MIN_WMID.
  */
-const scaledWidth = (count) => {
-  if (count <= 0) return 0
-  return WMID_MIN + WIDTH_GROWTH * Math.log1p(count - 1)
+const scaledWidth = (daily) => {
+  if (daily <= 0) return 0
+  return WIDTH_GROWTH * Math.log2(daily / DAILY_REF)
 }
 
 /**
@@ -676,7 +679,7 @@ const scaledWidth = (count) => {
  * pair. Pairs carrying less than PRUNE_FRACTION of the total internal
  * traffic are pruned (this naturally bounds the graph to ~100 edges).
  */
-function buildInternalEdges(pairs, byPath, visualScale = 1) {
+function buildInternalEdges(pairs, byPath, dayScale = 1) {
   let total = 0
   for (const [, [ab, ba]] of pairs) total += ab + ba
   const minCount = total * PRUNE_FRACTION
@@ -689,10 +692,10 @@ function buildInternalEdges(pairs, byPath, visualScale = 1) {
     const a = byPath.get(pf)
     const b = byPath.get(pt)
     if (a.hidden || b.hidden) continue // unplaced index pages are omitted
-    const wMid = scaledWidth((ab + ba) * visualScale)
+    const wMid = scaledWidth((ab + ba) * dayScale)
     if (wMid < MIN_WMID) continue
     edges.push(buildRibbon(a, b, ab, ba, wMid))
-    flows.push(...buildFlows(a, b, ab, ba, visualScale))
+    flows.push(...buildFlows(a, b, ab, ba, dayScale))
   }
   return { edges, flows }
 }
@@ -768,7 +771,7 @@ function collectSourcePairs(visits) {
  * Widths and pruning use the same log scale and traffic-share rule as
  * internal connections.
  */
-function buildExternal({ sources, exits }, byPath, innerBounds, visualScale = 1) {
+function buildExternal({ sources, exits }, byPath, innerBounds, dayScale = 1) {
   const extNodes = []
   const edges = []
   const flows = []
@@ -780,7 +783,7 @@ function buildExternal({ sources, exits }, byPath, innerBounds, visualScale = 1)
   const liveExits = exits.filter((p) => byPath.has(p.page))
   if (!liveSources.length && !liveExits.length) return { extNodes, edges, flows }
 
-  const width = (count) => scaledWidth(count * visualScale)
+  const width = (count) => scaledWidth(count * dayScale)
 
   // Incoming: one source node per identified source, in a row centered
   // above the map, with an edge to each page that source led to. A source
@@ -826,7 +829,7 @@ function buildExternal({ sources, exits }, byPath, innerBounds, visualScale = 1)
         const wMid = width(p.in)
         if (wMid < MIN_WMID) continue
         edges.push(buildRibbon(xn, page, p.in, 0, wMid, true))
-        flows.push(...buildFlows(xn, page, p.in, 0, visualScale))
+        flows.push(...buildFlows(xn, page, p.in, 0, dayScale))
       }
     })
   }
@@ -871,7 +874,7 @@ function buildExternal({ sources, exits }, byPath, innerBounds, visualScale = 1)
         const wMid = width(p.out)
         if (wMid < MIN_WMID) continue
         edges.push(buildRibbon(page, xn, p.out, 0, wMid, true))
-        flows.push(...buildFlows(page, xn, p.out, 0, visualScale))
+        flows.push(...buildFlows(page, xn, p.out, 0, dayScale))
       }
     })
   }
@@ -883,9 +886,10 @@ function buildExternal({ sources, exits }, byPath, innerBounds, visualScale = 1)
  * Build the transition map model.
  * Returns { nodes, edges, flows, extNodes, arcs, bounds } or null when
  * there is nothing to show. `arcs` holds the branch curves; `nodes` only
- * contains placed (visible) nodes.
+ * contains placed (visible) nodes. `dayScale` converts raw counts to a
+ * daily hit rate (DAY / range ms) for edge widths and bead rates.
  */
-export function buildTransitionGraph(data, pageTree, visits = [], visualScale = 1) {
+export function buildTransitionGraph(data, pageTree, visits = [], dayScale = 1) {
   const internal = collectInternalTransitions(data?.transitions)
   const sources = collectSourcePairs(visits)
   const exits = collectExitPairs(data?.transitions)
@@ -901,7 +905,7 @@ export function buildTransitionGraph(data, pageTree, visits = [], visualScale = 
   const { arcs, arcLeft } = layoutGroups(root)
   const placed = nodes.filter((n) => !n.hidden)
   const pairs = aggregatePairs(internal)
-  const { edges, flows } = buildInternalEdges(pairs, byPath, visualScale)
+  const { edges, flows } = buildInternalEdges(pairs, byPath, dayScale)
 
   // Tight bounding box of the placed page nodes, extended to cover the
   // branch curves running left of the pills; external nodes extend it.
@@ -920,7 +924,7 @@ export function buildTransitionGraph(data, pageTree, visits = [], visualScale = 
     y1: Math.max(...ys) + MY,
   }
 
-  const ext = buildExternal({ sources, exits }, byPath, bounds, visualScale)
+  const ext = buildExternal({ sources, exits }, byPath, bounds, dayScale)
   for (const xn of ext.extNodes) {
     bounds.x0 = Math.min(bounds.x0, xn.x - MX)
     bounds.y0 = Math.min(bounds.y0, xn.y - MY)

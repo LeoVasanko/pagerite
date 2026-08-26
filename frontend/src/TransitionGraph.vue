@@ -7,7 +7,7 @@
  * so the visual scale can normalize against a one-week reference.
  */
 import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
-import { DAY, WEEK } from './analytics/time.js'
+import { DAY } from './analytics/time.js'
 import { formatCount } from './analytics/format.js'
 import {
   TNODE_W,
@@ -22,9 +22,10 @@ const props = defineProps({
   pageTree: { type: Array, default: null },
 })
 
-const visualScale = computed(() => {
+const dayScale = computed(() => {
   const { t0, t1 } = props.window
-  if (t0 != null && t1 != null) return WEEK / (t1 - t0)
+  // Convert raw counts to a daily hit rate (hits/day).
+  if (t0 != null && t1 != null) return DAY / (t1 - t0)
   // 'all': scale by the actual data span, but never less than the 30-day
   // minimum the plot enforces, so sparse young data is not over-amplified.
   const times = new Set()
@@ -34,12 +35,12 @@ const visualScale = computed(() => {
   const arr = [...times]
   if (arr.length < 2) return 1
   const span = Math.max(...arr) - Math.min(...arr)
-  return WEEK / Math.max(span, 30 * DAY)
+  return DAY / Math.max(span, 30 * DAY)
 })
 
 const graph = computed(() =>
   props.data
-    ? buildTransitionGraph(props.data, props.pageTree, props.data.visits || [], visualScale.value)
+    ? buildTransitionGraph(props.data, props.pageTree, props.data.visits || [], dayScale.value)
     : null,
 )
 
@@ -58,7 +59,7 @@ const live = [] // { e, p } — beads in flight, p = progress 0..1
 let lastTick = 0
 
 const MAX_BEAD_RATE = 120 // upper bound on total beads per second
-const TRAVERSAL_S = 1.5 // seconds to cross any segment, end to end
+const TRAVERSAL_S = 0.4 // seconds to cross any segment, end to end
 
 const syncBeads = (flows) => {
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches

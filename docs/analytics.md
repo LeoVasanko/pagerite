@@ -276,8 +276,8 @@ its end, disappearing under later pills when long — so the lanes reflect
 the path
 structure even where index pages are omitted — opposite transition
 directions joined into organic
-tapered connections whose middle width grows logarithmically with the
-count (uncapped), connections
+tapered connections whose middle width grows logarithmically (base 2)
+with the daily hit rate (uncapped), connections
 carrying less than 1% of the total traffic
 pruned, as are those whose thin middle would render below ~0.8 px —
 fainter strands are invisible and only their wide end flares would show; beads are simulated one by one in JS (requestAnimationFrame) and
