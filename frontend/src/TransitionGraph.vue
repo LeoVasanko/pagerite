@@ -8,7 +8,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
 import { DAY } from './analytics/time.js'
-import { formatCount } from './analytics/format.js'
+import { formatCount, formatReadTime } from './analytics/format.js'
 import {
   TNODE_W,
   TNODE_H,
@@ -151,7 +151,7 @@ onBeforeUnmount(() => cancelAnimationFrame(rafId))
 const fitsPill = (label, fontPx = 19) => label.length * 0.52 * fontPx <= TNODE_W - 16
 
 const countLabel = (n) =>
-  n.readMin ? `${formatCount(n.views)}×${n.readMin}m` : formatCount(n.views)
+  n.readSec ? `${formatCount(n.views)}×${formatReadTime(n.readSec)}` : formatCount(n.views)
 </script>
 
 <template>

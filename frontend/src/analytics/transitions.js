@@ -259,8 +259,8 @@ function sortByNav(root, navOrder) {
   walk(root)
 }
 
-/** Compute median reading time per article in whole minutes. */
-function buildReadMinutes(visits) {
+/** Compute median reading time per article in seconds. */
+function buildReadSeconds(visits) {
   const times = {}
   for (const v of visits || []) {
     for (const [path, sec] of Object.entries(v.read || {})) {
@@ -269,19 +269,19 @@ function buildReadMinutes(visits) {
       }
     }
   }
-  const minutes = {}
+  const seconds = {}
   for (const [path, arr] of Object.entries(times)) {
     arr.sort((a, b) => a - b)
     const mid = Math.floor(arr.length / 2)
     const median =
       arr.length % 2 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2
-    minutes[path] = Math.max(1, Math.round(median / 60))
+    seconds[path] = Math.round(median)
   }
-  return minutes
+  return seconds
 }
 
 /** Compute view counts, labels and hidden flags for each node. */
-function annotateNodes(nodes, viewsData, titles, readMinutes) {
+function annotateNodes(nodes, viewsData, titles, readSeconds) {
   const viewCount = (p) => {
     let n = 0
     for (const c of Object.values(viewsData?.[p] || {})) n += c
@@ -290,7 +290,7 @@ function annotateNodes(nodes, viewsData, titles, readMinutes) {
 
   for (const n of nodes) {
     n.views = viewCount(n.path)
-    n.readMin = readMinutes[n.path] || 0
+    n.readSec = readSeconds[n.path] || 0
     // Article title inside the pill (clipped at the pill border on
     // render), slug as fallback for pages missing from the site tree.
     n.label = titles.get(n.path) || (n.path === '/' ? '🏠︎' : n.path.split('/').pop())
@@ -895,13 +895,13 @@ export function buildTransitionGraph(data, pageTree, visits = [], dayScale = 1) 
   const exits = collectExitPairs(data?.transitions)
   const navOrder = buildNavigationOrder(pageTree)
   const titles = buildTitleMap(pageTree)
-  const readMinutes = buildReadMinutes(visits)
+  const readSeconds = buildReadSeconds(visits)
 
   if (!internal.length && !navOrder.size) return null
 
   const { nodes, byPath, root } = buildNodeTree(internal, navOrder)
   sortByNav(root, navOrder)
-  annotateNodes(nodes, data?.views, titles, readMinutes)
+  annotateNodes(nodes, data?.views, titles, readSeconds)
   const { arcs, arcLeft } = layoutGroups(root)
   const placed = nodes.filter((n) => !n.hidden)
   const pairs = aggregatePairs(internal)
