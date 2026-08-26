@@ -20,9 +20,12 @@ Struct dumped to disk — separate from the kanta content database, path from
 ## What is collected
 
 The client (`pagerite.js`) POSTs fire-and-forget pings to `/_a` with
-`{fr, to}` (`fr` = source path):
+`fr`, `to`, `hide` and `read` as query parameters (`fr` = source path;
+falsy values are omitted):
 
-- **Initial page load**: `to` is the loaded path. This ping is what starts
+- **Initial page load**: only `to` — the loaded path — is sent, never `fr`
+  (an `fr` equal to `to` would log a bogus self-transition when a session
+  already exists, e.g. a second tab). This ping is what starts
   the visit and counts the entry page view — the document GET alone records
   nothing, so bots and admin browsing never register. JS-running crawlers
   (Googlebot, GoogleOther, Applebot, ...) do ping, but their User-Agent
@@ -34,7 +37,8 @@ The client (`pagerite.js`) POSTs fire-and-forget pings to `/_a` with
   abuse rules regardless. Reloads are not
   visits: the ping is skipped (PerformanceNavigationTiming `reload`), so a
   refresh neither counts a second view nor logs a self-transition. The GET
-  handler stashes a cross-origin https `Referer` (origin part only) and any
+  handler stashes a cross-origin https `Referer` (origin part only —
+  unavailable to JS once the page has loaded) and any
   `utm_*` query parameters in in-memory IP tables, consumed by the ping that
   starts the visit; internal or absent referers never touch the referer table.
 - **Internal fetch-navigations**: `to` is the target path, sent only after

@@ -31,7 +31,14 @@ from xml.sax.saxutils import escape as xml_escape
 
 import blake3
 import msgspec
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import RedirectResponse, Response
 from fastapi_vue import Frontend
 from kanta import Kanta
@@ -802,17 +809,6 @@ def _schedule_analytics_broadcast() -> None:
     )
 
 
-class AnalyticsPing(BaseModel):
-    """Navigation ping from pagerite.js (see docs/analytics.md)."""
-
-    fr: str = ""
-    to: str | None = None
-    #: 1 from admin clients: scrub the session instead of recording it.
-    hide: int = 0
-    #: Active reading time on ``fr`` (ms), if any.
-    read: int = 0
-
-
 @app.get("/_a", response_model=None)
 async def analytics_page(request: Request) -> Response:
     """Render the analytics viewer as a normal site page at /_a.
@@ -831,21 +827,31 @@ async def analytics_page(request: Request) -> Response:
 
 
 @app.post("/_a", status_code=204)
-async def analytics_ping(ping: AnalyticsPing, request: Request) -> None:
-    """Record a navigation ping ({fr, to}); fire-and-forget, never fails.
+async def analytics_ping(
+    request: Request,
+    fr: str = Query(""),
+    to: str | None = Query(None),
+    hide: int = Query(0),
+    read: int = Query(0),
+) -> None:
+    """Record a navigation ping (?fr=&to=&hide=&read=); fire-and-forget.
+
+    The initial page-load ping carries only ``to``: the entry is attributed
+    to the referer/UTM tags stashed by the document GET (see _track_entry),
+    which JS cannot see once the page has loaded.
 
     The reverse-DNS and DB-IP geoip lookups happen in a background task so
     the response is never delayed by slow DNS or the first MMDB decompress.
     """
     ip = _client_ip(request)
     visit_index, flushed_clients = analytics_store.ping(
-        ping.fr,
-        ping.to,
+        fr,
+        to,
         ip,
         request.headers.get("user-agent", ""),
         request.headers.get("accept-language", ""),
-        hide=bool(ping.hide),
-        read=ping.read,
+        hide=bool(hide),
+        read=read,
     )
     if visit_index is not None:
         visit = analytics_store.data.visits[visit_index]

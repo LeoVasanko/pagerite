@@ -417,10 +417,12 @@ import "overlayscrollbars/overlayscrollbars.css";
   }
 
   // --- Analytics pings ---------------------------------------------------
-  // Fire-and-forget POST /_a {fr, to, read}: on the initial page load
-  // (starts the visit — the server counts nothing from the document GET
-  // alone), for internal fetch-navigations, for external https exits, and
-  // on window close. ``read`` is the active time (ms) spent on ``fr``.
+  // Fire-and-forget POSTs to /_a with the fields as query parameters (a
+  // beacon can carry no body, and query args show in server logs next to
+  // the document GET they refer to): on the initial page load (starts the
+  // visit — the server counts nothing from the document GET alone), for
+  // internal fetch-navigations, for external https exits, and on window
+  // close. ``read`` is the active time (ms) spent on ``fr``.
   // Reading time pauses after 1 minute of inactivity and resumes on the
   // next mouse/touch/scroll/keyboard event.
   // Excluded: back/forward (popstate never pings), everything while the
@@ -434,22 +436,30 @@ import "overlayscrollbars/overlayscrollbars.css";
   // records nothing and scrubs any session the same browser accumulated
   // before logging in, so admins never show up as visits or crawlers.
   // See docs/analytics.md.
-  function ping(to, fr = currentPath, read = 0) {
-    if (document.body.classList.contains("editing")) return;
-    if (to && to === "/_a") return;
-    const hide = ssoAvailable && isAdmin ? 1 : 0;
-    const body = JSON.stringify({
-      fr, to, hide,
-      read: Math.max(0, Math.round(read / 1000)),
-    });
+
+  // fetch wrapper: every key of ``params`` becomes a query arg on /_a
+  // (falsy values are omitted). Admins get hide=1. ``beacon`` uses
+  // sendBeacon when available, for unload-time pings.
+  function pingFetch(params, { beacon = false } = {}) {
+    const query = new URLSearchParams();
+    if (ssoAvailable && isAdmin) params = { ...params, hide: 1 };
+    for (const [key, value] of Object.entries(params)) {
+      if (value) query.set(key, value);
+    }
+    const url = `/_a?${query}`;
     try {
-      fetch("/_a", {
-        method: "POST",
-        keepalive: true,
-        headers: { "content-type": "application/json" },
-        body,
-      });
+      if (beacon && navigator.sendBeacon) {
+        navigator.sendBeacon(url);
+      } else {
+        fetch(url, { method: "POST", keepalive: true });
+      }
     } catch { /* analytics must never break navigation */ }
+  }
+
+  function ping({ to, fr = currentPath, read = 0, beacon = false } = {}) {
+    if (document.body.classList.contains("editing")) return;
+    if (to === "/_a") return;
+    pingFetch({ fr, to, read: Math.round(read / 1000) }, { beacon });
   }
 
   // Active reading time for the current page. The clock stops after 1 minute
@@ -495,24 +505,10 @@ import "overlayscrollbars/overlayscrollbars.css";
 
   function sendClosePing() {
     if (closePingedFor === currentPath) return;
-    const read = Math.max(0, Math.round(takeReadTime() / 1000));
-    if (read <= 0) return;
-    const hide = ssoAvailable && isAdmin ? 1 : 0;
-    const body = JSON.stringify({ fr: currentPath, hide, read });
-    const blob = new Blob([body], { type: "application/json" });
-    try {
-      if (navigator.sendBeacon) {
-        navigator.sendBeacon("/_a", blob);
-      } else {
-        fetch("/_a", {
-          method: "POST",
-          keepalive: true,
-          headers: { "content-type": "application/json" },
-          body,
-        });
-      }
-    } catch { /* analytics must never break navigation */ }
     closePingedFor = currentPath;
+    const read = takeReadTime();
+    if (Math.round(read / 1000) <= 0) return;
+    ping({ read, beacon: true });
   }
 
   for (const ev of ["mousemove", "mousedown", "touchstart", "touchmove", "scroll", "keydown"]) {
@@ -522,6 +518,10 @@ import "overlayscrollbars/overlayscrollbars.css";
 
   // The initial page load pings too — it is what starts the visit and
   // counts the entry page view (the document GET alone records nothing).
+  // It carries only ``to``: the server attributes the entry to the referer
+  // it saw on the document GET (unavailable to JS once loaded), and an
+  // ``fr`` equal to ``to`` would log a bogus self-transition when a
+  // session already exists (e.g. a second tab).
   // Sent once per load, after the auth probes so the admin gate applies;
   // the pageshow re-probe must not ping again. Reloads are not visits:
   // pinging them would double-count the view and log a self-transition.
@@ -531,7 +531,7 @@ import "overlayscrollbars/overlayscrollbars.css";
     entryPinged = true;
     const nav = performance.getEntriesByType?.("navigation")[0];
     if (nav ? nav.type === "reload" : performance.navigation?.type === 1) return;
-    ping(currentPath);
+    ping({ to: currentPath, fr: "" });
   }
 
   // --- Analytics page mount/unmount --------------------------------------
@@ -732,7 +732,7 @@ import "overlayscrollbars/overlayscrollbars.css";
       // different links to the same domain stay distinct in analytics.
       if (url.protocol === "https:") {
         closePingedFor = currentPath;
-        ping(url.href, currentPath, takeReadTime());
+        ping({ to: url.href, read: takeReadTime() });
       }
       return;
     }
@@ -748,7 +748,7 @@ import "overlayscrollbars/overlayscrollbars.css";
     load(url).then((ok) => {
       if (!ok) return;
       closePingedFor = null;
-      ping(url.pathname, from, takeReadTime());
+      ping({ to: url.pathname, fr: from, read: takeReadTime() });
       resetReadTime();
     });
   });
