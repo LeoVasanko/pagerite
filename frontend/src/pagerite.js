@@ -401,16 +401,25 @@ import "overlayscrollbars/overlayscrollbars.css";
   // themes for their own effects (e.g. the purple sun rising faster than
   // the drift). Event-driven only: perfectly still when the page is idle.
   if (!reduceMotion.matches) {
-    let ticking = false;
+    // rAF loop that eases the value toward the live scroll position. Reading
+    // scrollY every frame (rather than only on scroll events) also picks up
+    // the in-between positions of Chrome/macOS momentum scrolling, whose
+    // scroll events fire late and coarsely. The loop idles once settled.
+    let value = Math.min(scrollY * 0.1, 30);
+    let running = false;
     const drift = () => {
-      ticking = false;
-      document.documentElement.style.setProperty(
-        "--pry", `${Math.min(scrollY * 0.1, 30)}px`,
-      );
+      const target = Math.min(scrollY * 0.1, 30);
+      value += (target - value) * 0.12;
+      if (Math.abs(target - value) < 0.05) {
+        value = target;
+        running = false;
+      }
+      document.documentElement.style.setProperty("--pry", `${value}px`);
+      if (running) requestAnimationFrame(drift);
     };
     addEventListener("scroll", () => {
-      if (!ticking) {
-        ticking = true;
+      if (!running) {
+        running = true;
         requestAnimationFrame(drift);
       }
     }, { passive: true });

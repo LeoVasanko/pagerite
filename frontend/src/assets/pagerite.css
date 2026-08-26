@@ -73,6 +73,10 @@ a {
 
 html {
   scroll-behavior: smooth;
+  /* No rubber-band bounce past the page ends (macOS trackpads): the banner
+     parallax in --pry is driven by scrollY and overscroll would let the
+     artwork drift beyond its designed range. */
+  overscroll-behavior: none;
   /* Native-scrollbar fallback styling (JS off or before pagerite.js runs):
      thin, theme-muted thumb on a transparent track. With JS the scrollbars
      are replaced by OverlayScrollbars (see pagerite.js) — floating,
