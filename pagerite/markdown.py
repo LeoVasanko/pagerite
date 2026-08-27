@@ -474,10 +474,10 @@ def render(
 
 def _dateline(created: datetime, modified: datetime | None) -> str:
     """Dateline for the ``{dates}`` tag: "1 Jan 2026", plus
-    " – edited 3 Jan 2026" when the last edit came >= 24h after
+    " – edited 3 Jan 2026" when the last edit came >= 48h after
     publishing (quick fixes right after posting stay unmentioned)."""
     out = f'<time datetime="{created.isoformat()}">{created.day} {created:%b %Y}</time>'
-    if modified is not None and modified - created >= timedelta(hours=24):
+    if modified is not None and modified - created >= timedelta(hours=48):
         out += f' – edited <time datetime="{modified.isoformat()}">{modified.day} {modified:%b %Y}</time>'
     return f'<p class="dateline">{out}</p>'
 
