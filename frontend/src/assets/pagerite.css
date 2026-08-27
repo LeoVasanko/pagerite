@@ -594,6 +594,8 @@ article dd {
   pre,
   blockquote,
   table,
+  ul,
+  ol,
   dl,
   .admonition,
   .markdown-alert {
