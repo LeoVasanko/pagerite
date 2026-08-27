@@ -856,6 +856,22 @@ blockquote p + p {
   margin-bottom: 0;
 }
 
+/* A figure inside an aside spans the box to its borders (negative
+   margins matching the box's padding); the caption keeps the box's
+   padding for itself. Explicit-width images keep their shrink-wrap. */
+.aside>figure:not(:has(img[width])) {
+  width: auto;
+  margin: -0.6rem -0.9rem 1rem;
+}
+
+.aside>figure figcaption {
+  padding: 0.6rem 0.9rem 0;
+}
+
+.aside>figure:last-child figcaption {
+  padding-bottom: 0.6rem;
+}
+
 .margin {
   float: left;
   clear: left;
