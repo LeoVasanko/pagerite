@@ -276,14 +276,24 @@ body {
 }
 
 /* Long articles (.multicol comes from the backend render, based on
-   content length — code excluded) lift the 78rem cap and scrap the right
-   gutter: a 1fr left gutter (which holds the overlaying sidebar and any
-   margin-breakout boxes) and the article taking all the rest, out to the
-   right viewport edge. Columns are capped at two (see the
-   `columns: 30rem 2` rule below). The .wide breakout is re-anchored to
-   the left gutter below (the article is no longer viewport-centered). */
+   content length — code excluded) lift the 78rem cap: main takes the full
+   width and the article composes itself inside it — fluid, bounded text
+   lanes, centered, with the surplus left vacant (see the article layout
+   rules below). The left track — main always sits in column 2 — collapses
+   to zero when the page has no sidebar; the sidebar then simply overlays
+   the vacant zone, as it does on single-column pages. */
 body:has(.multicol) #content {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 4fr);
+  grid-template-columns: 0 minmax(0, 1fr);
+}
+
+/* Only when the vacant zone cannot hold the sidebar does it get its own
+   12rem track — the same compromise single-column pages make below
+   102rem. Above that, a sidebar's presence changes nothing about the
+   article. */
+@media (max-width: 110rem) {
+  body:has(#sidebar):has(.multicol):not(.editing) #content {
+    grid-template-columns: 12rem minmax(0, 1fr);
+  }
 }
 
 body.editing #content {
@@ -421,6 +431,11 @@ main {
   /* No top padding: a leading wide image sits flush under the banner, and
      text-first pages get their spacing from the h1's top margin instead. */
   padding: 0 1.25rem 3rem;
+  /* The layout container for the article composition: the multicol stage
+     (lane count), the margin fall and the .wide bleed respond to the
+     actual available width here — editor inset included — via container
+     queries and cqw units. */
+  container-type: inline-size;
 }
 
 article h1,
@@ -562,19 +577,100 @@ article dd {
   hyphens: auto;
 }
 
-/* Multi-column reading, but only for long articles: the backend render
-   splits the body into .colseg segments (separated by full-width h2s and
-   .wide elements), tags segments with enough text as .cols (a ::: nocols
-   container opts its section out) and flags the article .multicol based
-   on content length — code blocks excluded. Never more than two columns:
-   `columns: 30rem 2` fits one or two columns of at least 30rem into the
-   article's current width — since .multicol also uncaps the article
-   width (see #content above), a wider window widens the two columns
-   instead of adding more. */
-.multicol .colseg.cols {
-  columns: 30rem 2;
-  column-gap: 3.5rem;
-  column-rule: 1px solid var(--line);
+/* The long-article composition (.multicol): a fluid but bounded text
+   lane with a 16rem side zone at the article's left, centered in main —
+   surplus width becomes vacant space, never endless text. (The backend
+   render splits the body into .colseg segments separated by full-width
+   h2s and .wide elements, tags text-heavy segments .cols — a ::: nocols
+   container opts its section out — and flags the article .multicol; CSS
+   owns the geometry.) Technical content wants a wide lane: up to 42rem
+   single, or two fluid lanes (36rem minimum, never more than two) once
+   they fit beside the zone, capped at 102rem total. The zone — the
+   region the nav sidebar overlays — is a margin indent on the lane
+   content; margin boxes float into it, and the text never moves. */
+article.multicol {
+  margin-inline: auto;
+  max-width: 58rem; /* 42rem lane + 16rem zone */
+}
+
+@container (min-width: 45rem) {
+  /* The side zone (not on phones): lane content indents 16rem; margin
+     boxes ({.margin} / ::: margin blocks, ::: aside, {.margin} figures)
+     float at the article's left edge — the same region the nav sidebar
+     overlays. Scoped to direct .body children (the backend render keeps
+     margin blocks out of the column segments); nested ones keep the
+     in-column float fallback. */
+  .multicol .body>.colseg,
+  .multicol .body>h1,
+  .multicol .body>h2,
+  article.multicol>h1 {
+    margin-left: 16rem;
+  }
+
+  .multicol .body>.margin,
+  .multicol .body>.aside,
+  .multicol .body>figure:has(.margin) {
+    float: left;
+    clear: left;
+    width: 14rem;
+    max-width: none;
+    margin: 0.3rem 2rem 1rem 0;
+  }
+
+  /* Wide separators start below any margin box — their bleed must not
+     wrap around it. */
+  .multicol .body>figure:has(.wide),
+  .multicol .body>div.wide,
+  .multicol .body>pre.wide {
+    clear: left;
+  }
+}
+
+@container (min-width: 96rem) {
+  article.multicol {
+    max-width: 102rem;
+  }
+
+  /* Two fluid lanes (36rem minimum) beside the zone, up to the 102rem
+     cap — wider windows just add vacant space. */
+  .multicol .colseg.cols {
+    columns: 36rem 2;
+    column-gap: 3.5rem;
+    column-rule: 1px solid var(--line);
+  }
+}
+
+/* With a sidebar, below 110rem the sidebar gets its own 12rem track (see
+   #content). The track IS the left lane then: no in-article zone, the
+   text lane runs fluid (up to 86rem), and margin boxes fall all the way
+   left into the track — sliding under the translucent sticky nav, which
+   only ever occupies its top. (The track never exists once the container
+   reaches 96rem, so the two-lane rules above never meet it. Not below
+   48rem: there the sidebar becomes a link strip above the article and
+   there is no track to fall into.) */
+@media (min-width: 48rem) and (max-width: 110rem) {
+  body:has(#sidebar):has(.multicol):not(.editing) article.multicol {
+    max-width: 86rem;
+  }
+
+  body:has(#sidebar):has(.multicol):not(.editing) .multicol .body>.colseg,
+  body:has(#sidebar):has(.multicol):not(.editing) .multicol .body>h1,
+  body:has(#sidebar):has(.multicol):not(.editing) .multicol .body>h2,
+  body:has(#sidebar):has(.multicol):not(.editing) article.multicol>h1 {
+    margin-left: 0;
+  }
+
+  body:has(#sidebar):has(.multicol):not(.editing) .multicol .body>.margin,
+  body:has(#sidebar):has(.multicol):not(.editing) .multicol .body>.aside,
+  body:has(#sidebar):has(.multicol):not(.editing) .multicol .body>figure:has(.margin) {
+    float: left;
+    clear: left;
+    width: 12rem;
+    max-width: none;
+    /* From the text's left edge to the page's left edge: half the
+       centering difference plus the track and main's padding. */
+    margin: 0.3rem 0 1rem calc(50% - 50cqw - 13.25rem);
+  }
 }
 
 /* A shrink-wrapped figure (explicit image width) centers in the plain
@@ -735,18 +831,19 @@ blockquote p + p {
 }
 
 /* Side boxes: ::: aside is a muted floated box (consecutive asides stack
-   via clear: right); {.margin} / ::: margin is a plainer margin note, and
-   figures take {.margin} like {.left}. All of them drop into the left
-   margin when the layout has room for it (the breakout rules live with
-   the figure rules below); without room they stay in-column floats —
-   asides on the right, margin boxes on the left. Headings already clear
+   via clear: left); {.margin} / ::: margin is a plainer margin note, and
+   figures take {.margin} like {.left}. On multicol pages they float in
+   the composition's left side zone — or in the sidebar's track when the
+   layout reserves one (see the article section); on wide single-column
+   pages they lean into the left gutter (with the figure rules below);
+   otherwise they stay in-column left floats. Headings already clear
    floats, so boxes never bleed into the next section. */
 .aside {
-  float: right;
-  clear: right;
+  float: left;
+  clear: left;
   width: 30%;
   max-width: 20rem;
-  margin: 0.3rem 0 1rem 1.2rem;
+  margin: 0.3rem 1.2rem 1rem 0;
   padding: 0.6rem 0.9rem;
   font-size: 0.9rem;
   color: var(--muted);
@@ -930,8 +1027,8 @@ figure:has(img[width]) {
   width: fit-content;
 }
 
-/* {.margin} figures float left like {.left} ones — until the margin
-   breakout below pulls them into the left gutter. */
+/* {.margin} figures float left like {.left} ones — until they fall into
+   the side zone (see the composition rules up in the article section). */
 figure:has(.margin) {
   float: left;
   width: 30%;
@@ -939,35 +1036,14 @@ figure:has(.margin) {
   margin: 0.3rem 1em 1rem 0;
 }
 
-/* The left-margin breakout: margin boxes ({.margin} / ::: margin blocks,
-   ::: aside, {.margin} figures) leave the text column for the left
-   gutter, hugging the article's left edge (a 12rem box on a 13.25rem
-   pull: the gutter plus main's padding). The sticky sidebar shares the
-   gutter and slides over them translucently — the same overlap full-bleed
-   .wide images get. Scoped to direct .body children: the backend render
-   keeps breakout blocks out of the column segments, and nested ones keep
-   the in-column float fallback. Room exists once the single-column
-   layout's symmetric gutters fit the box (≥104rem), and on multicol
-   pages whose 1fr left gutter fits it (≥65rem) — but never while editing
-   (the docked panel owns the left edge), and not below 102rem with a
-   sidebar (the fixed 12rem sidebar track, see #content, leaves no free
-   gutter there). */
+/* Wide single-column pages: margin boxes lean into the vacant left
+   gutter instead (below 104rem the gutter cannot hold the box, and while
+   editing the docked panel reshapes the gutters — in both they stay
+   plain floats). */
 @media (min-width: 104rem) {
-  body:not(.editing) .body>.margin,
-  body:not(.editing) .body>.aside,
-  body:not(.editing) .body>figure:has(.margin) {
-    float: left;
-    clear: left;
-    width: 12rem;
-    max-width: none;
-    margin: 0.3rem 0 1rem -13.25rem;
-  }
-}
-
-@media (min-width: 65rem) {
-  body:not(.editing):has(.multicol):not(:has(#sidebar)) .body>.margin,
-  body:not(.editing):has(.multicol):not(:has(#sidebar)) .body>.aside,
-  body:not(.editing):has(.multicol):not(:has(#sidebar)) .body>figure:has(.margin) {
+  body:not(.editing):not(:has(.multicol)) .body>.margin,
+  body:not(.editing):not(:has(.multicol)) .body>.aside,
+  body:not(.editing):not(:has(.multicol)) .body>figure:has(.margin) {
     float: left;
     clear: left;
     width: 12rem;
@@ -1004,42 +1080,53 @@ pre.wide {
   border-radius: 0;
 }
 
-/* .wide on multicol pages: the article is not viewport-centered (no right
-   gutter), so the bleed anchors at the left gutter — the 1fr share of the
-   1fr + 4fr grid, i.e. 20vw — plus main's padding, and spans on to the
-   right viewport edge. */
-body:has(.multicol) figure:has(.wide),
-body:has(.multicol) pre.wide {
-  margin-inline: calc(-20vw - 1.25rem) 0;
-}
-
 /* Editing: shrink the bleed to the space right of the docked editor. The
    window keeps its overlay scrollbars while editing, so — unlike a classic
-   scrollbar — they take no layout space and the vw math stays exact. */
+   scrollbar — they take no layout space and the vw math stays exact.
+   Multicol pages measure the bleed from main instead (cqw rules below),
+   which insets for the editor automatically. */
 body.editing figure:has(.wide),
 body.editing pre.wide {
   width: calc(100vw - var(--editor-w));
   margin-inline: calc(50% - (100vw - var(--editor-w)) / 2);
 }
 
-/* Editing + multicol: the left gutter is 1/5 of the space right of the
-   editor, and the bleed also crosses main's 1.25rem left padding. */
-body.editing:has(.multicol) figure:has(.wide),
-body.editing:has(.multicol) pre.wide {
-  margin-inline: calc((100vw - var(--editor-w)) / -5 - 1.25rem) 0;
+/* Narrow single-column pages with a sidebar: below 102rem the symmetric
+   gutters can no longer both hold the 12rem sidebar, so #content reserves
+   it with a fixed left track (see the matching media query below) and the
+   article always starts at 12rem (+ main's 1.25rem padding) — the bleed
+   margin is a plain constant. Scoped by :has(#sidebar) since the sidebar
+   element is omitted entirely on pages without sub-navigation, and
+   excluded while editing, where the editing rules above apply instead.
+   (Multicol pages use the same fixed track below 110rem — their rules
+   are below.) */
+@media (max-width: 102rem) {
+  body:has(#sidebar):not(.editing):not(:has(.multicol)) figure:has(.wide),
+  body:has(#sidebar):not(.editing):not(:has(.multicol)) pre.wide {
+    margin-inline: -13.25rem 0;
+  }
 }
 
-/* Narrow windows with a sidebar: below 102rem the symmetric gutters can no
-   longer both hold the 12rem sidebar, so #content reserves it with a fixed
-   left track (see the matching media query below) and the article always
-   starts at 12rem (+ main's 1.25rem padding) — the bleed margin is a plain
-   constant. Scoped by :has(#sidebar) since the sidebar element is omitted
-   entirely on pages without sub-navigation, and excluded while editing,
-   where the editing rules above apply instead. */
-@media (max-width: 102rem) {
-  body:has(#sidebar):not(.editing) figure:has(.wide),
-  body:has(#sidebar):not(.editing) pre.wide {
-    margin-inline: -13.25rem 0;
+/* .wide on multicol pages: the same edge-to-edge bleed, but measured from
+   main (the container) instead of the viewport — cqw includes the editor
+   inset automatically, so no editing override is needed. The 2.5rem
+   covers main's side padding. */
+body:has(.multicol) figure:has(.wide),
+body:has(.multicol) div.wide,
+body:has(.multicol) pre.wide {
+  width: calc(100cqw + 2.5rem);
+  margin-inline: calc(50% - 50cqw - 1.25rem);
+}
+
+/* Multicol with a sidebar track (≤110rem, see #content): main starts
+   12rem in, so the bleed extends left past the track to the true viewport
+   edge — sliding under the translucent sidebar. */
+@media (max-width: 110rem) {
+  body:has(#sidebar):has(.multicol):not(.editing) figure:has(.wide),
+  body:has(#sidebar):has(.multicol):not(.editing) div.wide,
+  body:has(#sidebar):has(.multicol):not(.editing) pre.wide {
+    width: calc(100cqw + 14.5rem);
+    margin-inline: calc(50% - 50cqw - 13.25rem) 0;
   }
 }
 
@@ -1076,30 +1163,23 @@ article h2 {
 
 /* Narrow windows with a sidebar: below 102rem the symmetric gutters can no
    longer both hold the 12rem sidebar, so reserve its space with a fixed
-   left track instead of letting it overlap the article. The article then
-   always starts at 12rem (+ main's 1.25rem padding), which the matching
-   .wide breakout rule in the images section relies on. Scoped by
-   :has(#sidebar) since the sidebar element is omitted entirely on pages
-   without sub-navigation. */
+   left track instead of letting it overlap the article (multicol pages use
+   this same track at every width — see the #content rules above). The
+   article then always starts at 12rem (+ main's 1.25rem padding), which
+   the matching .wide breakout rule in the images section relies on.
+   Scoped by :has(#sidebar) since the sidebar element is omitted entirely
+   on pages without sub-navigation. */
 @media (max-width: 102rem) {
   body:has(#sidebar):not(.editing) #content {
     grid-template-columns: 12rem minmax(0, 78rem) minmax(0, 1fr);
-  }
-
-  /* Long articles stay fluid here too: same 12rem reservation for the
-     sidebar, then the article takes everything to the right viewport
-     edge. The article's left edge stays at 12rem either way, so the
-     constant .wide breakout margin remains correct. */
-  body:has(#sidebar):has(.multicol):not(.editing) #content {
-    grid-template-columns: 12rem minmax(0, 1fr);
   }
 }
 
 /* Phones and other narrow viewports: single-column layout with the
    sidebar lifted above the article as a wrapping link strip, and no
-   floated figures — .left/.right/.margin fall back to plain centered
-   figures (explicit img widths still shrink-wrap), while .wide keeps its
-   full viewport bleed. */
+   floats at all — .left/.right/.margin figures fall back to plain
+   centered figures (explicit img widths still shrink-wrap), margin boxes
+   go full width, while .wide keeps its full viewport bleed. */
 @media (max-width: 48rem) {
 
   /* Nav type shrinks fluidly as space runs out. The nav font-size is
@@ -1172,17 +1252,27 @@ article h2 {
     margin: 0 auto 1.5rem;
   }
 
+  /* Margin boxes go full width too — no room for side floats on a
+     phone. */
+  .aside,
+  .margin {
+    float: none;
+    width: auto;
+    max-width: none;
+    margin: 0 0 1rem;
+  }
+
   /* An explicit img width still shrink-wraps the figure (redeclared: this
      block comes after the desktop rule at equal specificity). */
   figure:has(img[width]) {
     width: fit-content;
   }
 
-  /* The 102rem sidebar/multicol .wide margins assume a left sidebar
-     column; with the sidebar on top the article is viewport-wide and the
-     plain centered bleed applies again. */
-  body:has(#sidebar):not(.editing) figure:has(.wide),
-  body:has(.multicol) figure:has(.wide) {
+  /* The single-column sidebar .wide margins assume a left sidebar column;
+     with the sidebar on top the article is viewport-wide and the plain
+     centered bleed applies again. (Multicol pages need no override: their
+     cqw bleed is exact at any width.) */
+  body:has(#sidebar):not(.editing):not(:has(.multicol)) figure:has(.wide) {
     margin-inline: calc(50% - 50vw);
   }
 }

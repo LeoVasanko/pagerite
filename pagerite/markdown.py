@@ -11,10 +11,10 @@ same callout styling). ``::: name`` opens a generic container rendered
 as ``<div class="name">`` and closed by a matching ``:::`` (nest by
 giving the outer container more colons, e.g. `::::`); the name may be
 followed by brace attributes (``::: aside {.right}``). ``::: aside``
-floats as a muted side box, dropping into the left margin on wide
-viewports — the same margin breakout ``{.margin}`` (or ``::: margin``)
-gives any block — and ``::: nocols`` opts its section out of the column
-layout. A brace-attribute
+floats as a muted side box, floating in the side zone at the article's
+left on all but phone widths — the same margin float ``{.margin}`` (or
+``::: margin``) gives any block — and ``::: nocols`` opts its section out
+of the column layout. A brace-attribute
 line as a block's last line (no blank line between) applies to the whole
 block, e.g. a paragraph ending with ``{.wide}`` breaks out of the column
 layout as a full-width element; written after a block (code fence,
@@ -352,9 +352,9 @@ _PRE_BLOCK_RE = re.compile(r"<pre\b.*?</pre>", re.S)
 _TAG_RE = re.compile(r"<[^>]+>")
 
 # Classes that take their block out of the column flow: .wide is a
-# full-width separator, .margin/.aside break into the left margin (their
-# negative-margin breakout only works as a direct .body child, never from
-# inside a column).
+# full-width separator, .margin/.aside float in the side zone at the
+# article's left (they must be direct .body children for that — the zone
+# rules key off it — never inside a column).
 _WIDE = "wide"
 _BREAKOUT = ("margin", "aside")
 
