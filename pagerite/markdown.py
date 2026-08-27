@@ -11,8 +11,10 @@ same callout styling). ``::: name`` opens a generic container rendered
 as ``<div class="name">`` and closed by a matching ``:::`` (nest by
 giving the outer container more colons, e.g. `::::`); the name may be
 followed by brace attributes (``::: aside {.right}``). ``::: aside``
-floats as a side box beside the text and ``::: nocols`` opts its
-section out of the column layout. A brace-attribute
+floats as a muted side box, dropping into the left margin on wide
+viewports — the same margin breakout ``{.margin}`` (or ``::: margin``)
+gives any block — and ``::: nocols`` opts its section out of the column
+layout. A brace-attribute
 line as a block's last line (no blank line between) applies to the whole
 block, e.g. a paragraph ending with ``{.wide}`` breaks out of the column
 layout as a full-width element; written after a block (code fence,
@@ -20,6 +22,17 @@ heading, container, ...) it applies to that preceding block. Bare URLs autolink 
 the ``https://`` scheme hidden in the link text (``http://`` and other
 schemes stay visible; manually labelled links are untouched), and
 ``H~2~O`` / ``x^2^`` give sub/superscripts.
+
+render() also builds the layout structure: the top-level blocks are
+segmented for the column layout — h1/h2 headings, ``.wide`` blocks and
+margin-breakout blocks (``.margin``, ``::: aside``) stand on their own,
+the runs between them are wrapped in ``<div class="colseg">`` (tagged
+``.cols`` when the segment holds enough text, unless a ``::: nocols``
+container opts it out). The result carries ``multicol`` when the whole
+body justifies columns (views.py puts the class on the article); how
+many columns (never more than two), whether the margin breakout applies
+and every other viewport adaptation is then pagerite.css's call. The
+thresholds measure visible text, code blocks excluded.
 
 markdown-it's typographer is enabled, so body text gets SmartyPants-style
 replacements: straight quotes become curly, ``--`` / ``---`` become en / em
@@ -38,6 +51,7 @@ classes, e.g. `![alt](photo.avif "Caption"){.right}`.
 
 import re
 from datetime import datetime, timedelta
+from typing import NamedTuple
 
 from markdown_it import MarkdownIt
 from markdown_it.common.utils import escapeHtml
@@ -219,16 +233,23 @@ def _container_validate(params: str, _markup: str) -> bool:
     return pos == len(rest) - 1
 
 
-def _container_render(self, tokens, idx, options, env):
-    """Render `::: name {attrs}` containers as `<div class="name">`."""
-    token = tokens[idx]
-    if token.nesting == 1:
+def _container_attrs(state) -> None:
+    """Apply `::: name {attrs}` classes to container tokens at parse time.
+
+    The container plugin's default render is a plain renderToken, so the
+    name and brace attributes must live on the token itself — and being a
+    core rule (rather than a render rule) lets the segmentation in
+    render() see the classes (::: aside's margin breakout, the ::: nocols
+    opt-out, {.wide} containers).
+    """
+    for token in state.tokens:
+        if token.type != "container_block_open":
+            continue
         name, _, rest = token.info.strip().partition(" ")
         token.attrJoin("class", name)
         if rest.strip():
             _, attrs = parse_attrs(rest.strip())
             _apply_attrs(token, attrs)
-    return self.renderToken(tokens, idx, options, env)
 
 
 def _block_attrs(state) -> None:
@@ -301,8 +322,7 @@ md = (
     )
     .use(attrs_plugin)
     .use(admon_plugin)
-    .use(container_plugin, "block", validate=_container_validate,
-         render=_container_render)
+    .use(container_plugin, "block", validate=_container_validate)
     .use(footnote_plugin)
     .use(deflist_plugin)
     .use(tasklists_plugin, enabled=True)
@@ -316,9 +336,82 @@ md.add_render_rule("fence", _fence_rule)
 md.options["alerts"] = True
 # Block attrs must be stripped before the typographer curlifies their quotes.
 md.core.ruler.before("replacements", "block_attrs", _block_attrs)
+md.core.ruler.push("container_attrs", _container_attrs)
 md.core.ruler.push("unwrap_lone_figures", _unwrap_lone_figures)
 md.core.ruler.push("tag_task_checkboxes", _tag_task_checkboxes)
 md.core.ruler.push("shorten_autolinks", _shorten_autolinks)
+
+
+# Text-length thresholds (visible characters, code blocks excluded) for the
+# column layout: the article goes .multicol past MULTICOL_TEXT, and a column
+# segment gets .cols past COLS_TEXT.
+MULTICOL_TEXT = 1800
+COLS_TEXT = 600
+
+_PRE_BLOCK_RE = re.compile(r"<pre\b.*?</pre>", re.S)
+_TAG_RE = re.compile(r"<[^>]+>")
+
+# Classes that take their block out of the column flow: .wide is a
+# full-width separator, .margin/.aside break into the left margin (their
+# negative-margin breakout only works as a direct .body child, never from
+# inside a column).
+_WIDE = "wide"
+_BREAKOUT = ("margin", "aside")
+
+
+class Rendered(NamedTuple):
+    """render() result: the segmented body HTML, and whether the article
+    should carry .multicol (enough visible text to justify columns)."""
+
+    html: str
+    multicol: bool
+
+
+def _classes(token) -> set[str]:
+    return set((token.attrGet("class") or "").split())
+
+
+def _text_len(html: str) -> int:
+    """Visible-text length of rendered HTML, code blocks excluded."""
+    return len(_TAG_RE.sub("", _PRE_BLOCK_RE.sub("", html)).strip())
+
+
+def _top_level_blocks(tokens: list) -> list[list]:
+    """Split the token stream into its top-level blocks.
+
+    A new block starts at each level-0 opening/self-contained token;
+    closing and nested tokens (inline children, sub-containers) belong to
+    the current block, so every slice is balanced and renders on its own.
+    """
+    blocks = []
+    for token in tokens:
+        if token.level == 0 and token.nesting >= 0:
+            blocks.append([token])
+        elif blocks:
+            blocks[-1].append(token)
+    return blocks
+
+
+def _is_boundary(block: list) -> bool:
+    """True for blocks that never go inside a column segment (see the
+    _WIDE/_BREAKOUT comment above): h1/h2 headings, anything carrying
+    .wide, and blocks whose own element carries .margin/.aside — for a
+    lone-image paragraph (which renders as a <figure>) the image's classes
+    count as the block's own."""
+    first = block[0]
+    if first.type == "heading_open" and first.tag in ("h1", "h2"):
+        return True
+    own = _classes(first)
+    for token in block:
+        if _WIDE in _classes(token):
+            return True
+        if token.type == "inline":
+            children = token.children or []
+            if any(_WIDE in _classes(c) for c in children):
+                return True
+            if len(children) == 1 and children[0].type == "image":
+                own |= _classes(children[0])
+    return bool(own & set(_BREAKOUT))
 
 
 def render(
@@ -326,18 +419,57 @@ def render(
     page_path: str = "",
     created: datetime | None = None,
     modified: datetime | None = None,
-) -> str:
-    """Render Markdown text to an HTML string.
+) -> Rendered:
+    """Render Markdown text to the article body's HTML and layout flags.
+
+    The top-level blocks are grouped into column segments: boundary blocks
+    (h1/h2 headings, .wide, margin-breakout blocks — see _is_boundary) are
+    rendered bare, the runs between them wrapped in <div class="colseg">.
+    A segment is tagged .cols when it holds enough text (COLS_TEXT) and no
+    ::: nocols container; the article is .multicol when the whole body
+    exceeds MULTICOL_TEXT. pagerite.css keys all column and margin-breakout
+    layout off these classes.
 
     A ``{dates}`` line expands to the article's published/updated dateline
     (needs ``created``/``modified``; left as-is in contexts without them,
     e.g. the editor preview). Position is the author's choice — typically
     right after the article's h1.
     """
-    html = md.render(text, {"page_path": page_path})
+    env = {"page_path": page_path}
+    blocks = _top_level_blocks(md.parse(text, env))
+    # Group consecutive non-boundary blocks into segments (is_segment,
+    # flat tokens); boundary blocks stand on their own between them.
+    groups: list[tuple[bool, list]] = []
+    for block in blocks:
+        if _is_boundary(block):
+            groups.append((False, block))
+        elif groups and groups[-1][0]:
+            groups[-1][1].extend(block)
+        else:
+            groups.append((True, list(block)))
+
+    parts = []
+    total = 0
+    for is_segment, group in groups:
+        html = md.renderer.render(group, md.options, env)
+        if not html.strip():
+            continue  # e.g. a consumed standalone-attrs paragraph
+        text_len = _text_len(html)
+        total += text_len
+        if not is_segment:
+            parts.append(html)
+            continue
+        nocols = any(
+            "nocols" in _classes(t)
+            for t in group
+            if t.type == "container_block_open"
+        )
+        cols = " cols" if text_len > COLS_TEXT and not nocols else ""
+        parts.append(f'<div class="colseg{cols}">{html}</div>')
+    html = "".join(parts)
     if created is not None and "<p>{dates}</p>" in html:
         html = html.replace("<p>{dates}</p>", _dateline(created, modified))
-    return html
+    return Rendered(html, total > MULTICOL_TEXT)
 
 
 def _dateline(created: datetime, modified: datetime | None) -> str:

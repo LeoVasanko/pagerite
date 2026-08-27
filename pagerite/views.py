@@ -513,16 +513,18 @@ def banner_source(menu: dict[str, Node], path: str) -> str | None:
 def page_content(menu: dict[str, Node], path: str) -> HTML:
     """Render the contents of the #main element for a page."""
     node = resolve(menu, path)[-1]
-    doc = E.article
+    rendered = render(node.content or "", path, node.created, node.modified)
+    # Long articles get .multicol: the article column cap lifts (see the
+    # #content grid in pagerite.css) and the body's .cols segments lay out
+    # in at most two columns. The .body html is already segmented by
+    # render() — the whole layout is driven by these classes.
+    doc = E.article(class_="multicol") if rendered.multicol else E.article
     with doc:
         # An h1 in the markdown owns the article heading; the title is
         # only rendered as h1 when the markdown has none of its own.
         if not has_h1(node.content or ""):
             doc.h1(node.title)
-        doc.div(
-            HTML(render(node.content or "", path, node.created, node.modified)),
-            class_="body",
-        )
+        doc.div(HTML(rendered.html), class_="body")
     return HTML(str(doc))
 
 

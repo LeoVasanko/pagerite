@@ -275,12 +275,13 @@ body {
   grid-template-columns: minmax(0, 1fr) minmax(0, 78rem) minmax(0, 1fr);
 }
 
-/* Long articles (.multicol is added by pagerite.js based on content length)
-   lift the 78rem cap and scrap the right gutter: a 1fr left gutter (which
-   holds the overlaying sidebar) and the article taking all the rest, out
-   to the right viewport edge. The column count follows the width (see the
-   `columns: 30rem` rule below). The .wide breakout is re-anchored to the
-   left gutter below (the article is no longer viewport-centered). */
+/* Long articles (.multicol comes from the backend render, based on
+   content length — code excluded) lift the 78rem cap and scrap the right
+   gutter: a 1fr left gutter (which holds the overlaying sidebar and any
+   margin-breakout boxes) and the article taking all the rest, out to the
+   right viewport edge. Columns are capped at two (see the
+   `columns: 30rem 2` rule below). The .wide breakout is re-anchored to
+   the left gutter below (the article is no longer viewport-centered). */
 body:has(.multicol) #content {
   grid-template-columns: minmax(0, 1fr) minmax(0, 4fr);
 }
@@ -561,18 +562,26 @@ article dd {
   hyphens: auto;
 }
 
-/* Multi-column reading, but only for long articles (pagerite.js adds
-   .multicol based on content length — code blocks excluded — and splits
-   the body into .colseg segments separated by full-width h2s and .wide
-   elements; only segments with enough text get .cols, and a ::: nocols
-   container opts its section out). No fixed breakpoint: `columns: 30rem` lets CSS fit as
-   many columns of at least 30rem as the article's current width allows —
-   since .multicol also uncaps the article width (see #content above), a
-   wider window simply yields more columns. */
+/* Multi-column reading, but only for long articles: the backend render
+   splits the body into .colseg segments (separated by full-width h2s and
+   .wide elements), tags segments with enough text as .cols (a ::: nocols
+   container opts its section out) and flags the article .multicol based
+   on content length — code blocks excluded. Never more than two columns:
+   `columns: 30rem 2` fits one or two columns of at least 30rem into the
+   article's current width — since .multicol also uncaps the article
+   width (see #content above), a wider window widens the two columns
+   instead of adding more. */
 .multicol .colseg.cols {
-  columns: 30rem;
+  columns: 30rem 2;
   column-gap: 3.5rem;
   column-rule: 1px solid var(--line);
+}
+
+/* A shrink-wrapped figure (explicit image width) centers in the plain
+   layout; inside a column the centering looks adrift — left-align.
+   Floated figures keep their own margins (the text gap). */
+.multicol .colseg.cols figure:has(img[width]):not(:has(.left), :has(.right), :has(.margin)) {
+  margin-inline: 0;
 }
 
 .multicol .colseg {
@@ -725,13 +734,13 @@ blockquote p + p {
   --admonition-color: var(--accent3);
 }
 
-/* Asides (::: aside): a floated side box in the floated-figure idiom;
-   consecutive asides stack (clear: right). On wide single-column pages it
-   leans into the empty right gutter (below 104rem the gutter cannot hold
-   the box; multicol pages have no right gutter at all, and while editing
-   the docked panel reshapes the gutters — in all these it stays a plain
-   float). Headings already clear floats, so asides never bleed into the
-   next section. */
+/* Side boxes: ::: aside is a muted floated box (consecutive asides stack
+   via clear: right); {.margin} / ::: margin is a plainer margin note, and
+   figures take {.margin} like {.left}. All of them drop into the left
+   margin when the layout has room for it (the breakout rules live with
+   the figure rules below); without room they stay in-column floats —
+   asides on the right, margin boxes on the left. Headings already clear
+   floats, so boxes never bleed into the next section. */
 .aside {
   float: right;
   clear: right;
@@ -745,15 +754,19 @@ blockquote p + p {
   border-radius: 0.3rem;
 }
 
-.aside> :last-child {
+.aside> :last-child,
+.margin> :last-child {
   margin-bottom: 0;
 }
 
-@media (min-width: 104rem) {
-  body:not(.editing):not(:has(.multicol)) .aside {
-    width: 12rem;
-    margin-right: -13rem;
-  }
+.margin {
+  float: left;
+  clear: left;
+  width: 30%;
+  max-width: 20rem;
+  margin: 0.3rem 1.2rem 1rem 0;
+  font-size: 0.9rem;
+  color: var(--muted);
 }
 
 pre {
@@ -917,6 +930,52 @@ figure:has(img[width]) {
   width: fit-content;
 }
 
+/* {.margin} figures float left like {.left} ones — until the margin
+   breakout below pulls them into the left gutter. */
+figure:has(.margin) {
+  float: left;
+  width: 30%;
+  max-width: 50%;
+  margin: 0.3rem 1em 1rem 0;
+}
+
+/* The left-margin breakout: margin boxes ({.margin} / ::: margin blocks,
+   ::: aside, {.margin} figures) leave the text column for the left
+   gutter, hugging the article's left edge (a 12rem box on a 13.25rem
+   pull: the gutter plus main's padding). The sticky sidebar shares the
+   gutter and slides over them translucently — the same overlap full-bleed
+   .wide images get. Scoped to direct .body children: the backend render
+   keeps breakout blocks out of the column segments, and nested ones keep
+   the in-column float fallback. Room exists once the single-column
+   layout's symmetric gutters fit the box (≥104rem), and on multicol
+   pages whose 1fr left gutter fits it (≥65rem) — but never while editing
+   (the docked panel owns the left edge), and not below 102rem with a
+   sidebar (the fixed 12rem sidebar track, see #content, leaves no free
+   gutter there). */
+@media (min-width: 104rem) {
+  body:not(.editing) .body>.margin,
+  body:not(.editing) .body>.aside,
+  body:not(.editing) .body>figure:has(.margin) {
+    float: left;
+    clear: left;
+    width: 12rem;
+    max-width: none;
+    margin: 0.3rem 0 1rem -13.25rem;
+  }
+}
+
+@media (min-width: 65rem) {
+  body:not(.editing):has(.multicol):not(:has(#sidebar)) .body>.margin,
+  body:not(.editing):has(.multicol):not(:has(#sidebar)) .body>.aside,
+  body:not(.editing):has(.multicol):not(:has(#sidebar)) .body>figure:has(.margin) {
+    float: left;
+    clear: left;
+    width: 12rem;
+    max-width: none;
+    margin: 0.3rem 0 1rem -13.25rem;
+  }
+}
+
 /* .wide is full bleed: edge to edge of the viewport (or of the space right
    of the docked editor), while staying in flow so it keeps its vertical
    space. The article column is centered in the available space, so negative
@@ -1038,9 +1097,9 @@ article h2 {
 
 /* Phones and other narrow viewports: single-column layout with the
    sidebar lifted above the article as a wrapping link strip, and no
-   floated figures — .left/.right fall back to plain centered figures
-   (explicit img widths still shrink-wrap), while .wide keeps its full
-   viewport bleed. */
+   floated figures — .left/.right/.margin fall back to plain centered
+   figures (explicit img widths still shrink-wrap), while .wide keeps its
+   full viewport bleed. */
 @media (max-width: 48rem) {
 
   /* Nav type shrinks fluidly as space runs out. The nav font-size is
@@ -1105,7 +1164,8 @@ article h2 {
   }
 
   figure:has(.right),
-  figure:has(.left) {
+  figure:has(.left),
+  figure:has(.margin) {
     float: none;
     width: 100%;
     max-width: none;

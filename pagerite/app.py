@@ -1015,15 +1015,20 @@ async def editor_ws(ws: WebSocket) -> None:
                     markdown = msg.get("markdown", "")
                     chain = resolve(data.menu, path)
                     node = chain[-1] if chain else None
+                    rendered = render(
+                        markdown,
+                        path,
+                        node.created if node else None,
+                        node.modified if node else None,
+                    )
                     await ws.send_json({
                         "type": "html",
                         "path": path,
-                        "html": render(
-                            markdown,
-                            path,
-                            node.created if node else None,
-                            node.modified if node else None,
-                        ),
+                        "html": rendered.html,
+                        # Column-layout flags: the preview toggles the
+                        # article's .multicol class and swaps in the
+                        # segmented (.colseg/.cols) body html.
+                        "multicol": rendered.multicol,
                         "has_h1": has_h1(markdown),
                     })
                 case "save":

@@ -18,6 +18,8 @@ msgspec Structs for the kanta database. See `docs/content-model.md` for the full
 
 markdown-it-py renderer (html passthrough + attrs, footnote, deflist, tasklists, admon, gfm_autolink, sub/superscript plugins; typographer + breaks on). Custom image rule: relative srcs resolve against the page path; an image standing alone in its paragraph becomes a figure (captioned when titled), while inline-with-text images and raw `<img>` HTML stay plain. A `{dates}` line expands to the article's published/updated dateline (`p.dateline`, from `Node.created`/`modified`; left literal in previews of unsaved pages).
 
+`render()` returns a `Rendered(html, multicol)`: the body segmented for the column layout — h1/h2 headings, `.wide` blocks and margin-breakout blocks (`.margin`, `::: aside`) stand bare, the runs between them become `<div class="colseg">` (plus `.cols` on segments with enough text, `::: nocols` opting out), and `multicol` flags bodies long enough to columnize (visible-text thresholds, code excluded). `views.py` puts the class on the article; pagerite.css takes it from there (at most two columns, the left-margin breakout, all viewport adaptation).
+
 ## `views.py`
 
 The shared page layout as an html5tagger `Template` with placeholders (`Title`, `Brand`, `Banner`, `Nav`, `Sidebar`, `Main`), nav rendering straight from the `Data.menu` tree (siblings sorted by `Node.order`; nav links to content-less labels point at their first child via `first_leaf`, the first published descendant with content), and page/404 rendering.

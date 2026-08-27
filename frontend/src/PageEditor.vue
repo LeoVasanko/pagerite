@@ -240,9 +240,13 @@ function runScripts(root) {
   }
 }
 
-function previewIntoArticle(html, hasH1) {
+function previewIntoArticle(html, hasH1, multicol) {
   const article = document.querySelector('#main article')
   if (!article) return
+  // The server render owns the column layout: .multicol on the article,
+  // the segmented .colseg/.cols structure inside .body. Both arrive with
+  // the preview and must stay in sync as edits cross the thresholds.
+  article.classList.toggle('multicol', multicol)
   const h1 = article.querySelector('h1')
   const body = article.querySelector('.body')
   // The edit pen may be tucked inside an h1 (title or markdown-owned);
@@ -270,7 +274,7 @@ function onMessage(ev) {
     requestRender()
     dirty.value = false // just loaded from the server, nothing unsaved
   } else if (msg.type === 'html' && msg.path === path.value) {
-    previewIntoArticle(msg.html, msg.has_h1)
+    previewIntoArticle(msg.html, msg.has_h1, msg.multicol)
   } else if (msg.type === 'saved') {
     saveError.value = ''
     pendingSave = null
