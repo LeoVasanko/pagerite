@@ -41,6 +41,7 @@
 
   --font-body: var(--font-montserrat);
   --font-heading: var(--font-literata);
+  --code-x-height: 0.517; /* Montserrat's x-height ratio */
 }
 
 /* Dark scheme: same identity, but the page goes deep violet (never muddy

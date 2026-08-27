@@ -17,6 +17,7 @@
   --line: #ffffff1c;
   --font-body: var(--font-literata);
   --font-heading: var(--font-fraunces);
+  --code-x-height: 0.507; /* Literata's x-height ratio */
 }
 
 /* Oversized tilted brand in the sky→violet gradient. */

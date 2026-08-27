@@ -16,6 +16,7 @@
   --line: #12203f14;
   --font-body: var(--font-inter);
   --font-heading: var(--font-montserrat);
+  --code-x-height: 0.546; /* Inter's x-height ratio */
 }
 
 @media (prefers-color-scheme: dark) {

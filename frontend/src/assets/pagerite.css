@@ -56,6 +56,11 @@
   /* The brand follows the heading font unless overridden separately. */
   --font-brand: var(--font-heading);
   --font-code: var(--font-fira-code);
+  /* Target x-height ratio for code text: set to the body font's ratio
+     (here Source Sans 3's 0.478) so font-size-adjust can scale the code
+     font to the same optical height. Themes retune it to their body font
+     (measured: Literata 0.507, Inter 0.546, Montserrat 0.517, Cause 0.5). */
+  --code-x-height: 0.478;
   /* Width of the docked editor panel (used both here for shifting the page
      and in the Vue editor's own styles). */
   --editor-w: min(46rem, 50vw);
@@ -762,10 +767,15 @@ pre {
   position: relative;
 }
 
-/* Inline code integrates with the text, no box of its own */
-p code,
-li code {
-  font-size: 0.85em;
+/* Inline code integrates with the text, no box of its own. Instead of a
+   fixed em shrink (which can't fit every body/code font pairing — Fira
+   Code's x-height ratio 0.525 is taller than Source Sans 3's 0.478 yet
+   shorter than Inter's 0.546), font-size-adjust scales whatever code font
+   is in use so its x-height matches the body font's ratio. Browsers
+   without font-size-adjust get unadjusted 1em code, which is fine. */
+code {
+  font-family: var(--font-code);
+  font-size-adjust: ex-height var(--code-x-height);
 }
 
 /* Click-to-copy button (added by pagerite.js) */
@@ -792,11 +802,6 @@ pre:hover .copy,
 
 .copy.copied {
   color: var(--accent);
-}
-
-code {
-  font-family: var(--font-code);
-  font-size: 0.88em;
 }
 
 /* Tables separate by color, not lines: the header is a soft vertical

@@ -29,6 +29,7 @@
   --font-body: var(--font-cause);
   --font-heading: var(--font-new-rocker);
   --font-brand: var(--font-cause);
+  --code-x-height: 0.5; /* Cause's x-height ratio */
 }
 
 /* The page is the same landscape the banner paints: hazy sky light up top
