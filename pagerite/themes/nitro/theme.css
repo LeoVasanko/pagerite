@@ -138,14 +138,9 @@
 
 /* Console-style headings: uppercase monospace. h1 in the page text color
    with a hazard-stripe underline, h2 deep orange, h3 cyan. */
-article h1,
-article h2,
-article h3 {
+article h1 {
   text-transform: uppercase;
   letter-spacing: 0.02em;
-}
-
-article h1 {
   color: var(--text);
   font-weight: 700;
   padding-bottom: 0.5rem;
