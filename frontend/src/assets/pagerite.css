@@ -922,16 +922,19 @@ figure:has(img[width]) {
    is not viewport-centered; each just overrides width/margin-inline, and
    later rules win at equal specificity. The analytics dashboard uses the
    same breakout directly on its container (div.wide — it is the page's
-   whole content, not a figure). */
+   whole content, not a figure), and code blocks via a trailing {.wide}
+   line (fence attrs land on <code>, hence pre:has(.wide)). */
 figure:has(.wide),
-div.wide {
+div.wide,
+pre:has(.wide) {
   width: 100vw;
   max-width: none;
   margin-inline: calc(50% - 50vw);
 }
 
 /* Full bleed means edge to edge — no rounded corners. */
-figure:has(.wide) img {
+figure:has(.wide) img,
+pre:has(.wide) {
   border-radius: 0;
 }
 
@@ -939,21 +942,24 @@ figure:has(.wide) img {
    gutter), so the bleed anchors at the left gutter — the 1fr share of the
    1fr + 4fr grid, i.e. 20vw — plus main's padding, and spans on to the
    right viewport edge. */
-body:has(.multicol) figure:has(.wide) {
+body:has(.multicol) figure:has(.wide),
+body:has(.multicol) pre:has(.wide) {
   margin-inline: calc(-20vw - 1.25rem) 0;
 }
 
 /* Editing: shrink the bleed to the space right of the docked editor. The
    window keeps its overlay scrollbars while editing, so — unlike a classic
    scrollbar — they take no layout space and the vw math stays exact. */
-body.editing figure:has(.wide) {
+body.editing figure:has(.wide),
+body.editing pre:has(.wide) {
   width: calc(100vw - var(--editor-w));
   margin-inline: calc(50% - (100vw - var(--editor-w)) / 2);
 }
 
 /* Editing + multicol: the left gutter is 1/5 of the space right of the
    editor, and the bleed also crosses main's 1.25rem left padding. */
-body.editing:has(.multicol) figure:has(.wide) {
+body.editing:has(.multicol) figure:has(.wide),
+body.editing:has(.multicol) pre:has(.wide) {
   margin-inline: calc((100vw - var(--editor-w)) / -5 - 1.25rem) 0;
 }
 
@@ -965,7 +971,8 @@ body.editing:has(.multicol) figure:has(.wide) {
    entirely on pages without sub-navigation, and excluded while editing,
    where the editing rules above apply instead. */
 @media (max-width: 102rem) {
-  body:has(#sidebar):not(.editing) figure:has(.wide) {
+  body:has(#sidebar):not(.editing) figure:has(.wide),
+  body:has(#sidebar):not(.editing) pre:has(.wide) {
     margin-inline: -13.25rem 0;
   }
 }

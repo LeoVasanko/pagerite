@@ -9,12 +9,14 @@ note/tip/warning/etc., the title optional) and GitHub-style alerts
 (``> [!NOTE]`` / TIP / IMPORTANT / WARNING / CAUTION, rendered in the
 same callout styling). ``::: name`` opens a generic container rendered
 as ``<div class="name">`` and closed by a matching ``:::`` (nest by
-giving the outer container more colons, e.g. `::::`); ``::: aside``
+giving the outer container more colons, e.g. `::::`); the name may be
+followed by brace attributes (``::: aside {.right}``). ``::: aside``
 floats as a side box beside the text and ``::: nocols`` opts its
 section out of the column layout. A brace-attribute
 line as a block's last line (no blank line between) applies to the whole
 block, e.g. a paragraph ending with ``{.wide}`` breaks out of the column
-layout as a full-width element. Bare URLs autolink (GFM), with
+layout as a full-width element; written after a block (code fence,
+heading, container, ...) it applies to that preceding block. Bare URLs autolink (GFM), with
 the ``https://`` scheme hidden in the link text (``http://`` and other
 schemes stay visible; manually labelled links are untouched), and
 ``H~2~O`` / ``x^2^`` give sub/superscripts.
@@ -121,11 +123,7 @@ def _unwrap_lone_figures(state) -> None:
                 # A lone image becomes a <figure> (see _image_rule); block
                 # attrs on the paragraph (e.g. a trailing {.wide} line) move
                 # onto the image so they survive the unwrap.
-                for key, value in (tokens[i - 1].attrs or {}).items():
-                    if key == "class":
-                        child.attrJoin("class", value)
-                    else:
-                        child.attrSet(key, value)
+                _apply_attrs(child, tokens[i - 1].attrs or {})
                 tokens[i - 1].hidden = True
                 tokens[i + 1].hidden = True
 
@@ -168,14 +166,43 @@ def _shorten_autolinks(state) -> None:
                     text.content = text.content.removeprefix("https://")
 
 
-_CONTAINER_NAME_RE = re.compile(r"\s*[a-zA-Z][\w-]*\s*$")
+_CONTAINER_NAME_RE = re.compile(r"[a-zA-Z][\w-]*")
+
+
+def _apply_attrs(token, attrs: dict) -> None:
+    """Join/set parsed brace attributes (`{.class key=value}`) on a token."""
+    for key, value in attrs.items():
+        if key == "class":
+            token.attrJoin("class", value)
+        else:
+            token.attrSet(key, value)
+
+
+def _container_validate(params: str, _markup: str) -> bool:
+    """`::: name`, optionally followed by brace attrs (`::: aside {.right}`)."""
+    name, _, rest = params.strip().partition(" ")
+    if not _CONTAINER_NAME_RE.fullmatch(name):
+        return False
+    rest = rest.strip()
+    if not rest:
+        return True
+    try:
+        pos, _ = parse_attrs(rest)
+    except ParseError:
+        return False
+    # parse() stops at (returns the index of) the closing brace.
+    return pos == len(rest) - 1
 
 
 def _container_render(self, tokens, idx, options, env):
-    """Render `::: name` containers as `<div class="name">`."""
+    """Render `::: name {attrs}` containers as `<div class="name">`."""
     token = tokens[idx]
     if token.nesting == 1:
-        token.attrJoin("class", token.info.strip())
+        name, _, rest = token.info.strip().partition(" ")
+        token.attrJoin("class", name)
+        if rest.strip():
+            _, attrs = parse_attrs(rest.strip())
+            _apply_attrs(token, attrs)
     return self.renderToken(tokens, idx, options, env)
 
 
@@ -207,25 +234,28 @@ def _block_attrs(state) -> None:
         if not standalone and token.children[-2].type != "softbreak":
             continue
         # The target: the enclosing block for a trailing attrs line, or the
-        # previous same-level block for a standalone attrs paragraph. Never
+        # previous same-level block for a standalone attrs paragraph —
+        # including self-contained blocks like code fences and <hr>. Never
         # a hidden token (tight-list paragraphs render no tag to hold the
         # attributes) — in that case leave the text untouched instead of
         # silently swallowing it.
         own = i - 1  # standalone: the attrs paragraph's own opening token
         j = i - 1
         while j >= 0:
-            if (tokens[j].nesting == 1 and not tokens[j].hidden
-                    and (not standalone or (j != own
-                                            and tokens[j].level == tokens[own].level))):
+            target = tokens[j]
+            if target.hidden:
+                pass
+            elif standalone:
+                if (j != own and target.level == tokens[own].level
+                        and (target.nesting == 1
+                             or target.type in ("fence", "code_block", "hr"))):
+                    break
+            elif target.nesting == 1:
                 break
             j -= 1
         if j < 0:
             continue
-        for key, value in attrs.items():
-            if key == "class":
-                tokens[j].attrJoin("class", value)
-            else:
-                tokens[j].attrSet(key, value)
+        _apply_attrs(tokens[j], attrs)
         if standalone:
             tokens[own].hidden = True
             token.children = []
@@ -246,8 +276,8 @@ md = (
     )
     .use(attrs_plugin)
     .use(admon_plugin)
-    .use(container_plugin, "block", validate=lambda params, _markup:
-         bool(_CONTAINER_NAME_RE.fullmatch(params)), render=_container_render)
+    .use(container_plugin, "block", validate=_container_validate,
+         render=_container_render)
     .use(footnote_plugin)
     .use(deflist_plugin)
     .use(tasklists_plugin, enabled=True)
