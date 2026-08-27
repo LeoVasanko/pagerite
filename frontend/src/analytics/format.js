@@ -349,8 +349,8 @@ export function mainDomain(host, limit = 24) {
 
 /**
  * Group raw crawler hits by client hash and format each group as a row showing
- * every internal page that crawler visited.  Rows are sorted by total hits,
- * most active crawler first, rather than by most recent hit.
+ * every internal page that crawler visited.  Rows are sorted by most recent hit
+ * first, with total hits as a tie-breaker.
  * ``clients`` maps client hashes to client records.
  */
 export function formatCrawlerRows(crawlers, clients, pageTree, now = Date.now()) {
@@ -380,7 +380,7 @@ export function formatCrawlerRows(crawlers, clients, pageTree, now = Date.now())
     return n
   }
   return [...groups.values()]
-    .sort((a, b) => totalHits(b) - totalHits(a) || b.lastStart - a.lastStart)
+    .sort((a, b) => b.lastStart - a.lastStart || totalHits(b) - totalHits(a))
     .slice(0, 10)
     .map((g) => {
       const client = g.client || {}

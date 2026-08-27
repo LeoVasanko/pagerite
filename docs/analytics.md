@@ -100,7 +100,7 @@ falsy values are omitted):
   country/city are filled in asynchronously, just like for real visits.  In
   the analytics viewer, crawler hits are grouped by client hash and shown as
   a trail of internal pages that crawler visited; the crawler table lists
-  the most active crawlers first rather than the most recent hits.
+  the most recent crawler first, with the most active as a tie-breaker.
 - **Abuse (scanner) hits**: a 404 for a telltale path — any URL segment
   starting with a dot (`/.env`, `/.git/config`) or ending in `.php` —
   classifies the source IP as abuse immediately, and ten plain 404s from one

@@ -235,9 +235,26 @@ import "overlayscrollbars/overlayscrollbars.css";
       btn.textContent = "copy";
       btn.addEventListener("click", async () => {
         const code = pre.querySelector("code");
-        await navigator.clipboard.writeText(
-          (code || pre).textContent.replace(/\n$/, ""),
-        );
+        const text = (code || pre).textContent.replace(/\n$/, "");
+        // navigator.clipboard exists only in secure contexts (https or
+        // localhost); viewing over plain http needs the textarea fallback.
+        try {
+          if (navigator.clipboard) {
+            await navigator.clipboard.writeText(text);
+          } else {
+            const ta = document.createElement("textarea");
+            ta.value = text;
+            ta.style.cssText = "position:fixed;opacity:0";
+            document.body.append(ta);
+            ta.select();
+            document.execCommand("copy");
+            ta.remove();
+          }
+        } catch {
+          btn.textContent = "failed";
+          setTimeout(() => (btn.textContent = "copy"), 1500);
+          return;
+        }
         btn.textContent = "copied";
         btn.classList.add("copied");
         setTimeout(() => {

@@ -78,6 +78,31 @@ def _highlight(text: str, lang: str, _attrs: str) -> str:
     return highlight(text, lexer, _formatter)
 
 
+def _fence_rule(
+    self: RendererHTML,
+    tokens,
+    idx: int,
+    options,
+    env: dict,
+) -> str:
+    """Render a fenced code block.
+
+    Like the default fence rule, but block attributes (a trailing `{...}`
+    line, applied to the fence token by _block_attrs) go on the <pre> — the
+    block element — instead of the <code>, which keeps only the language
+    class. This is what makes e.g. `{.wide}` or `{style="..."}` after a
+    code fence style the block itself.
+    """
+    token = tokens[idx]
+    info = token.info.strip() if token.info else ""
+    lang = info.split(maxsplit=1)[0] if info else ""
+    highlighted = (_highlight(token.content, lang, "")
+                   or escapeHtml(token.content))
+    code_class = f' class="{options.langPrefix}{lang}"' if lang else ""
+    return (f"<pre{self.renderAttrs(token)}><code{code_class}>"
+            f"{highlighted}</code></pre>\n")
+
+
 def _image_rule(
     self: RendererHTML,
     tokens,
@@ -286,6 +311,7 @@ md = (
     .use(superscript_plugin)
 )
 md.add_render_rule("image", _image_rule)
+md.add_render_rule("fence", _fence_rule)
 # GFM alerts (`> [!NOTE]` etc.), built into markdown-it-py's blockquote rule.
 md.options["alerts"] = True
 # Block attrs must be stripped before the typographer curlifies their quotes.
