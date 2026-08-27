@@ -80,17 +80,27 @@ export function calcTotalViews(views) {
 // Very short reads are navigation/skims, not real reading time.
 export const MIN_READ_SECONDS = 10
 
+/** path -> accumulated read seconds for a visit, derived from its trail. */
+export function readMapOf(v) {
+  const map = {}
+  for (const item of Object.values(v.trail || {})) {
+    if (item.read) map[item.to] = (map[item.to] || 0) + item.read
+  }
+  return map
+}
+
 /** Average minutes per visit and average of per-article median read minutes. */
 export function calcReadStats(visits) {
   const perArticle = {}
   let totalVisitSeconds = 0
   let visitCount = 0
   for (const v of visits || []) {
-    const secs = Object.values(v.read || {}).filter((s) => s >= MIN_READ_SECONDS)
+    const read = readMapOf(v)
+    const secs = Object.values(read).filter((s) => s >= MIN_READ_SECONDS)
     if (!secs.length) continue
     visitCount++
     totalVisitSeconds += secs.reduce((a, b) => a + b, 0)
-    for (const [path, s] of Object.entries(v.read || {})) {
+    for (const [path, s] of Object.entries(read)) {
       if (s >= MIN_READ_SECONDS) {
         ; (perArticle[path] || (perArticle[path] = [])).push(s)
       }
@@ -271,7 +281,7 @@ export function formatRecentVisits(visits, pageTree, limit = 50) {
     .reverse()
     .map((v) => ({
       when: new Date(v.start).toLocaleString(),
-      steps: [v.referer, v.entry, ...(v.trail || [])]
+      steps: [v.referer, ...Object.values(v.trail || {}).map((t) => t.to)]
         .map((p) => stepOf(p, titles))
         .filter(Boolean),
     }))
@@ -510,14 +520,12 @@ export function formatVisitRows(visits, clients, pageTree, now = Date.now()) {
   const titles = buildTitleMap(pageTree)
   return [...(visits || [])].reverse().slice(0, 20).map((v) => {
     const client = (clients || {})[v.client] || {}
-    const read = v.read || {}
-    const statuses = v.statuses || {}
-    const trail = [v.entry, ...(v.trail || [])]
-      .map((p) => {
-        const step = stepOf(p, titles)
+    const trail = Object.values(v.trail || {})
+      .map((item) => {
+        const step = stepOf(item.to, titles)
         if (step) {
-          if (read[p]) step.readSeconds = read[p]
-          if (statuses[p]) step.status = statuses[p]
+          if (item.read) step.readSeconds = item.read
+          if (item.status) step.status = item.status
         }
         return step
       })

@@ -782,7 +782,7 @@ async def _broadcast_analytics() -> None:
     """Send the current analytics snapshot to every connected WS client."""
     if not _analytics_ws_clients:
         return
-    payload = msgspec.json.encode(analytics_store.data).decode()
+    payload = analytics_store.display_json()
     closed = set()
     for ws in _analytics_ws_clients:
         try:
@@ -865,7 +865,8 @@ def _track_entry(path: str, request: Request, *, status: int = 200) -> list[byte
     Nothing is counted on the GET itself — the client's /_a ping starts the
     visit, so bots never register as visits (JS-running crawlers ping too,
     but the ping handler ignores known bot UAs).  (Admin clients ping too,
-    but with hide=1, which scrubs their session instead of recording it.)
+    but with hide=1, which flags their visit hidden: it is recorded but
+    excluded from all statistics and from the crawler list.)
 
     The devserver's health probe (``GET /?from=devserver.py`` from
     ``127.0.0.1``) is ignored: it is not real traffic and would otherwise be
@@ -941,7 +942,7 @@ async def analytics_websocket(ws: WebSocket) -> None:
     endpoint. Powers the analytics viewer rendered at /_a.
     """
     await ws.accept()
-    await ws.send_text(msgspec.json.encode(analytics_store.data).decode())
+    await ws.send_text(analytics_store.display_json())
     _analytics_ws_clients.add(ws)
     try:
         while True:

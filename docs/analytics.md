@@ -27,7 +27,8 @@ falsy values are omitted):
   (an `fr` equal to `to` would log a bogus self-transition when a session
   already exists, e.g. a second tab). This ping is what starts
   the visit and counts the entry page view — the document GET alone records
-  nothing, so bots and admin browsing never register. JS-running crawlers
+  nothing, so bots never register (admin browsing does register, but
+  flagged `hide`; see **Admins** below). JS-running crawlers
   (Googlebot, GoogleOther, Applebot, ...) do ping, but their User-Agent
   gives them away: pings whose UA matches `_is_bot_ua` (anything calling
   itself a "bot", plus known exceptions such as GoogleOther) are ignored
@@ -57,12 +58,18 @@ falsy values are omitted):
   without the preload header, and without the ping that GET would flush to
   the crawler list.
 - **Admins**: when SSO is in use and the session is known to be an admin,
-  the client still pings but adds `hide=1`. The server then records
-  nothing — and if the same client session already had a visit from before
-  logging in, that visit is removed from the JSON along with every count
-  it recorded — an in-memory per-visit log of count events makes full
-  reversal possible. With no auth proxy (dev/test)
-  "admin" is everyone's state, so `hide` stays 0 and everything is recorded.
+  the client still pings but adds `hide=1`. The activity is recorded as
+  usual (navigations and all), but the `hide` flag is set on the **client
+  record** — so it covers everything that client ever did: visits and
+  crawler hits from before the login included. Hidden clients never appear
+  in the viewer payload: `Store.display()` drops their visits, crawler
+  hits, abuse hits and metadata, and computes every aggregate (site visits,
+  page views, transitions) from the visible visits only, so nothing needs
+  to be reversed or redacted. Pending crawler hits from a hidden client
+  are discarded when they expire, so admin browsing never lands in the
+  crawler list either. With no auth proxy
+  (dev/test) "admin" is everyone's state, so `hide` stays 0 and everything
+  is recorded.
 - The server validates `to`: internal paths must be valid slug paths
   ("/" or `[a-z0-9_-]` segments), external ones are re-derived to the
   https origin and accepted only when the client sent exactly that.
@@ -94,7 +101,8 @@ falsy values are omitted):
   the header only hides a GET from the crawler stats, the path-based abuse
   classification is unaffected).  If a ping
   from the same client arrives within 10 seconds the hit is discarded;
-  otherwise it is written to `crawlers`.  Crawlers do not count as
+  otherwise it is written to `crawlers` — unless the client is hidden
+  (admin), in which case the hit is discarded on expiry too.  Crawlers do not count as
   visits or views.  The `Accept-Language` header is stored on the shared
   `Client` immediately; reverse-DNS host names and DB-IP geoip
   country/city are filled in asynchronously, just like for real visits.  In
@@ -141,7 +149,10 @@ Each `Client` record:
 - `city` — city name from the DB-IP MMDB lookup, when available,
 - `ua` — raw `User-Agent` string,
 - `ua_pretty` — compact display form of the UA (browser/OS/device) when
-  parsable, otherwise the raw string.
+  parsable, otherwise the raw string,
+- `hide` — true for admin clients (`hide=1` ping): all their visits,
+  crawler hits and abuse hits are recorded but excluded from every
+  statistic and from the viewer payload.
 
 Each `Visit` record:
 
@@ -149,13 +160,16 @@ Each `Visit` record:
 - `entry` — first page (path) seen,
 - `referer` — external https origin of the initial load, `""` for direct,
 - `client` — 6-byte blake3 hash referencing `Analytics.clients`,
-- `trail` — everything seen afterwards in first-seen order: page paths and
-  external exit URLs. Re-visiting an already seen page (incl. the entry)
-  does not append.
+- `trail` — the entry page and everything seen afterwards, keyed by the
+  timestamp of first sight (insertion order = first-seen order). Each item
+  holds `to` (page path or external exit URL), the accumulated active
+  reading time in seconds (`read`) and the most recent HTTP status seen
+  for the target (`status`). Re-visiting an already seen target updates
+  its item instead of appending.
+- `navs` — every navigation ping (`fr`, `to`), keyed by its timestamp,
+  repeats included. The aggregates are computed from this log at display
+  time.
 - `utm` — `utm_*` query parameters from the landing URL, as a dict.
-- `read` — active reading time per path (seconds), keyed by path.
-- `statuses` — HTTP status of the response when each path was first seen
-  (200 or 404), keyed by path.
 
 Each `CrawlerHit` record:
 
@@ -190,10 +204,16 @@ to tell misses from real pages at a glance.
 
 ## Aggregates
 
+Aggregates are **not stored**; they are computed at display time by
+`Store.display()` from the visit records (entry + `navs` log), skipping
+hidden clients' visits. This is what allows a client to become hidden after
+navigations were already logged: no counts need reversing. The computed
+shapes, part of the WebSocket payload (`Display` struct alongside `visits`,
+`crawlers`, `abuse` and `clients`):
+
 - `transitions`: time series of page transitions, sparse nested dict
-  `from -> to -> bucket -> count` with the same 5-minute bucketing as
-  `views`. `from` is the referer origin or `"(direct)"` for initial loads,
-  a page path for pings.
+  `from -> to -> bucket -> count` with 5-minute bucketing. `from` is the
+  referer origin or `"(direct)"` for initial loads, a page path for pings.
 - `views`: time series of page loads, `path -> bucket -> count`, sparse: only
   non-zero 5-minute buckets exist (bucket key is its floored ISO timestamp).
   Every load counts, including repeats within a visit; external exit origins
@@ -202,7 +222,7 @@ to tell misses from real pages at a glance.
   5-minute bucketing.
 
 Sparseness keeps quiet sites small; dropping old data is a matter of deleting
-list/dict entries (`visits` is a plain append-only list, buckets plain keys).
+list entries (`visits` is a plain append-only list).
 
 ## Persistence
 

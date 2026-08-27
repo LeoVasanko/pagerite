@@ -12,8 +12,13 @@ away (``_is_bot_ua``) and their pings are ignored, so they land in the
 crawler list too.  Idle-time link preloads from pagerite.js carry an
 ``x-pagerite-preload`` header and are not tracked at all — the ping sent
 when the user actually navigates does the counting.
-Admin clients ping with ``hide=1``, which records nothing and removes any
-visit the session accumulated before logging in.  Scanner telltale 404s
+Admin clients ping with ``hide=1``: the client record is flagged ``hide``,
+which covers everything that client ever did — visits and crawler hits
+from before the login included.  Aggregates (site visits, page views,
+transitions) are not stored; they are computed at display time from the
+visit records, excluding hidden clients, and hidden clients' visits,
+crawler hits, abuse hits and metadata are left out of the viewer payload
+entirely.  Scanner telltale 404s
 (dotpaths, *.php) classify the source IP as abuse; its hits — including
 earlier crawler hits — are moved to the abuse list, which the viewer
 groups by IP with full request paths.  Client metadata (IP, UA, language,
@@ -87,15 +92,47 @@ class Client(msgspec.Struct, omit_defaults=True):
     ua: str = ""
     #: Compact display form of ``ua`` (browser/OS/device) when parsable.
     ua_pretty: str = ""
+    #: True for admin clients (hide=1 ping): their visits, crawler hits and
+    #: abuse hits are recorded but excluded from all statistics and from
+    #: the viewer payload.
+    hide: bool = False
+
+
+class Nav(msgspec.Struct, omit_defaults=True):
+    """One navigation inside a visit: from ``fr`` to ``to``.
+
+    ``to`` is an internal page path or an external https exit URL.  Every
+    navigation is logged (repeats included), keyed by its timestamp in
+    ``Visit.navs``, so display-time aggregates can count views and
+    transitions; ``Visit.trail`` keeps the first-seen order.
+    """
+
+    fr: str
+    to: str
+
+
+class TrailItem(msgspec.Struct, omit_defaults=True):
+    """One first-seen target in a visit trail: a page or external exit URL.
+
+    ``read`` accumulates active reading time (seconds) across the whole
+    visit; ``status`` is the most recent HTTP status seen for the target.
+    """
+
+    to: str
+    #: Accumulated active reading time in seconds.
+    read: int = 0
+    #: Most recent HTTP status of the response (200 or 404).
+    status: int = 200
 
 
 class Visit(msgspec.Struct, omit_defaults=True):
     """One visit: the initial-load data plus everything seen afterwards.
 
-    ``trail`` holds page paths and external exit URLs in first-seen
-    order; re-visiting an already seen page does not append. The entry
-    page itself is in ``entry``, not in the trail.  Client metadata is
-    held in ``Analytics.clients`` keyed by ``client``.
+    ``trail`` holds the entry page and everything seen afterwards, keyed by
+    the timestamp of first sight (insertion order = first-seen order);
+    re-visiting an already seen target updates its item instead of
+    appending.  Client metadata is held in ``Analytics.clients`` keyed by
+    ``client``.
     """
 
     start: datetime
@@ -104,13 +141,13 @@ class Visit(msgspec.Struct, omit_defaults=True):
     referer: str = ""
     #: 6-byte blake3 hash referencing ``Analytics.clients``.
     client: bytes = b""
-    trail: list[str] = []
+    #: First-seen targets keyed by their timestamp (entry included).
+    trail: dict[datetime, TrailItem] = {}
+    #: Every navigation ping (repeats included) keyed by its timestamp; the
+    #: aggregates are computed from this log at display time.
+    navs: dict[datetime, Nav] = {}
     #: UTM query parameters from the landing URL, keyed by parameter name.
     utm: dict[str, str] = {}
-    #: Active reading time per path (seconds), keyed by path.
-    read: dict[str, int] = {}
-    #: HTTP status of the response when the path was first seen (200 or 404).
-    statuses: dict[str, int] = {}
 
 
 class CrawlerHit(msgspec.Struct, omit_defaults=True):
@@ -166,6 +203,22 @@ class Analytics(msgspec.Struct, omit_defaults=True):
     clients: dict[bytes, Client] = {}
     #: IPs classified as scanners/abusers (keys; values always True).
     abuse_ips: dict[str, bool] = {}
+
+
+class Display(msgspec.Struct, omit_defaults=True):
+    """The viewer payload: visible data plus display-time aggregates.
+
+    Hidden clients are excluded everywhere: their visits, crawler hits,
+    abuse hits and metadata are dropped, and the aggregates are computed
+    from the visible visits only.
+    The aggregate shapes match what the viewer consumes: sparse 5-minute
+    buckets keyed by their floored ISO timestamp.
+    """
+
+    visits: list[Visit] = []
+    crawlers: list[CrawlerHit] = []
+    abuse: list[AbuseHit] = []
+    clients: dict[bytes, Client] = {}
     #: Page transitions per 5-minute bucket (sparse):
     #: from -> to -> bucket ISO -> count. ``from`` is the referer origin or
     #: "(direct)" for initial loads, a page path for pings.
@@ -316,10 +369,6 @@ class Store:
                 pass  # legacy schema / corrupt or unreadable file: start fresh
         #: client hash -> index of the current visit in data.visits
         self.sessions: dict[bytes, int] = {}
-        #: visit index -> count events recorded for that visit, so
-        #: ``_remove_visit`` can reverse all of them — not just the ones
-        #: from the visit's creation.  In-memory only, like ``sessions``.
-        self._count_log: dict[int, list[tuple]] = {}
         #: ip -> external https origin of the latest document GET carrying
         #: one, stashed for the visit the client's initial ping starts.
         #: Internal or absent referers never touch the table.
@@ -373,6 +422,9 @@ class Store:
     def _flush_crawlers(self, now: datetime | None = None) -> list[bytes]:
         """Move expired pending crawler hits into persistent ``data.crawlers``.
 
+        Hits from a hidden client (admin) are discarded instead of
+        persisted — admin browsing must not land in the crawler list.
+
         Returns the client hashes of the newly flushed hits so callers can
         schedule async enrichment.
         """
@@ -383,68 +435,63 @@ class Store:
         expired: list[CrawlerHit] = []
         remaining: list[CrawlerHit] = []
         for hit in self.pending_crawlers:
-            (expired if hit.start <= cutoff else remaining).append(hit)
+            if hit.start > cutoff:
+                remaining.append(hit)
+                continue
+            client = self.data.clients.get(hit.client)
+            if client is not None and client.hide:
+                continue  # hidden admin client: not a crawler
+            expired.append(hit)
         if not expired:
+            self.pending_crawlers = remaining
             return []
         self.pending_crawlers = remaining
         self.data.crawlers.extend(expired)
         self._save()
         return [hit.client for hit in expired]
 
-    def _count(self, table: dict[str, int], key: str) -> None:
-        table[key] = table.get(key, 0) + 1
+    def _hidden(self, client_hash: bytes) -> bool:
+        """True when the client record is flagged hidden (admin)."""
+        client = self.data.clients.get(client_hash)
+        return client is not None and client.hide
 
-    def _count_transition(self, fr: str, to: str, now: datetime) -> None:
-        """Count one transition in its 5-minute bucket (sparse matrix)."""
-        buckets = self.data.transitions.setdefault(fr, {}).setdefault(to, {})
-        self._count(buckets, _bucket(now))
+    def display(self) -> Display:
+        """Build the viewer payload, excluding hidden clients.
 
-    def _uncount(self, table: dict[str, int], key: str) -> None:
-        """Reverse one ``_count``: decrement and drop empty keys."""
-        if key in table:
-            table[key] -= 1
-            if table[key] <= 0:
-                del table[key]
-
-    def _remove_visit(self, index: int) -> None:
-        """Delete a visit and reverse every count it recorded.
-
-        Used when a known visitor turns out to be an admin (hide=1 ping):
-        the session is scrubbed from the stats.  The in-memory
-        ``_count_log`` tracks each site-visit/view/transition count the
-        visit produced, so the scrub reverses all of them — including the
-        ones logged by later pings inside the visit.
+        The aggregates (site visits, page views, transitions) are computed
+        here from the visit records rather than stored, so a client that
+        becomes hidden after navigations were already logged disappears
+        from every statistic.  Internal-path navigations count as page
+        views; external https targets are transitions only.
         """
-        for event in self._count_log.pop(index, ()):
-            kind = event[0]
-            if kind == "site":
-                self._uncount(self.data.site_visits, event[1])
-            elif kind == "view":
-                views = self.data.views.get(event[1])
-                if views is not None:
-                    self._uncount(views, event[2])
-                    if not views:
-                        del self.data.views[event[1]]
-            else:  # transition
-                _, fr, to, bucket = event
-                fr_map = self.data.transitions.get(fr)
-                if fr_map is not None:
-                    buckets = fr_map.get(to)
-                    if buckets is not None:
-                        self._uncount(buckets, bucket)
-                        if not buckets:
-                            del fr_map[to]
-                    if not fr_map:
-                        del self.data.transitions[fr]
-        del self.data.visits[index]
-        # Sessions and count logs store list indices; shift the ones past
-        # the removed visit.
-        for key, i in list(self.sessions.items()):
-            if i > index:
-                self.sessions[key] = i - 1
-        self._count_log = {
-            i - 1 if i > index else i: log for i, log in self._count_log.items()
-        }
+        visits = [v for v in self.data.visits if not self._hidden(v.client)]
+        display = Display(
+            visits=visits,
+            crawlers=[h for h in self.data.crawlers if not self._hidden(h.client)],
+            abuse=[h for h in self.data.abuse if not self._hidden(h.client)],
+            clients={h: c for h, c in self.data.clients.items() if not c.hide},
+        )
+        for visit in visits:
+            bucket = _bucket(visit.start)
+            site = display.site_visits
+            site[bucket] = site.get(bucket, 0) + 1
+            entry_views = display.views.setdefault(visit.entry, {})
+            entry_views[bucket] = entry_views.get(bucket, 0) + 1
+            fr = visit.referer or "(direct)"
+            buckets = display.transitions.setdefault(fr, {}).setdefault(visit.entry, {})
+            buckets[bucket] = buckets.get(bucket, 0) + 1
+            for t, nav in visit.navs.items():
+                nb = _bucket(t)
+                if nav.to.startswith("/"):
+                    nav_views = display.views.setdefault(nav.to, {})
+                    nav_views[nb] = nav_views.get(nb, 0) + 1
+                nbuckets = display.transitions.setdefault(nav.fr, {}).setdefault(nav.to, {})
+                nbuckets[nb] = nbuckets.get(nb, 0) + 1
+        return display
+
+    def display_json(self) -> str:
+        """The ``display()`` payload as a JSON string for the WebSocket."""
+        return msgspec.json.encode(self.display()).decode()
 
     def _client_ip(self, client_hash: bytes) -> str:
         """Return the IP stored for ``client_hash``, or "" if missing."""
@@ -601,20 +648,9 @@ class Store:
             client=client_hash,
             utm=utm or {},
         )
-        visit.statuses[entry] = status
+        visit.trail[now] = TrailItem(to=entry, status=status)
         self.data.visits.append(visit)
-        index = len(self.data.visits) - 1
-        self.sessions[client_hash] = index
-        bucket = _bucket(now)
-        fr = referer or "(direct)"
-        self._count(self.data.site_visits, bucket)
-        self._count(self.data.views.setdefault(entry, {}), bucket)
-        self._count_transition(fr, entry, now)
-        self._count_log[index] = [
-            ("site", bucket),
-            ("view", entry, bucket),
-            ("transition", fr, entry, bucket),
-        ]
+        self.sessions[client_hash] = len(self.data.visits) - 1
         return visit
 
     def track_entry(
@@ -688,7 +724,10 @@ class Store:
         if index is None or index >= len(self.data.visits):
             return
         visit = self.data.visits[index]
-        visit.read[path] = visit.read.get(path, 0) + seconds
+        for item in visit.trail.values():
+            if item.to == path:
+                item.read += seconds
+                return
 
     def ping(
         self,
@@ -711,10 +750,11 @@ class Store:
         A ping with no known session starts a fresh visit, consuming the
         referer and UTM tags stashed by the document GET if there are any.
 
-        ``hide`` is set by admin clients: the ping cancels pending crawler
-        hits as usual, and any existing visit for this client session is
-        removed from the stats (the admin browsed anonymously before logging
-        in).  Nothing new is recorded.
+        ``hide`` is set by admin clients: the client record is flagged
+        ``hide`` — which covers everything it ever did, including visits and
+        crawler hits from before the login — and the navigation is recorded
+        normally.  Hidden clients are excluded from every statistic and list
+        at display time, and their pending crawler hits are discarded.
 
         Pings from IPs classified as abuse, and pings whose User-Agent
         claims a JS-running crawler identity (``_is_bot_ua``), are ignored
@@ -727,34 +767,35 @@ class Store:
         """
         flushed = self._flush_crawlers()
         lang, country = _parse_accept_language(accept_language)
-        client_hash = _client_hash(ip, ua, lang)
         if hide:
-            # Admin ping: cancel pending crawler hits and scrub the session.
+            # Admin ping: flag the client hidden and never a crawler hit.
+            # The flag lives on the client record, so it covers visits and
+            # crawler hits from before the login too; display-time
+            # aggregation excludes hidden clients from every statistic.
+            client_hash = self._ensure_client(ip, ua, lang, country=country)
+            self.data.clients[client_hash].hide = True
             self.pending_crawlers = [
                 hit for hit in self.pending_crawlers if hit.client != client_hash
             ]
-            self.pending_statuses.pop(client_hash, None)
-            index = self.sessions.pop(client_hash, None)
-            if index is not None and index < len(self.data.visits):
-                self._remove_visit(index)
-                self._save()
-            return None, flushed
-        if ip in self.data.abuse_ips:
-            return None, flushed
-        if _is_bot_ua(ua):
-            # A JS-running crawler (Googlebot, GoogleOther, Applebot execute
-            # JS and ping): never a visit.  Its pending crawler hits are
-            # kept and flush to ``data.crawlers`` normally.
-            return None, flushed
-        # A real visitor ping cancels any pending crawler hits from this client.
-        self.pending_crawlers = [
-            hit for hit in self.pending_crawlers if hit.client != client_hash
-        ]
+        else:
+            client_hash = _client_hash(ip, ua, lang)
+            if ip in self.data.abuse_ips:
+                return None, flushed
+            if _is_bot_ua(ua):
+                # A JS-running crawler (Googlebot, GoogleOther, Applebot
+                # execute JS and ping): never a visit.  Its pending crawler
+                # hits are kept and flush to ``data.crawlers`` normally.
+                return None, flushed
+            # A real visitor ping cancels any pending crawler hits from
+            # this client.
+            self.pending_crawlers = [
+                hit for hit in self.pending_crawlers if hit.client != client_hash
+            ]
         fr_path = _internal_path(from_) if from_ else ""
         if fr_path and read > 0:
             self._add_read(client_hash, fr_path, read)
         if not to:
-            if read > 0:
+            if read > 0 or hide:
                 self._save()
             return None, flushed
         if to.startswith("/") and not to.startswith("//"):
@@ -784,17 +825,15 @@ class Store:
         else:
             visit = self.data.visits[index]
             now = datetime.now(UTC)
-            bucket = _bucket(now)
-            log = self._count_log.setdefault(index, [])
-            if target.startswith("/"):
-                self._count(self.data.views.setdefault(target, {}), bucket)
-                log.append(("view", target, bucket))
-            self._count_transition(fr, target, now)
-            log.append(("transition", fr, target, bucket))
-            # First-seen only: repeat pages and repeated exits don't append.
-            if visit.entry != target and target not in visit.trail:
-                visit.trail.append(target)
-            visit.statuses[target] = target_status
+            visit.navs[now] = Nav(fr=fr, to=target)
+            # First-seen only: repeat pages and repeated exits update the
+            # existing trail item (most recent status) instead of appending.
+            for item in visit.trail.values():
+                if item.to == target:
+                    item.status = target_status
+                    break
+            else:
+                visit.trail[now] = TrailItem(to=target, status=target_status)
         self._save()
         visit_index = index if index is not None and index < len(self.data.visits) else None
         return visit_index, flushed

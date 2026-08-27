@@ -29,7 +29,7 @@
  * pings) are skipped.
  */
 
-import { MIN_READ_SECONDS } from './format.js'
+import { MIN_READ_SECONDS, readMapOf } from './format.js'
 
 // Nodes are constant-size pills (stadium rects) holding the slug and the
 // view count on two centered lines. TNODE_BOUND is the pill's bounding
@@ -263,7 +263,7 @@ function sortByNav(root, navOrder) {
 function buildReadSeconds(visits) {
   const times = {}
   for (const v of visits || []) {
-    for (const [path, sec] of Object.entries(v.read || {})) {
+    for (const [path, sec] of Object.entries(readMapOf(v))) {
       if (sec >= MIN_READ_SECONDS) {
         ; (times[path] || (times[path] = [])).push(sec)
       }
