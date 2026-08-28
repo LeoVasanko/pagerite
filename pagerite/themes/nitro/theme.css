@@ -183,8 +183,7 @@ article ul ul li::before {
 }
 
 article ul ul ul li::before {
-  content: "»";
-  color: var(--accent);
+  color: var(--muted);
 }
 
 blockquote {

@@ -60,12 +60,14 @@ article h3 {
 }
 
 /* Theme-colored diamond markers instead of the base emoji (blue/orange
-   clashes with this palette). */
+   clashes with this palette). The text-style ◆ runs heavy at full size,
+   so it's shrunk with font-size, the box is widened to compensate. */
 article ul li::before {
   content: "◆";
   color: var(--accent);
-  font-size: 0.7em;
-  vertical-align: 0.15em;
+  font-size: 0.8em;
+  margin-left: calc(-1 * var(--list-indent) / 0.8);
+  width: calc(var(--list-indent) / 0.8);
 }
 
 article ul ul li::before {
@@ -74,7 +76,6 @@ article ul ul li::before {
 }
 
 article ul ul ul li::before {
-  content: "◆";
   color: var(--accent3);
 }
 

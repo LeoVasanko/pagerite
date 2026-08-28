@@ -625,37 +625,82 @@ article * + h6 {
 }
 
 /* Lists: small diamond emoji markers — blue 🔹 on odd nesting levels,
-   orange 🔸 on even. The marker occupies a 1em outdented box so wrapped
-   lines align. */
-article ul {
+   orange 🔸 on even; ordered lists get muted counters (an explicit
+   [type] attribute keeps the browser's native markers). The marker box
+   spans the whole --list-indent (outdented from the text column,
+   centered), so the space on both sides of the glyph is equal whatever
+   its advance width — emoji diamonds, chevrons, flowers, whatever a
+   theme swaps in. The box is em-sized so it tracks the local text size
+   (e.g. smaller in asides); a theme that shrinks the glyph via
+   font-size must widen the box by the inverse factor (see the purple
+   theme) to keep it spanning the indent. */
+article :is(ul, ol:not([type])) {
   list-style: none;
-  padding-inline-start: 1.8em;
+  padding-left: 0;
+  --list-indent: 2em;
+}
+
+article :is(ul, ol:not([type])) > li {
+  padding-left: var(--list-indent);
 }
 
 article ul li::before {
   content: "🔹";
   display: inline-block;
-  margin-left: -1.3em;
-  width: 1.3em;
+  margin-left: calc(-1 * var(--list-indent));
+  width: var(--list-indent);
+  text-align: center;
 }
 
 article ul ul li::before {
   content: "🔸";
 }
 
-article ul ul ul li::before {
-  content: "🔹";
+article ol:not([type]) {
+  list-style: none;
+  counter-reset: item;
 }
 
-/* Task lists: real checkboxes (not emoji), clickable in the public page. */
+article ol:not([type]) > li {
+  counter-increment: item;
+}
+
+article ol:not([type]) > li::before {
+  content: counter(item) ".";
+  color: var(--muted);
+  display: inline-block;
+  margin-left: calc(-1 * var(--list-indent));
+  width: var(--list-indent);
+  text-align: left;
+}
+
+/* Task lists: real clickable checkboxes. The checkbox stands in for the
+   list marker — taken out of flow, left-aligned in the indent box and
+   centered on the first line's middle, so the item text starts at the
+   same edge as every other list item's. */
+article .task-list-item {
+  position: relative;
+}
+
 article .task-list-item::before {
   content: none;
 }
 
 article .task-list-item-checkbox {
+  position: absolute;
+  left: 0;
+  top: calc(0.5lh - .15ex);
+  translate: 0 -50%;
+  font-size: inherit;
+  line-height: inherit;
   cursor: pointer;
-  margin-inline-end: 0.35em;
-  vertical-align: middle;
+}
+
+/* The item text is a <label for> the checkbox (tasklists label_after):
+   clicking it toggles too — without selecting the text on repeat clicks. */
+article .task-list-item label {
+  cursor: pointer;
+  user-select: none;
 }
 
 article {

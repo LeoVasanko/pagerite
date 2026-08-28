@@ -412,7 +412,9 @@ md = (
     .use(container_plugin, "block", validate=_container_validate)
     .use(footnote_plugin)
     .use(deflist_plugin)
-    .use(tasklists_plugin, enabled=True)
+    # label_after: the item text is wrapped in <label for> after the
+    # checkbox, so clicking the text toggles it.
+    .use(tasklists_plugin, enabled=True, label=True, label_after=True)
     .use(gfm_autolink_plugin)
     .use(sub_plugin)
     .use(superscript_plugin)

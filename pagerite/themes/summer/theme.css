@@ -205,12 +205,11 @@ article a:hover {
   color: var(--accent);
 }
 
-/* Flower bullets, one accent per nesting level. */
+/* Fleur-de-lis on the first level, flowers below — one accent per level.
+   (⚜️ renders emoji-style, so it needs no shrinking like the flowers.) */
 article ul li::before {
-  content: "❀";
+  content: "⚜️";
   color: var(--accent3);
-  font-size: 0.8em;
-  vertical-align: 0.1em;
 }
 
 article ul ul li::before {
