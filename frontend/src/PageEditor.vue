@@ -5,11 +5,14 @@
 // The socket connects when the editor is opened and reconnects with
 // exponential backoff after a failure; unsaved text and pending saves
 // survive a disconnect. Editor and article (window) scrolls are linked
-// proportionally both ways (syncWindowToEditor / syncEditorToWindow).
+// piecewise-linearly both ways, keyed on the section anchors' data-line
+// (syncWindowToEditor / syncEditorToWindow).
 // Saving (💾 / Ctrl+S) is explicit
 // and refreshes the page regions in place — never a reload — so the editor
-// state (unsaved text included) also survives closing the shell; it is lost
-// only on a real page reload.
+// state (unsaved text included) also survives closing the shell. The editor
+// always follows the URL: navigating away retargets it to the new page,
+// stashing unsaved text per path (unsavedStash) so returning to the page
+// restores the working draft; stashes clear on save and on real reload.
 import { onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState } from '@codemirror/state'
@@ -95,6 +98,7 @@ function save() {
     // editor; the save APIs (REST PUT / WS save) never delete on empty.
     return fetch(`/_api/pages/${path.value}`, { method: 'DELETE' }).then((res) => {
       saveError.value = res.ok ? '' : '⚠️ changes could not be saved'
+      if (res.ok) unsavedStash.delete(path.value)
     })
   }
   const msg = {
@@ -219,7 +223,16 @@ function insertTable(cols, rows) {
   view.focus()
 }
 
+// Unsaved edits survive navigation within the session: leaving a page
+// stashes its working text here, returning restores it (the server doc
+// still arrives, for title/published and as the base underneath).
+// Entries clear on save and on real reload (the shell is in-memory only).
+const unsavedStash = new Map()
+
 function openPath(p) {
+  if (dirty.value && path.value && p !== path.value) {
+    unsavedStash.set(path.value, view.state.doc.toString())
+  }
   path.value = p
   send({ type: 'open', path: p })
 }
@@ -265,15 +278,21 @@ function onMessage(ev) {
   if (msg.type === 'doc' && msg.path === path.value) {
     title.value = msg.title
     published.value = msg.published
-    setDocument(msg.markdown)
+    // Restore stashed unsaved edits over the server doc when returning
+    // to a page left dirty.
+    const stashed = unsavedStash.get(msg.path)
+    setDocument(stashed ?? msg.markdown)
+    dirty.value = stashed != null
     requestRender()
-    dirty.value = false // just loaded from the server, nothing unsaved
+    // A section pen's target line survives the open/path-switch here.
+    consumePendingLine()
   } else if (msg.type === 'html' && msg.path === path.value) {
     previewIntoArticle(msg.html, msg.multicol)
   } else if (msg.type === 'saved') {
     saveError.value = ''
     pendingSave = null
     dirty.value = false
+    unsavedStash.delete(path.value)
     savedResolve?.()
     savedResolve = null
   } else if (msg.type === 'error') {
@@ -305,31 +324,104 @@ function onKeydown(ev) {
 function onEditorShown() {
   if (document.body.dataset.editorMode !== 'page') return
   updateWindowTitle()
-  if (dirty.value) requestRender()
+  // Always follow the URL: if the user navigated while the editor was
+  // hidden or on another tab, retarget (discarding unsaved text — its
+  // preview page is gone); otherwise restore the working preview.
+  const p = normPath(props.pagePath)
+  if (p !== path.value) openPath(p)
+  else if (dirty.value) requestRender()
+  consumePendingLine()
 }
 
-// Bidirectional proportional scroll sync between the CodeMirror scroller
-// and the window (the article's scroller, also while editing). Both
-// directions apply instantly (never smooth — a smooth window scroll feeds
-// its intermediate positions back into the editor and fights the user's
-// scrolling) and coalesce to one update per frame. Loops are broken two
-// ways: a driver flag held until one frame AFTER the write (the scroll
-// event a programmatic write dispatches arrives asynchronously — clearing
-// the flag in the writing frame would let the echo through and the two
-// directions would chase each other, which showed up as random jumping
-// whenever layout shifted the proportional targets mid-scroll), and a 1px
-// tolerance so residual rounding is a no-op. When the panel's height
-// changes mid-scroll (its top tracks the banner), the page is the driver:
-// the editor is re-matched to the page's position, never vice versa.
+// Piecewise-linear scroll sync between the CodeMirror scroller and the
+// window (the article's scroller, also while editing), keyed on the
+// section anchors: the backend tags anchored h1/h2 headings with
+// data-line (markdown source line), so each heading pairs a document
+// position with a page position, and positions interpolate linearly
+// between neighbouring headings. Endpoints are the article top (line 1)
+// and the document bottom (last line).
+//
+// Editor → page follows the CURSOR, not the editor viewport: the cursor's
+// fractional line (soft-wrap included, so moving inside a wrapped
+// paragraph tracks smoothly) maps to its page position, shown at a fixed
+// anchor height in the window — the cursor on the last line lands at the
+// end of the page, no ramping needed. Only cursor/selection changes drive
+// this direction: editor wheel-scrolling repositions the text, not the
+// page, which removes the scroll→scroll echo entirely.
+// Page → editor anchors a viewport fraction that grows with page progress
+// (0 = heading at viewport top when the page is at the top, 1 = viewport
+// bottom at the page's end), so both document ends line up exactly.
+//
+// Both directions apply instantly (never smooth — a smooth window scroll
+// feeds its intermediate positions back into the editor and fights the
+// user's scrolling) and coalesce to one update per frame. Loops are
+// broken two ways: a driver flag held until one frame AFTER the write
+// (the scroll event a programmatic write dispatches arrives
+// asynchronously — clearing the flag in the writing frame would let the
+// echo through and the two directions would chase each other, which
+// showed up as random jumping whenever layout shifted the targets
+// mid-scroll), and a 1px tolerance so residual rounding is a no-op. When
+// the panel's height changes mid-scroll (its top tracks the banner), the
+// page is the driver: the editor is re-matched to the page's position,
+// never vice versa.
+
+// [markdown line (1-based), window Y] control points, ascending in both.
+function syncPoints() {
+  const article = document.querySelector('#main article')
+  if (!article || !view) return null
+  const pts = [[1, article.getBoundingClientRect().top + scrollY]]
+  for (const h of article.querySelectorAll('[data-line]')) {
+    pts.push([+h.dataset.line + 1, h.getBoundingClientRect().top + scrollY])
+  }
+  pts.push([view.state.doc.lines, document.documentElement.scrollHeight])
+  return pts.sort((a, b) => a[0] - b[0])
+}
+
+// Piecewise-linear map of v from column `from` to column `to`, clamped to
+// the segment ends.
+function interp(pts, v, from, to) {
+  let i = 1
+  while (i < pts.length - 1 && pts[i][from] < v) i++
+  const [a0, b0] = [pts[i - 1][from], pts[i - 1][to]]
+  const [a1, b1] = [pts[i][from], pts[i][to]]
+  const t = a1 > a0 ? (v - a0) / (a1 - a0) : 0
+  return b0 + Math.max(0, Math.min(1, t)) * (b1 - b0)
+}
+
+// Editor scroller top showing the fractional markdown line.
+function editorTopFor(line) {
+  const scroller = view.scrollDOM
+  const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+  if (line >= view.state.doc.lines) return max
+  const n = Math.max(1, Math.floor(line))
+  const block = view.lineBlockAt(view.state.doc.line(n).from)
+  return Math.min(max, block.top + (line - n) * block.height)
+}
+
+//: Window height fraction where the cursor's page position is shown.
+const CURSOR_ANCHOR = 1 / 3
+
 function syncWindowToEditor() {
   if (syncingScroll || !view) return
   syncingScroll = true
   requestAnimationFrame(() => {
-    const scroller = view.scrollDOM
-    const max = scroller.scrollHeight - scroller.clientHeight
-    const pct = max > 0 ? scroller.scrollTop / max : 0
-    const y = pct * Math.max(0, document.documentElement.scrollHeight - innerHeight)
-    if (Math.abs(scrollY - y) > 1) scrollTo({ top: y, behavior: 'instant' })
+    const pts = syncPoints()
+    if (pts) {
+      // The cursor's page position, shown at a fixed window height.
+      const pos = view.state.selection.main.head
+      const coords = view.coordsAtPos(pos)
+      if (coords) {
+        const scroller = view.scrollDOM
+        const block = view.lineBlockAt(pos)
+        const docY = coords.top - scroller.getBoundingClientRect().top + scroller.scrollTop
+        const frac = block.height > 0
+          ? Math.max(0, Math.min(1, (docY - block.top) / block.height))
+          : 0
+        const line = view.state.doc.lineAt(pos).number + frac
+        const y = interp(pts, line, 0, 1) - CURSOR_ANCHOR * innerHeight
+        if (Math.abs(scrollY - y) > 1) scrollTo({ top: Math.max(0, y), behavior: 'instant' })
+      }
+    }
     requestAnimationFrame(() => { syncingScroll = false })
   })
 }
@@ -338,13 +430,45 @@ function syncEditorToWindow() {
   if (syncingScroll || !view) return
   syncingScroll = true
   requestAnimationFrame(() => {
-    const scroller = view.scrollDOM
-    const pageMax = Math.max(0, document.documentElement.scrollHeight - innerHeight)
-    const pct = pageMax > 0 ? scrollY / pageMax : 0
-    const top = pct * Math.max(0, scroller.scrollHeight - scroller.clientHeight)
-    if (Math.abs(scroller.scrollTop - top) > 1) scroller.scrollTop = top
+    const pts = syncPoints()
+    if (pts) {
+      // Anchor fraction grows with page progress: the mapped line sits at
+      // the viewport top when the page is at its top, at the bottom when
+      // scrolled all the way down.
+      const pageMax = Math.max(0, document.documentElement.scrollHeight - innerHeight)
+      const a = pageMax > 0 ? scrollY / pageMax : 0
+      const line = interp(pts, scrollY + a * innerHeight, 1, 0)
+      const scroller = view.scrollDOM
+      const top = editorTopFor(line) - a * scroller.clientHeight
+      const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+      const clamped = Math.max(0, Math.min(max, top))
+      if (Math.abs(scroller.scrollTop - clamped) > 1) scroller.scrollTop = clamped
+    }
     requestAnimationFrame(() => { syncingScroll = false })
   })
+}
+
+// Jump both views to a markdown source line (0-based, as carried by the
+// section pens' data-line / window.__pageriteEditLine).
+function scrollToSourceLine(line) {
+  if (!view || line == null) return
+  const n = Math.max(1, Math.min(line + 1, view.state.doc.lines))
+  const pos = view.state.doc.line(n).from
+  view.dispatch({
+    selection: { anchor: pos },
+    effects: EditorView.scrollIntoView(pos, { y: 'start', yMargin: 8 }),
+  })
+  const h = document.querySelector(`#main article [data-line="${line}"]`)
+  if (h) scrollTo({ top: h.getBoundingClientRect().top + scrollY, behavior: 'instant' })
+}
+
+// A section pen carries its line in window.__pageriteEditLine; consume it
+// once the document is here (fresh open, path switch, re-shown shell).
+function consumePendingLine() {
+  const line = window.__pageriteEditLine
+  if (line == null) return
+  delete window.__pageriteEditLine
+  scrollToSourceLine(line)
 }
 
 function connect() {
@@ -386,7 +510,11 @@ onMounted(() => {
         cmTheme,
         cmHighlight,
         EditorView.lineWrapping, // Markdown lines are long: soft-wrap them
-        EditorView.updateListener.of((u) => { if (u.docChanged) requestRender() }),
+        EditorView.updateListener.of((u) => {
+          if (u.docChanged) requestRender()
+          // Cursor moves (typing included) drive the page scroll sync.
+          if (u.selectionSet) syncWindowToEditor()
+        }),
         EditorView.domEventHandlers({
           paste(ev) {
             // Paste an image straight into the article: upload + insert
@@ -402,9 +530,10 @@ onMounted(() => {
     }),
     parent: editorEl.value,
   })
-  view.scrollDOM.addEventListener('scroll', syncWindowToEditor)
   // Page → editor: window scroll (and resizes, e.g. the panel growing when
   // the banner scrolls away) re-match the editor to the page's position.
+  // The other direction is cursor-driven (updateListener above), never
+  // scroll-driven — an editor scroll moves text, not the page.
   addEventListener('scroll', syncEditorToWindow, { passive: true })
   addEventListener('resize', syncEditorToWindow)
   // Opening the editor means you want to write: start focused.
@@ -416,6 +545,8 @@ onMounted(() => {
   }
   addEventListener('keydown', onKeydown)
   addEventListener('pagerite:editor-shown', onEditorShown)
+  // A section pen clicked while the page editor is already open.
+  addEventListener('pagerite:edit-section', consumePendingLine)
 })
 
 onUnmounted(() => {
@@ -430,6 +561,7 @@ onUnmounted(() => {
   removeEventListener('resize', syncEditorToWindow)
   removeEventListener('keydown', onKeydown)
   removeEventListener('pagerite:editor-shown', onEditorShown)
+  removeEventListener('pagerite:edit-section', consumePendingLine)
 })
 </script>
 
@@ -634,8 +766,8 @@ onUnmounted(() => {
 }
 
 /* CodeMirror sits inside a bordered box, like a dialog's input area, with
-   a slight margin to the panel edges. Wheel scroll stays in the editor and
-   drives the article (syncWindowToEditor) instead of double-scrolling. */
+   a slight margin to the panel edges. Wheel scroll stays in the editor
+   (overscroll-behavior) instead of double-scrolling the page. */
 .editor {
   flex: 1;
   min-width: 0;

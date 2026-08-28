@@ -340,9 +340,12 @@ def _heading_ids(state) -> None:
     author-set `{#id}` always wins; auto ids slugify the heading text
     (python-slugify, mirroring the editor's slugify.js) and dedupe with
     -2/-3 suffixes per render. Headings that already contain a link are
-    left unwrapped. Deeper headings (h3+) are never navigable.
+    ``data-line`` records the heading's markdown source line (0-based, after
+    undoing the render(title=...) injection offset via ``env``) — the page
+    editor uses it for section pens and piecewise-linear scroll sync.
     """
     tokens = state.tokens
+    line_offset = state.env.get("line_offset", 0)
 
     def wrap(i: int, token, href: str) -> None:
         inline = tokens[i + 1]
@@ -353,8 +356,14 @@ def _heading_ids(state) -> None:
         inline.children = [anchor, *inline.children, Token("link_close", "a", -1)]
 
     # The first in-body h1 is the title: href="" self-link, never an id.
+    # Only TOP-LEVEL headings participate — h1/h2 nested in ::: containers
+    # or asides (level > 0) get no anchors, data-lines or pens.
     first_h1 = next(
-        (i for i, t in enumerate(tokens) if t.type == "heading_open" and t.tag == "h1"),
+        (
+            i
+            for i, t in enumerate(tokens)
+            if t.type == "heading_open" and t.tag == "h1" and t.level == 0
+        ),
         None,
     )
     if first_h1 is not None:
@@ -363,7 +372,7 @@ def _heading_ids(state) -> None:
     heads = [
         (i, token)
         for i, token in enumerate(tokens)
-        if token.type == "heading_open" and token.tag in ("h1", "h2") and i != first_h1
+        if token.type == "heading_open" and token.tag in ("h1", "h2") and token.level == 0 and i != first_h1
     ]
     if len(heads) < ANCHOR_MIN_HEADINGS:
         return
@@ -383,6 +392,8 @@ def _heading_ids(state) -> None:
                 n += 1
             token.attrSet("id", hid)
         seen.add(hid)
+        if token.map:
+            token.attrSet("data-line", str(max(0, token.map[0] - line_offset)))
         wrap(i, token, f"#{hid}")
 
 
@@ -517,9 +528,12 @@ def render(
     e.g. the editor preview). Position is the author's choice — typically
     right after the article's h1.
     """
-    env = {"page_path": page_path}
+    env = {"page_path": page_path, "line_offset": 0}
     if title and not has_h1(text):
         text = f"# {title}\n\n{text}"
+        # The injected title shifts source lines by two; _heading_ids
+        # subtracts this from its data-line attributes.
+        env["line_offset"] = 2
     blocks = _top_level_blocks(md.parse(text, env))
     # Group consecutive non-boundary blocks into segments (is_segment,
     # flat tokens); boundary blocks stand on their own between them.

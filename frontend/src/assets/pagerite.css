@@ -667,6 +667,16 @@ article h1 .edit-link {
   margin-left: 0.4rem;
 }
 
+/* Section pens sit at the end of anchored h2s, dimmer than the page pen
+   until hovered. */
+article h2 .edit-section {
+  position: static;
+  font-size: 0.85rem;
+  vertical-align: 0.35em;
+  margin-left: 0.4rem;
+  opacity: 0.35;
+}
+
 .edit-link:hover {
   opacity: 1;
 }

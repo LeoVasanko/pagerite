@@ -69,19 +69,22 @@ import "overlayscrollbars/overlayscrollbars.css";
     return map;
   })();
 
-  function makePen(mode) {
+  function makePen(mode, line) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.dataset.editorSrc = editorMeta.src;
     btn.dataset.editorCss = editorMeta.css || "";
     btn.dataset.editorMode = mode;
-    if (mode === "page") {
-      btn.className = "edit-link";
-      btn.title = "edit page";
+    if (line != null) {
+      // Section pen on an anchored h2: opens the page editor at the
+      // section's markdown source line (data-line, from the backend).
+      btn.className = "edit-link edit-section";
+      btn.title = "edit section";
       btn.textContent = "🖊️";
-    } else if (mode === "banner") {
-      btn.className = "edit-link";
-      btn.title = "edit banner";
+      btn.dataset.editorLine = line;
+    } else if (mode === "page") {
+      btn.className = "edit-link edit-page";
+      btn.title = "edit page";
       btn.textContent = "🖊️";
     } else {
       btn.className = "edit-link site-edit-link";
@@ -93,8 +96,16 @@ import "overlayscrollbars/overlayscrollbars.css";
 
   function injectPagePen() {
     const article = document.querySelector("#main article");
-    if (article && !article.querySelector("button.edit-link")) {
+    if (!article) return;
+    if (!article.querySelector("button.edit-page")) {
       article.prepend(makePen("page"));
+    }
+    // Section pens on the anchored h2s (long articles only — the backend
+    // adds data-line to those headings), for editor access mid-document.
+    for (const h2 of article.querySelectorAll("h2[data-line]")) {
+      if (!h2.querySelector("button.edit-section")) {
+        h2.append(makePen("page", h2.dataset.line));
+      }
     }
   }
 
@@ -131,8 +142,6 @@ import "overlayscrollbars/overlayscrollbars.css";
       const pens = document.createElement("div");
       pens.className = "editor-pens";
       if (canEdit && !onAnalytics) {
-        pens.append(makePen("banner"));
-        pens.append(makePen("site"));
         // Analytics viewer is now a normal page at /_a.
         const a = document.createElement("a");
         a.className = "edit-link analytics-link";
@@ -140,6 +149,7 @@ import "overlayscrollbars/overlayscrollbars.css";
         a.title = "analytics";
         a.textContent = "📊";
         pens.append(a);
+        pens.append(makePen("site"));
       }
       if (ssoAvailable) pens.append(makeAuthLink(isAdmin));
       banner.after(pens);
@@ -260,14 +270,11 @@ import "overlayscrollbars/overlayscrollbars.css";
 
   // Tuck the article edit pen at the end of the first h1 (which may come
   // from the markdown itself). Re-runs when the editor replaces the
-  // previewed body, since that wipes elements inside it.
+  // previewed article, since that wipes elements inside it.
   function placeEditPen() {
     const article = document.querySelector("#main article");
-    const btn = article?.querySelector("button.edit-link");
-    // First visible h1: the title h1 may be display:none when the
-    // markdown owns its heading (editor preview state).
-    const h1 = [...(article?.querySelectorAll("h1") || [])]
-      .find((h) => h.offsetParent !== null);
+    const btn = article?.querySelector("button.edit-page");
+    const h1 = article?.querySelector("h1");
     if (btn && h1 && btn.parentElement !== h1) h1.append(btn);
   }
 
@@ -690,6 +697,13 @@ import "overlayscrollbars/overlayscrollbars.css";
     }
     currentPath = new URL(finalUrl, location.href).pathname;
     if (push) history.pushState(null, "", finalUrl);
+    // The open editor follows the URL: retarget the per-page tabs to the
+    // navigated-to page (unsaved text of the previous page is discarded —
+    // the article it previewed into is gone).
+    if (document.body.classList.contains("editing")) {
+      const p = currentPath.replace(/^\/+|\/+$/g, "");
+      dispatchEvent(new CustomEvent("pagerite:switch-editor", { detail: { path: p } }));
+    }
     // Cross-page anchor links scroll to the section after the swap (the
     // browser only does this itself on full page loads).
     const hash = new URL(finalUrl, location.href).hash;
@@ -710,9 +724,19 @@ import "overlayscrollbars/overlayscrollbars.css";
     if (editBtn && editBtn.dataset.editorSrc) {
       ev.preventDefault();
       const mode = editBtn.dataset.editorMode || "page";
+      const line = editBtn.dataset.editorLine;
+      // A section pen remembers its markdown source line: the page editor
+      // opens (or jumps, when already open) scrolled to that section.
+      // Clicking the plain page pen of the open tab closes the shell.
+      if (line != null) window.__pageriteEditLine = +line;
+      else delete window.__pageriteEditLine;
       if (document.body.classList.contains("editing")
           && document.body.dataset.editorMode === mode) {
-        editorModule?.then((m) => m.closeEditor());
+        if (line != null) {
+          dispatchEvent(new CustomEvent("pagerite:edit-section"));
+        } else {
+          editorModule?.then((m) => m.closeEditor());
+        }
         return;
       }
       for (const css of (editBtn.dataset.editorCss || "").split(",")) {
