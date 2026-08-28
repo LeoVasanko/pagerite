@@ -566,7 +566,7 @@ article h6 {
 
 article h1 {
   font-size: 2.2rem;
-  margin: 2rem 0 1.2rem;
+  margin: 0 0 1.2rem;
 }
 
 /* Margin strategy: bottom-only inside articles. Top margins misalign
@@ -579,6 +579,7 @@ article blockquote,
 article pre,
 article figure,
 article table,
+article h2,
 article h3,
 article h4,
 article h5,
@@ -588,14 +589,32 @@ article h6 {
 }
 
 /* Headings separate from the text above via a top margin on the sibling
-   combinator: a heading that is the first child of a container (e.g. the
-   top of a .colseg column segment) gets no gap, and browsers truncate the
-   margin at column breaks, so column tops stay aligned. */
+   combinator: a heading that is the first child of a container (an aside,
+   an admonition, a .colseg column segment, ...) gets no gap, and browsers
+   truncate the margin at column breaks, so column tops stay aligned. The
+   one exception is a page-top heading: main carries no top padding, so a
+   leading h1/h2 keeps its spacing from the banner. */
 article h3,
 article h4,
 article h5,
 article h6 {
   margin-bottom: 0.4rem;
+}
+
+article * + h1,
+article > h1:first-child {
+  margin-top: 2rem;
+}
+
+article * + h2,
+article > h2:first-child {
+  margin-top: 2.2rem;
+}
+
+/* A section heading right after the page title needs no separator of its
+   own — the h1's bottom margin already sets it off. */
+article h1 + h2 {
+  margin-top: 0;
 }
 
 article * + h3,
@@ -833,7 +852,10 @@ article.multicol {
 
 article h2 {
   font-size: 1.5rem;
-  margin: 2.2rem 0 0.6rem;
+  /* Bottom-only like every other block (margin-top: 0 comes from the group
+     above); the section-separator top margin lives in the sibling rule, and
+     a shorthand here would tie on specificity and clobber it. */
+  margin-bottom: 0.6rem;
 }
 
 /* Heading self-links (section anchors) look exactly like plain heading
