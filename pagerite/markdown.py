@@ -10,7 +10,8 @@ note/tip/warning/etc., the title optional) and GitHub-style alerts
 same callout styling). ``::: name`` opens a generic container rendered
 as ``<div class="name">`` and closed by a matching ``:::`` (nest by
 giving the outer container more colons, e.g. `::::`); the name may be
-followed by brace attributes (``::: aside {.right}``). ``::: aside``
+followed by brace attributes (``::: aside {.right}``), or omitted for a
+pandoc-style nameless div (``::: {.aside}``). ``::: aside``
 floats as a muted side box, floating in the side zone at the article's
 left on all but phone widths — the same margin float ``{.margin}`` (or
 ``::: margin``) gives any block — and ``::: nocols`` opts its section out
@@ -107,15 +108,29 @@ def _fence_rule(
 ) -> str:
     """Render a fenced code block.
 
-    Like the default fence rule, but block attributes (a trailing `{...}`
-    line, applied to the fence token by _block_attrs) go on the <pre> — the
-    block element — instead of the <code>, which keeps only the language
-    class. This is what makes e.g. `{.wide}` or `{style="..."}` after a
-    code fence style the block itself.
+    Like the default fence rule, but block attributes go on the <pre> —
+    the block element — instead of the <code>, which keeps only the
+    language class. Attributes are accepted both pandoc-style on the
+    info line (```{.python .wide #id key=val} — the first class is the
+    language when no bare language word precedes the braces) and as a
+    trailing `{...}` line applied by _block_attrs. This is what makes
+    e.g. `{.wide}` or `{style="..."}` style the block itself.
     """
     token = tokens[idx]
     info = token.info.strip() if token.info else ""
-    lang = info.split(maxsplit=1)[0] if info else ""
+    lang, _, brace = info.partition("{")
+    lang = lang.split(maxsplit=1)[0] if lang.strip() else ""
+    if brace:
+        try:
+            _, attrs = parse_attrs("{" + brace)
+        except ParseError:
+            attrs = {}
+        classes = attrs.pop("class", "").split()
+        if not lang and classes:
+            lang = classes.pop(0)
+        if classes:
+            _apply_attrs(token, {"class": " ".join(classes)})
+        _apply_attrs(token, attrs)
     highlighted = _highlight(token.content, lang, "") or escapeHtml(token.content)
     code_class = f' class="{options.langPrefix}{lang}"' if lang else ""
     return (
@@ -226,13 +241,19 @@ def _apply_attrs(token, attrs: dict) -> None:
 
 
 def _container_validate(params: str, _markup: str) -> bool:
-    """`::: name`, optionally followed by brace attrs (`::: aside {.right}`)."""
+    """`::: name`, optionally followed by brace attrs (`::: aside {.right}`).
+
+    Pandoc-style nameless divs (`::: {.aside}`) are accepted too — the
+    attrs alone give the container its classes.
+    """
     name, _, rest = params.strip().partition(" ")
-    if not _CONTAINER_NAME_RE.fullmatch(name):
+    if name.startswith("{"):
+        name, rest = "", params.strip()
+    elif not _CONTAINER_NAME_RE.fullmatch(name):
         return False
     rest = rest.strip()
     if not rest:
-        return True
+        return bool(name)  # a nameless container needs the attrs
     try:
         pos, _ = parse_attrs(rest)
     except ParseError:
@@ -253,8 +274,12 @@ def _container_attrs(state) -> None:
     for token in state.tokens:
         if token.type != "container_block_open":
             continue
-        name, _, rest = token.info.strip().partition(" ")
-        token.attrJoin("class", name)
+        info = token.info.strip()
+        name, _, rest = info.partition(" ")
+        if name.startswith("{"):
+            name, rest = "", info
+        if name:
+            token.attrJoin("class", name)
         if rest.strip():
             _, attrs = parse_attrs(rest.strip())
             _apply_attrs(token, attrs)
