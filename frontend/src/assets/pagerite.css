@@ -646,11 +646,16 @@ article * + h6 {
    theme swaps in. The box is em-sized so it tracks the local text size
    (e.g. smaller in asides); a theme that shrinks the glyph via
    font-size must widen the box by the inverse factor (see the purple
-   theme) to keep it spanning the indent. */
+   theme) to keep it spanning the indent. flow-root makes the list a
+   block formatting context: beside a floated figure the whole list box
+   clears the float (line boxes alone would dodge it while the marker
+   box, outdented from the li's padding edge, stayed under the image),
+   so the gap becomes the figure's margin plus the full --list-indent. */
 article :is(ul, ol:not([type])) {
   list-style: none;
   padding-left: 0;
   --list-indent: 2em;
+  display: flow-root;
 }
 
 article :is(ul, ol:not([type])) > li {
