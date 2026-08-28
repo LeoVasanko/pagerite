@@ -175,14 +175,6 @@ import "overlayscrollbars/overlayscrollbars.css";
     }
 
     if (isAdmin) {
-      // Teach the backend the site's public origin (used for absolute
-      // social/canonical URLs): unlike request headers, location.origin
-      // reflects the real scheme and host even behind reverse proxies.
-      fetch("/_api/site-url", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ url: location.origin }),
-      }).catch(() => {});
       // Warm the cache with the editor bundle: the hashed asset is
       // immutable, so preloading costs nothing and the pens then open
       // instantly. The analytics page has no editor.

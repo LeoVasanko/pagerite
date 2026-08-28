@@ -152,6 +152,15 @@ function externalSlug(origin) {
   }
 }
 
+/** Origin (scheme://host) of an external https URL, for favicon lookup. */
+function externalOrigin(url) {
+  try {
+    return new URL(url).origin
+  } catch {
+    return ''
+  }
+}
+
 /** Format one trail step: an internal page or an external https origin. */
 function stepOf(path, titles) {
   if (path?.startsWith('/')) {
@@ -163,6 +172,7 @@ function stepOf(path, titles) {
       slug: externalSlug(path),
       title: 'External site',
       external: true,
+      origin: externalOrigin(path),
     }
   }
   return null

@@ -75,10 +75,6 @@ class Data(msgspec.Struct):
 
     #: Top-level menu items by slug; "" is the front page.
     menu: dict[str, Node] = {}
-    #: Content-addressed file store: name (blake3 hash prefix + extension)
-    #: -> bytes, served immutable at "/_f/{name}". Absolute URLs that stay
-    #: valid when pages move.
-    files: dict[str, bytes] = {}
     #: Bumped on every structure/content write, so page ETags (which embed
     #: it) invalidate cached copies when navigation-affecting changes happen.
     version: int = 0
@@ -97,15 +93,10 @@ class Data(msgspec.Struct):
     #: Raw site-wide custom CSS, injected inline in every page <head>.
     #: Trusted author content; not sanitized.
     custom_css: str = ""
-    #: Favicon: name of a file in `files` (content-addressed), linked as
-    #: <link rel="icon"> on every page. Empty = the build's /favicon.ico.
+    #: Favicon: content-addressed file name (served at "/_f/{name}"),
+    #: linked as <link rel="icon"> on every page. Empty = the build's
+    #: /favicon.ico.
     favicon: str = ""
-    #: Public origin (scheme + host) of the site, learned from admin
-    #: browsers (POST /_api/site-url — location.origin is correct even
-    #: behind reverse proxies, unlike request Host headers). Used for
-    #: absolute social/canonical URLs; empty = fall back to the request's
-    #: own base URL.
-    site_url: str = ""
     #: Legacy flat page store (pre-tree databases); migrated into `menu`
     #: on startup, then cleared. Never written otherwise.
     pages: dict[str, Page] = {}

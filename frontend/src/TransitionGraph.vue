@@ -20,7 +20,20 @@ const props = defineProps({
   data: { type: Object, default: null },
   window: { type: Object, required: true },
   pageTree: { type: Array, default: null },
+  favicons: { type: Object, default: null },
 })
+
+// origin -> /_f/... icon URL, keyed by the node's origin (source/exit
+// pills only; UTM-tagged source nodes without an https origin stay
+// text-only).
+const extFavicon = (x) => {
+  if (!x.path?.startsWith('https://')) return null
+  try {
+    return props.favicons?.[new URL(x.path).origin] || null
+  } catch {
+    return null
+  }
+}
 
 const dayScale = computed(() => {
   const { t0, t1 } = props.window
@@ -150,6 +163,12 @@ onBeforeUnmount(() => cancelAnimationFrame(rafId))
 // middle) survives the clip. Width estimate: ~0.52 em per glyph.
 const fitsPill = (label, fontPx = 19) => label.length * 0.52 * fontPx <= TNODE_W - 16
 
+// With a favicon the label leaves room for the icon at the pill's left
+// and is always left-anchored past it.
+const labelX = (x) =>
+  extFavicon(x) ? x.x - TNODE_W / 2 + 36 : fitsPill(x.label) ? x.x : x.x - TNODE_W / 2 + 8
+const labelAnchor = (x) => (!extFavicon(x) && fitsPill(x.label) ? 'middle' : 'start')
+
 const countLabel = (n) =>
   n.readSec ? `${formatCount(n.views)}×${formatReadTime(n.readSec)}` : formatCount(n.views)
 </script>
@@ -180,7 +199,8 @@ const countLabel = (n) =>
           <rect :x="x.x - TNODE_W/2" :y="x.y - TNODE_H/2" :width="TNODE_W" :height="TNODE_H" :rx="TNODE_H/2"
                 :class="['txnode', x.kind === 'source' ? 'txnode-source' : 'txnode-exit']" />
           <g :clip-path="`url(#xclip${i})`">
-            <text :x="fitsPill(x.label) ? x.x : x.x - TNODE_W/2 + 8" :y="x.y - TNODE_H*0.16" class="tnodeslug" dominant-baseline="middle" :style="{ textAnchor: fitsPill(x.label) ? 'middle' : 'start' }">{{ x.label }}</text>
+            <image v-if="extFavicon(x)" :href="extFavicon(x)" :x="x.x - TNODE_W/2 + 12" :y="x.y - TNODE_H*0.16 - 11" width="22" height="22" />
+            <text :x="labelX(x)" :y="x.y - TNODE_H*0.16" class="tnodeslug" dominant-baseline="middle" :style="{ textAnchor: labelAnchor(x) }">{{ x.label }}</text>
             <text :x="x.x" :y="x.y + TNODE_H*0.24" class="tnodecount" dominant-baseline="middle">{{ formatCount(x.count) }}</text>
           </g>
         </a>
@@ -189,7 +209,8 @@ const countLabel = (n) =>
           <rect :x="x.x - TNODE_W/2" :y="x.y - TNODE_H/2" :width="TNODE_W" :height="TNODE_H" :rx="TNODE_H/2"
                 :class="['txnode', x.kind === 'source' ? 'txnode-source' : 'txnode-exit']" />
           <g :clip-path="`url(#xclip${i})`">
-            <text :x="fitsPill(x.label) ? x.x : x.x - TNODE_W/2 + 8" :y="x.y - TNODE_H*0.16" class="tnodeslug" dominant-baseline="middle" :style="{ textAnchor: fitsPill(x.label) ? 'middle' : 'start' }">{{ x.label }}</text>
+            <image v-if="extFavicon(x)" :href="extFavicon(x)" :x="x.x - TNODE_W/2 + 12" :y="x.y - TNODE_H*0.16 - 11" width="22" height="22" />
+            <text :x="labelX(x)" :y="x.y - TNODE_H*0.16" class="tnodeslug" dominant-baseline="middle" :style="{ textAnchor: labelAnchor(x) }">{{ x.label }}</text>
             <text :x="x.x" :y="x.y + TNODE_H*0.24" class="tnodecount" dominant-baseline="middle">{{ formatCount(x.count) }}</text>
           </g>
         </g>

@@ -21,7 +21,7 @@ import re
 import shutil
 import socket
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from email.utils import format_datetime
 from functools import lru_cache
@@ -30,7 +30,7 @@ from urllib.parse import urlparse
 from xml.sax.saxutils import escape as xml_escape
 
 import blake3
-import msgspec
+import httpx
 from fastapi import (
     FastAPI,
     HTTPException,
@@ -58,13 +58,25 @@ from pagerite.data import (
 )
 from pagerite.markdown import has_h1, render, toggle_task
 
-DB_PATH = os.getenv("PAGERITE_DB", "pagerite.kantadb")
+# Site identity: the hostname comes from the CLI (first positional argument,
+# exported as PAGERITE_HOSTNAME) and names the per-site data directory
+# ``<hostname>/{content.kantadb, analytics.json, files}`` under the cwd.
+HOSTNAME = os.getenv("PAGERITE_HOSTNAME", "localhost")
+SITE_DIR = Path(HOSTNAME)
+#: Public origin of the site, used for absolute social/canonical/sitemap
+#: URLs. Localhost serves varying ports, so it falls back to the request's
+#: own base URL instead.
+SITE_URL = f"https://{HOSTNAME}" if HOSTNAME != "localhost" else ""
+
+DB_PATH = os.getenv("PAGERITE_DB", str(SITE_DIR / "content.kantadb"))
 
 # Visit analytics go to their own JSON file, not the kanta database.
-ANALYTICS_PATH = Path(
-    os.getenv("PAGERITE_ANALYTICS", DB_PATH.replace(".kantadb", "") + ".analytics.json")
-)
+ANALYTICS_PATH = Path(os.getenv("PAGERITE_ANALYTICS", str(SITE_DIR / "analytics.json")))
 analytics_store = analytics.Store(ANALYTICS_PATH)
+
+# Content-addressed file store (uploads, seed assets, fetched favicons):
+# files on disk under hash-prefixed names, cached in RAM, served at /_f/.
+FILES_DIR = Path(os.getenv("PAGERITE_FILES", str(SITE_DIR / "files")))
 
 # Live WebSocket clients for the analytics stream.
 _analytics_ws_clients: set[WebSocket] = set()
@@ -160,7 +172,7 @@ _geoip = GeoIP()
 
 # Our own data root; kanta edits it in place, reads are plain attribute access.
 data = Data()
-kanta = Kanta(DB_PATH, data)
+kanta = Kanta(DB_PATH, data, migrations="pagerite.migrations")
 
 # Vue build served at the site root, no SPA catch-all (assets only). The
 # build mirrors the URL space: hashed, immutable files live under
@@ -178,7 +190,7 @@ def _hash_name(body: bytes, orig: str) -> str:
 def _store_seed_file(markdown: str, banner: str, orig: str, body: bytes) -> tuple[str, str]:
     """Store a seed file content-addressed and point references at /_f/."""
     name = _hash_name(body, orig)
-    data.files.setdefault(name, body)
+    file_store.put(name, body)
     markdown = markdown.replace(f"]({orig}", f"](/_f/{name}")
     banner = banner.replace(f'src="/{orig}"', f'src="/_f/{name}"')
     banner = banner.replace(f'src="{orig}"', f'src="/_f/{name}"')
@@ -259,12 +271,15 @@ def _seed(data: Data) -> None:
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Open the database, migrate legacy content, load assets, load GeoIP."""
     await kanta.open()
+    await asyncio.to_thread(file_store.load)
     _migrate_legacy()
     await frontend.load()
     # Decompress/open the DB-IP MMDB once at startup.  Lookups are then
     # read-only and safe to run in background ``to_thread`` workers.
     await asyncio.to_thread(_geoip._load)
     analytics_store.subscribe(_schedule_analytics_broadcast)
+    # Backfill favicons for external sites already in the recorded data.
+    _schedule_favicon_fetch()
     yield
     analytics_store.unsubscribe(_schedule_analytics_broadcast)
     await kanta.close()
@@ -293,6 +308,57 @@ async def _headers(request: Request, call_next) -> Response:
 # Dynamic HTML is compressed per request at level 9 (static assets are
 # already pre-compressed by fastapi-vue's Frontend).
 _zstd = ZstdCompressor(9)
+
+
+class FileStore:
+    """Content-addressed files on disk, fully cached in RAM.
+
+    Every file is kept in RAM uncompressed and zstd-compressed (the
+    compressed copy only when it actually shrinks the body), so ``/_f``
+    serves both encodings without touching disk or re-compressing.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        #: name -> (uncompressed body, zstd body or None)
+        self._cache: dict[str, tuple[bytes, bytes | None]] = {}
+
+    @staticmethod
+    def _entry(body: bytes) -> tuple[bytes, bytes | None]:
+        compressed = _zstd.compress(body)
+        return body, compressed if len(compressed) < len(body) else None
+
+    def load(self) -> None:
+        """Read every stored file into the RAM cache (startup)."""
+        try:
+            entries = sorted(self.path.iterdir())
+        except FileNotFoundError:
+            return
+        for f in entries:
+            if f.is_file() and not f.name.startswith("."):
+                self._cache.setdefault(f.name, self._entry(f.read_bytes()))
+
+    def get(self, name: str) -> tuple[bytes, bytes | None] | None:
+        return self._cache.get(name)
+
+    def put(self, name: str, body: bytes) -> None:
+        """Store ``body`` under ``name`` on disk and in the RAM cache."""
+        if name in self._cache:
+            return
+        self.path.mkdir(parents=True, exist_ok=True)
+        (self.path / name).write_bytes(body)
+        self._cache[name] = self._entry(body)
+
+    def delete(self, name: str) -> None:
+        self._cache.pop(name, None)
+        with suppress(FileNotFoundError):
+            (self.path / name).unlink()
+
+    def __contains__(self, name: str) -> bool:
+        return name in self._cache
+
+
+file_store = FileStore(FILES_DIR)
 
 
 def _render_html(kind: str, path: str, base_url: str) -> str:
@@ -341,9 +407,9 @@ def _html_response(
     if-none-match revalidations with a 304.
     """
     zstd = "zstd" in request.headers.get("accept-encoding", "")
-    # Absolute social/canonical URLs use the learned public origin; until
-    # an admin visit teaches it, fall back to the request's own base URL.
-    base_url = data.site_url or str(request.base_url).rstrip("/")
+    # Absolute social/canonical URLs use the site's public origin; on
+    # localhost (varying ports) fall back to the request's own base URL.
+    base_url = SITE_URL or str(request.base_url).rstrip("/")
     if DEVMODE:
         identity = _render_html(kind, path, base_url).encode()
         body = _zstd.compress(identity) if zstd else identity
@@ -516,33 +582,6 @@ async def put_settings(settings: SettingsIn) -> None:
         data.version += 1
 
 
-class SiteUrlIn(BaseModel):
-    """Payload for learning the site's public origin."""
-
-    url: str
-
-
-@app.post("/_api/site-url", status_code=204)
-async def learn_site_url(payload: SiteUrlIn) -> None:
-    """Learn the site's public origin (scheme + host) from an admin browser.
-
-    pagerite.js reports location.origin once an admin session is detected:
-    unlike request Host headers it reflects the real public scheme and host
-    even behind reverse proxies, with zero manual configuration. Stored in
-    the database with a version bump so cached pages re-render with correct
-    absolute social/canonical URLs.
-    """
-    url = payload.url.rstrip("/")
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.path:
-        raise HTTPException(400, "not an origin")
-    if url == data.site_url:
-        return
-    with kanta.transaction("learn site url"):
-        data.site_url = url
-        data.version += 1
-
-
 @app.put("/_api/settings/favicon")
 async def put_favicon(request: Request) -> dict[str, str]:
     """Upload a favicon into the content-addressed store and activate it.
@@ -555,8 +594,8 @@ async def put_favicon(request: Request) -> dict[str, str]:
     if not body:
         raise HTTPException(400, "empty file")
     stored = _hash_name(body, request.headers.get("x-filename", "favicon.ico"))
+    file_store.put(stored, body)
     with kanta.transaction("upload favicon"):
-        data.files[stored] = body
         data.favicon = stored
         data.version += 1
     return {"path": f"/_f/{stored}"}
@@ -622,9 +661,7 @@ async def upload_file(name: str, request: Request) -> dict[str, str]:
         raise HTTPException(400, "bad file name")
     body = await request.body()
     stored = _hash_name(body, name)
-    with kanta.transaction("upload file", extra=name):
-        data.files[stored] = body
-        data.version += 1
+    file_store.put(stored, body)
     return {"path": f"/_f/{stored}"}
 
 
@@ -632,11 +669,9 @@ async def upload_file(name: str, request: Request) -> dict[str, str]:
 async def delete_file(name: str) -> None:
     """Remove a file from the content-addressed store (no refcounting:
     other pages referencing the same content will 404)."""
-    if name not in data.files:
+    if name not in file_store:
         raise HTTPException(404, "no such file")
-    with kanta.transaction("delete file", extra=name):
-        del data.files[name]
-        data.version += 1
+    file_store.delete(name)
 
 
 @app.get("/_themes/{name}/{filename}")
@@ -676,18 +711,22 @@ async def theme_file(name: str, filename: str, request: Request) -> Response:
 @app.get("/_f/{name}")
 async def stored_file(name: str, request: Request) -> Response:
     """Serve a file from the content-addressed store (immutable: the name
-    is its own hash, so cache forever)."""
-    body = data.files.get(name)
-    if body is None:
+    is its own hash, so cache forever).  Bodies are served from the RAM
+    cache, zstd-compressed when the client accepts it and compression
+    actually shrank the file."""
+    entry = file_store.get(name)
+    if entry is None:
         raise HTTPException(404)
     if request.headers.get("if-none-match") == name:
         return Response(status_code=304)
+    body, compressed = entry
+    headers = {"etag": name, "cache-control": "public, max-age=31536000, immutable"}
+    if compressed is not None and "zstd" in request.headers.get("accept-encoding", ""):
+        headers["content-encoding"] = "zstd"
+        headers["vary"] = "accept-encoding"
+        body = compressed
     mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
-    return Response(
-        body,
-        media_type=mime,
-        headers={"etag": name, "cache-control": "public, max-age=31536000, immutable"},
-    )
+    return Response(body, media_type=mime, headers=headers)
 
 
 @app.delete("/_api/pages/{path:path}", status_code=204)
@@ -778,6 +817,68 @@ def _schedule_client_enrichment(client_hashes: list[bytes]) -> None:
         asyncio.create_task(_enrich_client(client_hash))
 
 
+#: Icon MIME -> file extension for the stored favicon name.  The extension
+#: reflects the actual content, not the /favicon.ico request path.
+_FAVICON_EXT = {
+    "image/x-icon": ".ico",
+    "image/vnd.microsoft.icon": ".ico",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+    "image/avif": ".avif",
+    "image/svg+xml": ".svg",
+}
+
+_FAVICON_MAX_BYTES = 65536
+
+#: Origins with a fetch task currently in flight.
+_favicon_in_flight: set[str] = set()
+
+
+async def _fetch_favicon(origin: str) -> None:
+    """Fetch ``{origin}/favicon.ico`` and store it content-hashed on disk.
+
+    The result (icon file name, or "" for a miss) is recorded in the
+    analytics store; misses are retried after analytics._FAVICON_RETRY.
+    Never raises: analytics must not break page serving.
+    """
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=8) as client:
+            r = await client.get(f"{origin}/favicon.ico")
+        body = r.content
+        if not (200 <= r.status_code < 300) or not body or len(body) > _FAVICON_MAX_BYTES:
+            analytics_store.record_favicon(origin)
+            return
+        mime = r.headers.get("content-type", "").split(";")[0].strip().lower()
+        if not mime.startswith("image/"):
+            # Served without an image type: sniff SVG, else assume ICO.
+            if b"<svg" in body[:1024]:
+                mime = "image/svg+xml"
+            elif mime in ("", "application/octet-stream", "text/plain"):
+                mime = "image/x-icon"
+            else:
+                analytics_store.record_favicon(origin)
+                return
+        ext = _FAVICON_EXT.get(mime, ".ico")
+        name = _hash_name(body, f"favicon{ext}")
+        file_store.put(name, body)
+        analytics_store.record_favicon(origin, name)
+    except (httpx.HTTPError, OSError):
+        analytics_store.record_favicon(origin)
+    finally:
+        _favicon_in_flight.discard(origin)
+
+
+def _schedule_favicon_fetch() -> None:
+    """Start background favicon fetches for origins that need one."""
+    for origin in analytics_store.favicon_origins_needed():
+        if origin in _favicon_in_flight:
+            continue
+        _favicon_in_flight.add(origin)
+        asyncio.create_task(_fetch_favicon(origin))
+
+
 async def _broadcast_analytics() -> None:
     """Send the current analytics snapshot to every connected WS client."""
     if not _analytics_ws_clients:
@@ -857,6 +958,7 @@ async def analytics_ping(
         visit = analytics_store.data.visits[visit_index]
         asyncio.create_task(_enrich_client(visit.client))
     _schedule_client_enrichment(flushed_clients)
+    _schedule_favicon_fetch()
 
 
 def _track_entry(path: str, request: Request, *, status: int = 200) -> list[bytes]:
@@ -888,7 +990,7 @@ def _track_entry(path: str, request: Request, *, status: int = 200) -> list[byte
         and _client_ip(request) == "127.0.0.1"
     ):
         return []
-    own_origin = f"https://{urlparse(str(request.base_url)).netloc}"
+    own_origin = SITE_URL or f"https://{urlparse(str(request.base_url)).netloc}"
     full_path = f"{request.url.path}{_query_suffix(request)}"
     return analytics_store.track_entry(
         request.headers.get("referer", ""),
@@ -1112,7 +1214,7 @@ async def front_page(request: Request) -> Response:
 @app.get("/sitemap.xml")
 async def sitemap(request: Request) -> Response:
     """Dynamically generate a sitemap of all published article pages."""
-    base = str(request.base_url).rstrip("/")
+    base = SITE_URL or str(request.base_url).rstrip("/")
     entries: list[tuple[str, datetime, int]] = []
 
     def walk(
@@ -1175,7 +1277,7 @@ async def sitemap(request: Request) -> Response:
 @app.get("/robots.txt")
 async def robots_txt(request: Request) -> Response:
     """Allow all crawling and point crawlers at the sitemap."""
-    base = str(request.base_url).rstrip("/")
+    base = SITE_URL or str(request.base_url).rstrip("/")
     body = f"User-agent: *\nAllow: /\nSitemap: {base}/sitemap.xml\n"
     return Response(
         body,

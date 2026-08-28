@@ -190,11 +190,27 @@ class AbuseHit(msgspec.Struct, omit_defaults=True):
     is_404: bool = False
 
 
+class Favicon(msgspec.Struct, omit_defaults=True):
+    """Favicon fetch record for one external https origin.
+
+    The icon itself is stored on disk under a content-hashed name (like
+    uploads, but outside the kanta db), referenced here by ``file``; an
+    empty ``file`` is a known miss, retried after ``_FAVICON_RETRY``.
+    """
+
+    #: Content-hashed file name of the stored icon, "" when the fetch failed.
+    file: str = ""
+    #: When the fetch was last attempted.
+    fetched: datetime | None = None
+
+
 class Analytics(msgspec.Struct, omit_defaults=True):
     """Root of the analytics JSON file. Append-only by design: old data is
     dropped by deleting list entries / bucket keys."""
 
     visits: list[Visit] = []
+    #: Favicon fetch records keyed by external https origin.
+    favicons: dict[str, Favicon] = {}
     #: Document GETs that never produced a ping, treated as crawler/bot hits.
     crawlers: list[CrawlerHit] = []
     #: Requests from abusive IPs (see AbuseHit), grouped by IP in the viewer.
@@ -219,6 +235,9 @@ class Display(msgspec.Struct, omit_defaults=True):
     crawlers: list[CrawlerHit] = []
     abuse: list[AbuseHit] = []
     clients: dict[bytes, Client] = {}
+    #: origin -> URL path of the stored favicon ("/_favicons/<file>"),
+    #: only for origins whose icon was fetched successfully.
+    favicons: dict[str, str] = {}
     #: Page transitions per 5-minute bucket (sparse):
     #: from -> to -> bucket ISO -> count. ``from`` is the referer origin or
     #: "(direct)" for initial loads, a page path for pings.
@@ -301,6 +320,9 @@ def _utm_tags(query: str) -> dict[str, str]:
 
 
 _CRAWLER_TIMEOUT = timedelta(seconds=10)
+
+#: How long a failed favicon fetch suppresses retries for the same origin.
+_FAVICON_RETRY = timedelta(days=7)
 
 #: UAs of JS-running crawlers, which would register as visitors on their
 #: ping.  Anything calling itself a "bot" or "spider" matches; known crawlers
@@ -470,6 +492,11 @@ class Store:
             crawlers=[h for h in self.data.crawlers if not self._hidden(h.client)],
             abuse=[h for h in self.data.abuse if not self._hidden(h.client)],
             clients={h: c for h, c in self.data.clients.items() if not c.hide},
+            favicons={
+                origin: f"/_f/{f.file}"
+                for origin, f in self.data.favicons.items()
+                if f.file
+            },
         )
         for visit in visits:
             bucket = _bucket(visit.start)
@@ -543,6 +570,34 @@ class Store:
             changed = True
         if changed:
             self._save()
+
+    def favicon_origins_needed(self) -> list[str]:
+        """External https origins seen in visits whose favicon needs fetching.
+
+        Covers visit referers and external exit targets (trail and navs).
+        Origins with a stored icon, or a miss younger than
+        ``_FAVICON_RETRY``, are skipped.
+        """
+        origins: set[str] = set()
+        for visit in self.data.visits:
+            if visit.referer:
+                origins.add(visit.referer)
+            for target in list(visit.trail.values()) + list(visit.navs.values()):
+                origin = _origin(target.to)
+                if origin is not None:
+                    origins.add(origin)
+        now = datetime.now(UTC)
+        return [
+            origin
+            for origin in origins
+            if (f := self.data.favicons.get(origin)) is None
+            or (not f.file and (f.fetched is None or now - f.fetched > _FAVICON_RETRY))
+        ]
+
+    def record_favicon(self, origin: str, file: str = "") -> None:
+        """Store the favicon fetch result for ``origin`` ("" = miss)."""
+        self.data.favicons[origin] = Favicon(file=file, fetched=datetime.now(UTC))
+        self._save()
 
     def _abuse_hit(
         self,

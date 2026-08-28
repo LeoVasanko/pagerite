@@ -1,8 +1,7 @@
 .*
 !.gitignore
 *.lock
-*.kantadb
-pagerite.analytics.json
+/localhost
 dbip-*.mmdb*
 /pagerite/frontend-build
 package-lock.json

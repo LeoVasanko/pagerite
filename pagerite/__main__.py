@@ -74,6 +74,14 @@ def main() -> None:
     """Run the backend server with optional arguments."""
     parser = argparse.ArgumentParser(description="Run the pagerite server.")
     parser.add_argument(
+        "hostname",
+        nargs="?",
+        default="localhost",
+        help=("Public hostname of the site; names the data directory "
+              "<hostname>/{content.kantadb, analytics.json, files} under the "
+              "cwd (default: localhost)."),
+    )
+    parser.add_argument(
         "-l",
         "--listen",
         action="append",
@@ -85,6 +93,9 @@ def main() -> None:
         help="Download/update the DB-IP city lite database before starting.",
     )
     args = parser.parse_args()
+    # Export the hostname before pagerite.app is imported: it derives the
+    # data directory and public origin from it at import time.
+    os.environ["PAGERITE_HOSTNAME"] = args.hostname
     if args.dbip:
         _download_dbip()
     dev = {"reload": True, "reload_dirs": ["pagerite"]} if DEVMODE else {}

@@ -130,6 +130,7 @@ watch(range, (r) => {
 })
 
 const clients = computed(() => data.value?.clients || {})
+const favicons = computed(() => data.value?.favicons || {})
 const visitRows = computed(() => formatVisitRows(visits.value, clients.value, pageTree.value, now.value))
 const crawlers = computed(() => rangeData.value?.crawlers || [])
 const crawlerRows = computed(() => formatCrawlerRows(crawlers.value, clients.value, pageTree.value, now.value))
@@ -161,7 +162,7 @@ const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], c
         </section>
 
         <VisitorCharts :data="data" :range="range" />
-        <TransitionGraph :data="rangeData" :window="window" :page-tree="pageTree" />
+        <TransitionGraph :data="rangeData" :window="window" :page-tree="pageTree" :favicons="favicons" />
 
         <section>
           <h2>Recent visits</h2>
@@ -177,9 +178,9 @@ const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], c
               <tbody>
                 <tr v-for="(v, i) in visitRows" :key="i">
                   <td class="trail">
-                    <TrailLink v-if="v.refererStep" :step="v.refererStep" @close="$emit('close')" />
+                    <TrailLink v-if="v.refererStep" :step="v.refererStep" :favicons="favicons" @close="$emit('close')" />
                     <span v-if="v.utm && v.utm !== '—'" class="utm-tag small muted" :title="v.utmTitle">{{ v.utm }}</span>
-                    <TrailLink v-for="(s, si) in v.trail" :key="si" :step="s" @close="$emit('close')" />
+                    <TrailLink v-for="(s, si) in v.trail" :key="si" :step="s" :favicons="favicons" @close="$emit('close')" />
                   </td>
                   <VisitorCell
                     :ip="v.ip"

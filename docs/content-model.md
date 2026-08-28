@@ -14,7 +14,7 @@ Siblings order by the fractional `Node.order` key: a moved item gets a fresh key
 
 ## Files
 
-`Data.files` is a content-addressed store (blake3[:12] + extension) mapping file names to bytes, served at `/_f/{name}` with immutable caching; pages reference files by absolute `/_f/` URLs so hierarchy moves never break them.
+Files are content-addressed (blake3[:12] + extension) and stored **on disk** under `<hostname>/files/` (path from `PAGERITE_FILES`), served at `/_f/{name}` with immutable caching; the `FileStore` in app.py caches every file in RAM, both uncompressed and zstd-compressed (the compressed copy only when smaller), so `/_f` answers both encodings without disk reads. Pages reference files by absolute `/_f/` URLs so hierarchy moves never break them. Pre-refactor databases kept the blobs in a `Data.files` kanta field; the kanta migration `pagerite/migrations.py::migrate_v1` writes them to disk on open and drops the field (removed from `Data`). Fetched favicons of external analytics sites live in the same store (see `docs/analytics.md`).
 
 ## Banners
 
@@ -26,10 +26,10 @@ Siblings order by the fractional `Node.order` key: a moved item gets a fresh key
 
 `Data.brand` is the site name (header link + `<title>` suffix), editable in the site editor via `/_api/settings`; empty = no header link and no `<title>` suffix.
 
-`Data.brand_html` is raw trusted HTML replacing the brand link entirely (rendered in a `#brand` div on top of the banner, next to the nav) — site-wide, not per-page like banners; edited in the site editor with image/video upload into `Data.files`.
+`Data.brand_html` is raw trusted HTML replacing the brand link entirely (rendered in a `#brand` div on top of the banner, next to the nav) — site-wide, not per-page like banners; edited in the site editor with image/video upload into the content-addressed file store.
 
 `Data.theme` is the active theme name (empty = none/base only); themes are folders in `pagerite/themes/{name}` containing `theme.css` and/or `banner.css` (+ `banner.svg` artwork and any extra assets the CSS references, like summer's `grass.svg`), served by the backend at `/_themes/{name}/...` — read from disk per request (etag by mtime), never built, so on-disk edits show on the next page load even in prod. The theme selector and banner-design selector enumerate these folders via `GET /_api/settings`.
 
 `Data.custom_css` is raw trusted CSS injected inline in every page `<head>` (id `pagerite-user`) and swapped during fetch-navigation; editable in the site editor. Font picks (heading/body/brand) in the site editor are stored as plain `:root` rows in `custom_css` (`--font-body: var(--font-source-sans);` format — parsed out and rewritten on change, the `:root` block added/removed as needed), referencing the per-family variables (`--font-source-sans` etc.) from `pagerite.css`; the base stylesheet's `--font-brand` defaults to `var(--font-heading)`.
 
-`Data.favicon` names a file in the content-addressed `files` store, uploaded/cleared in the site editor via `PUT`/`DELETE /_api/settings/favicon`; when set it is linked as `<link rel="icon">` on every page, otherwise browsers fall back to the build's `/favicon.ico` by convention.
+`Data.favicon` names a file in the content-addressed store (on disk under `<hostname>/files/`), uploaded/cleared in the site editor via `PUT`/`DELETE /_api/settings/favicon`; when set it is linked as `<link rel="icon">` on every page, otherwise browsers fall back to the build's `/favicon.ico` by convention.

@@ -2,11 +2,11 @@
 
 Server-side visit analytics. Data lives in a plain JSON file — a msgspec
 Struct dumped to disk — separate from the kanta content database, path from
-`PAGERITE_ANALYTICS` (default: the database path with `.kantadb` replaced by
-`.analytics.json`, e.g. `pagerite.analytics.json`).
+`PAGERITE_ANALYTICS` (default: `analytics.json` in the per-site data
+directory, e.g. `localhost/analytics.json`).
 
 - `pagerite/analytics.py` — data model (`Analytics`, `Client`, `Visit`,
-  `CrawlerHit`, `AbuseHit`) and the `Store` (in-memory data + session map,
+  `CrawlerHit`, `AbuseHit`, `Favicon`) and the `Store` (in-memory data + session map,
   atomic JSON persistence).
 - `pagerite/app.py` — entry-referer stashing in `show_page` (`_track_entry`),
   the `POST /_a` ping endpoint, and `WebSocket /_api/ws/analytics`
@@ -73,6 +73,20 @@ falsy values are omitted):
 - The server validates `to`: internal paths must be valid slug paths
   ("/" or `[a-z0-9_-]` segments), external ones are re-derived to the
   https origin and accepted only when the client sent exactly that.
+- **External-site favicons**: for every external https origin seen as a visit
+  referer or an exit link, the server fetches `{origin}/favicon.ico` in a
+  background task (httpx, 8 s timeout, ≤ 64 KB, image content-types only —
+  SVG is sniffed from the body when served without an image type) and stores
+  the icon content-hashed on disk in the FileStore (served at `/_f/{name}`,
+  extension matching the actual MIME).  The origin → file name mapping is
+  recorded in `Analytics.favicons` (`Favicon.file`/`fetched`); misses are
+  recorded too and retried only after 7 days.  Fetches are scheduled after
+  each ping and once at startup, which backfills icons for already-recorded
+  data.  The viewer payload carries `favicons` (origin → `/_f/...` path),
+  and the viewer shows the icon wherever an external site is mentioned:
+  referer/exit trail links in the visit table and the source/exit pills of
+  the transition map (UTM-attributed source nodes without an https origin
+  stay text-only).
 - **Client records**: the visitor's IP (IPv4 or IPv6 /64 network), raw
   `User-Agent` and extracted `Accept-Language` tag are hashed with blake3;
   the first 6 bytes identify a shared `Client` record.  The `Client` stores

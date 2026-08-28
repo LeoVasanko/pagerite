@@ -22,6 +22,10 @@ The `::view-transition*` block at the end of `pagerite.css` (from termotohtori.f
 
 Vite builds ES-module `.js` outputs; in dev the backend links them as `<script type="module">` (module scripts defer by default), in production it inlines them at the end of the body.
 
-## Database file
+## Data directory
 
-The database file is `pagerite.kantadb` in the cwd (`PAGERITE_DB` overrides); gitignored. Do not delete it without asking.
+All site data lives under `<hostname>/` in the cwd — `content.kantadb`,
+`analytics.json` and `files/` — where `<hostname>` is the CLI's first
+positional argument (default `localhost`, exported as `PAGERITE_HOSTNAME`;
+`PAGERITE_DB`/`PAGERITE_ANALYTICS`/`PAGERITE_FILES` override individual
+paths). gitignored. Do not delete it without asking.
