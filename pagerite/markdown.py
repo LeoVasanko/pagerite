@@ -27,12 +27,16 @@ render() also builds the layout structure: the top-level blocks are
 segmented for the column layout — h1/h2 headings, ``.wide`` blocks and
 margin-breakout blocks (``.margin``, ``::: aside``) stand on their own,
 the runs between them are wrapped in ``<div class="colseg">`` (tagged
-``.cols`` when the segment holds enough text, unless a ``::: nocols``
-container opts it out). The result carries ``multicol`` when the whole
-body justifies columns (views.py puts the class on the article); how
-many columns (never more than two), whether the margin breakout applies
-and every other viewport adaptation is then pagerite.css's call. The
-thresholds measure visible text, code blocks excluded.
+``.cols`` when the segment holds enough text — COLS_TEXT — in at least
+COLS_PARAS paragraphs or one paragraph long enough to turn .breakable,
+unless a ``::: nocols`` container opts it out;
+in column segments, paragraphs past BREAKABLE_TEXT are marked
+``.breakable`` so they may split across columns). The result carries
+``multicol`` when the whole body justifies columns (views.py puts the
+class on the article); how many columns (never more than two), whether
+the margin breakout applies and every other viewport adaptation is then
+pagerite.css's call. The thresholds measure visible text, code blocks
+excluded.
 
 markdown-it's typographer is enabled, so body text gets SmartyPants-style
 replacements: straight quotes become curly, ``--`` / ``---`` become en / em
@@ -434,12 +438,23 @@ md.core.ruler.push("heading_ids", _heading_ids)
 
 # Text-length thresholds (visible characters, code blocks excluded) for the
 # column layout: the article goes .multicol past MULTICOL_TEXT, and a column
-# segment gets .cols past COLS_TEXT.
+# segment gets .cols past COLS_TEXT — provided it also has at least
+# COLS_PARAS paragraphs or a paragraph long enough to turn .breakable: a
+# lone unbreakable paragraph would fill a column on its own and strand the
+# rest (e.g. a floated figure) in the other, leaving a mostly empty column.
 MULTICOL_TEXT = 1800
 COLS_TEXT = 600
+COLS_PARAS = 2
+
+#: Paragraphs past this visible length are marked .breakable, letting them
+#: split across columns (shorter ones stay unbreakable so a paragraph never
+#: straddles the column gap).
+BREAKABLE_TEXT = 800
 
 _PRE_BLOCK_RE = re.compile(r"<pre\b.*?</pre>", re.S)
 _TAG_RE = re.compile(r"<[^>]+>")
+_PARA_OPEN_RE = re.compile(r"<p[\s>]")
+_PARA_RE = re.compile(r"<p((?:\s[^>]*)?)>(.*?)</p>", re.S)
 
 # Classes that take their block out of the column flow: .wide is a
 # full-width separator, .margin/.aside float in the side zone at the
@@ -464,6 +479,28 @@ def _classes(token) -> set[str]:
 def _text_len(html: str) -> int:
     """Visible-text length of rendered HTML, code blocks excluded."""
     return len(_TAG_RE.sub("", _PRE_BLOCK_RE.sub("", html)).strip())
+
+
+def _breakable_paras(html: str) -> str:
+    """Mark column-filling paragraphs .breakable so they may split.
+
+    Columns keep paragraphs whole (break-inside: avoid-column), but a
+    paragraph long enough to fill a column would strand everything after
+    it in a column of its own — these get .breakable, and pagerite.css
+    lets them split across the column gap. Only applied to .cols segments.
+    """
+
+    def repl(m: re.Match[str]) -> str:
+        attrs, body = m.group(1), m.group(2)
+        if _text_len(body) <= BREAKABLE_TEXT:
+            return m.group(0)
+        if 'class="' in attrs:
+            attrs = attrs.replace('class="', 'class="breakable ', 1)
+        else:
+            attrs = f'{attrs} class="breakable"'
+        return f"<p{attrs}>{body}</p>"
+
+    return _PARA_RE.sub(repl, html)
 
 
 def _top_level_blocks(tokens: list) -> list[list]:
@@ -520,10 +557,12 @@ def render(
     The top-level blocks are grouped into column segments: boundary blocks
     (h1/h2 headings, .wide, margin-breakout blocks — see _is_boundary) are
     rendered bare, the runs between them wrapped in <div class="colseg">.
-    A segment is tagged .cols when it holds enough text (COLS_TEXT) and no
-    ::: nocols container; the article is .multicol when the whole body
-    exceeds MULTICOL_TEXT. pagerite.css keys all column and margin-breakout
-    layout off these classes.
+    A segment is tagged .cols when it holds enough text (COLS_TEXT) in at
+    least two paragraphs (COLS_PARAS) or one breakable-length paragraph,
+    and no ::: nocols container; its long paragraphs are marked .breakable;
+    the article is .multicol when the whole body exceeds MULTICOL_TEXT.
+    pagerite.css keys all column and margin-breakout layout off these
+    classes.
 
     A ``{dates}`` line expands to the article's published/updated dateline
     (needs ``created``/``modified``; left as-is in contexts without them,
@@ -562,7 +601,16 @@ def render(
         nocols = any(
             "nocols" in _classes(t) for t in group if t.type == "container_block_open"
         )
-        cols = " cols" if text_len > COLS_TEXT and not nocols else ""
+        marked = _breakable_paras(html)
+        cols = (
+            " cols"
+            if text_len > COLS_TEXT
+            and not nocols
+            and (len(_PARA_OPEN_RE.findall(html)) >= COLS_PARAS or marked != html)
+            else ""
+        )
+        if cols:
+            html = marked
         parts.append(f'<div class="colseg{cols}">{html}</div>')
     html = "".join(parts)
     if created is not None and "<p>{dates}</p>" in html:
