@@ -89,7 +89,7 @@ class Data(msgspec.Struct):
     #: Active theme name (empty = none/base only). Themes live in
     #: pagerite/themes/{theme}/ (theme.css and/or banner.css/banner.svg/
     #: banner.html), served by the backend from disk.
-    theme: str = "purple"
+    theme: str = "corporate"
     #: Page transition design name (cube, crossfade, ...). Designs live in
     #: pagerite/themes/{name}/transition.css and are injected as
     #: #pagerite-transition on every page.
