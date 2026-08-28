@@ -30,6 +30,8 @@ Files are content-addressed (blake3[:12] + extension) and stored **on disk** und
 
 `Data.theme` is the active theme name (empty = none/base only); themes are folders in `pagerite/themes/{name}` containing `theme.css` and/or `banner.css` (+ `banner.svg` artwork and any extra assets the CSS references, like summer's `grass.svg`), served by the backend at `/_themes/{name}/...` — read from disk per request (etag by mtime), never built, so on-disk edits show on the next page load even in prod. The theme selector and banner-design selector enumerate these folders via `GET /_api/settings`.
 
+`Data.transition` is the page-transition design name (default `cube`): a theme folder shipping `transition.css`, injected as `#pagerite-transition` on every page and selected in the site editor (the selector enumerates `transition.css` folders via `GET /_api/settings`). See `docs/themes-and-assets.md`.
+
 `Data.custom_css` is raw trusted CSS injected inline in every page `<head>` (id `pagerite-user`) and swapped during fetch-navigation; editable in the site editor. Font picks (heading/body/brand) in the site editor are stored as plain `:root` rows in `custom_css` (`--font-body: var(--font-source-sans);` format — parsed out and rewritten on change, the `:root` block added/removed as needed), referencing the per-family variables (`--font-source-sans` etc.) from `pagerite.css`; the base stylesheet's `--font-brand` defaults to `var(--font-heading)`.
 
 `Data.favicon` names a file in the content-addressed store (on disk under `<hostname>/files/`), uploaded/cleared in the site editor via `PUT`/`DELETE /_api/settings/favicon`; when set it is linked as `<link rel="icon">` on every page, otherwise browsers fall back to the build's `/favicon.ico` by convention.

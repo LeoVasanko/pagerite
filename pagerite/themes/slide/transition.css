@@ -1,0 +1,74 @@
+/* Horizontal slide page transition: the old page slides left while the new
+   one follows from the right, both moving together like pages side by side.
+   Injected by the backend as #pagerite-transition when the "slide"
+   transition is selected in the site settings. Mirrored on history-back
+   (html.nav-back); same-section navigation crossfades (html.nav-fade). Both
+   snapshots cover the viewport throughout, so no background shows between
+   them. */
+::view-transition {
+  background: var(--bg);
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  mix-blend-mode: normal;
+  animation: none;
+}
+
+@keyframes slide-out-left {
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+::view-transition-old(root) {
+  animation: 300ms ease-in-out forwards slide-out-left;
+}
+
+::view-transition-new(root) {
+  animation: 300ms ease-in-out slide-in-right;
+}
+
+/* Reverse direction for browser back navigation. */
+@keyframes slide-out-right {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes slide-in-left {
+  from {
+    transform: translateX(-100%);
+  }
+}
+
+html.nav-back::view-transition-old(root) {
+  animation-name: slide-out-right;
+}
+
+html.nav-back::view-transition-new(root) {
+  animation-name: slide-in-left;
+}
+
+/* Same-section navigation: a plain crossfade instead of the slide. The old
+   snapshot stays fully opaque underneath while the new one fades in on
+   top — never a dip to black. */
+@keyframes nav-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+html.nav-fade::view-transition-old(root) {
+  animation: none;
+}
+
+html.nav-fade::view-transition-new(root) {
+  animation: 200ms ease-in-out nav-fade-in;
+}

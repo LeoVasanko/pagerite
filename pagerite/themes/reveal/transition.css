@@ -1,0 +1,52 @@
+/* Wipe-reveal page transition: the old page stays put while the new one is
+   revealed on top of it by a clip-path wipe sweeping left to right.
+   Injected by the backend as #pagerite-transition when the "reveal"
+   transition is selected in the site settings. Mirrored on history-back
+   (html.nav-back: the wipe sweeps right to left); same-section navigation
+   crossfades (html.nav-fade). */
+::view-transition-old(root),
+::view-transition-new(root) {
+  mix-blend-mode: normal;
+  animation: none;
+}
+
+@keyframes reveal-right {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0);
+  }
+}
+
+::view-transition-new(root) {
+  clip-path: inset(0);
+  animation: 350ms ease-in-out reveal-right;
+}
+
+/* Reverse direction for browser back navigation. */
+@keyframes reveal-left {
+  from {
+    clip-path: inset(0 0 0 100%);
+  }
+  to {
+    clip-path: inset(0);
+  }
+}
+
+html.nav-back::view-transition-new(root) {
+  animation-name: reveal-left;
+}
+
+/* Same-section navigation: a plain crossfade instead of the wipe. The old
+   snapshot stays fully opaque underneath while the new one fades in on
+   top — never a dip to black. */
+@keyframes nav-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+html.nav-fade::view-transition-new(root) {
+  animation: 200ms ease-in-out nav-fade-in;
+}

@@ -27,7 +27,7 @@ import "overlayscrollbars/overlayscrollbars.css";
     // canonical order: base < theme < banner design < custom CSS (whose
     // equal-specificity :root rules — font variables — must win by order).
     import("./assets/pagerite.css").then(() => {
-      for (const id of ["pagerite-theme", "pagerite-banner", "pagerite-user"]) {
+      for (const id of ["pagerite-theme", "pagerite-banner", "pagerite-transition", "pagerite-user"]) {
         const el = document.getElementById(id);
         if (el) document.head.append(el);
       }
@@ -687,7 +687,8 @@ import "overlayscrollbars/overlayscrollbars.css";
       applyEffects();
       mountAnalytics(doc);
     };
-    // Rotating cube page transition (see the FRAGILE block in pagerite.css);
+    // Rotating cube page transition (styles injected as #pagerite-transition
+    // from the selected design's transition.css, e.g. themes/cube/);
     // mirrored when navigating back through history. Navigation within the
     // same top-level section crossfades instead, in either direction.
     if (document.startViewTransition && !reduceMotion.matches) {

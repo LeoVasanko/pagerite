@@ -90,6 +90,10 @@ class Data(msgspec.Struct):
     #: pagerite/themes/{theme}/ (theme.css and/or banner.css/banner.svg/
     #: banner.html), served by the backend from disk.
     theme: str = "purple"
+    #: Page transition design name (cube, crossfade, ...). Designs live in
+    #: pagerite/themes/{name}/transition.css and are injected as
+    #: #pagerite-transition on every page.
+    transition: str = "cube"
     #: Raw site-wide custom CSS, injected inline in every page <head>.
     #: Trusted author content; not sanitized.
     custom_css: str = ""

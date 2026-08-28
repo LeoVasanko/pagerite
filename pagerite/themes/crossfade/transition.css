@@ -1,0 +1,20 @@
+/* Crossfade page transition. Injected by the backend as #pagerite-transition
+   when the "crossfade" transition is selected in the site settings. The old
+   snapshot stays fully opaque underneath while the new one fades in on top —
+   never a dip to black. Direction-neutral, so html.nav-back needs no
+   mirroring (and same-section html.nav-fade changes nothing). */
+@keyframes nav-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  mix-blend-mode: normal;
+  animation: none;
+}
+
+::view-transition-new(root) {
+  animation: 200ms ease-in-out nav-fade-in;
+}

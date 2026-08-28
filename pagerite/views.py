@@ -64,6 +64,13 @@ def _banner_design_names() -> list[str]:
     )
 
 
+def _transition_names() -> list[str]:
+    """Available page-transition designs: theme folders with transition.css."""
+    return sorted(
+        d.name for d in THEMES.iterdir() if d.is_dir() and (d / "transition.css").exists()
+    )
+
+
 def _valid_name(name: str) -> bool:
     """Guard against path traversal in theme/design names."""
     return bool(name) and "/" not in name and not name.startswith(".")
@@ -91,6 +98,17 @@ def _banner_css_url(design: str) -> str | None:
     """URL for a banner design's stylesheet, served by the backend."""
     if design and _valid_name(design) and (THEMES / design / "banner.css").exists():
         return f"/_themes/{design}/banner.css"
+    return None
+
+
+def _transition_css_url(transition: str) -> str | None:
+    """URL for a page-transition stylesheet, served by the backend."""
+    if (
+        transition
+        and _valid_name(transition)
+        and (THEMES / transition / "transition.css").exists()
+    ):
+        return f"/_themes/{transition}/transition.css"
     return None
 
 
@@ -146,6 +164,7 @@ def _layout(
     custom_css: str = "",
     theme: str = "",
     banner_design: str = "",
+    transition: str = "cube",
     favicon: str = "",
     social: dict[str, str] | None = None,
 ) -> Template:
@@ -160,7 +179,8 @@ def _layout(
     analytics) stay external in both modes.
 
     Order matters and is fixed: base (Vite build, absent in dev where Vite
-    injects it from JS), theme and banner design (from pagerite/themes/),
+    injects it from JS), theme, banner design and page transition (from
+    pagerite/themes/),
     entry-specific stylesheets (e.g. overlayscrollbars.css), then the user's
     custom CSS last so it always wins.
 
@@ -220,6 +240,7 @@ def _layout(
         ("pagerite-base", _base_css_url(vite_url)),
         ("pagerite-theme", _theme_css_url(theme)),
         ("pagerite-banner", _banner_css_url(banner_design)),
+        ("pagerite-transition", _transition_css_url(transition)),
     ]
     for id_, url in sheets:
         if not url:
@@ -706,6 +727,7 @@ def render_page(
     favicon: str = "",
     brand_html: str = "",
     base_url: str = "",
+    transition: str = "cube",
 ) -> str:
     """Render a full HTML page for the slug path."""
     node = resolve(menu, path)[-1]
@@ -715,7 +737,7 @@ def render_page(
     return str(
         _layout(
             *_page_assets(), custom_css, theme, banner_design(menu, path, theme),
-            favicon, social,
+            transition, favicon, social,
         )(
             Title=f"{title} – {brand}" if brand else title,
             Brand=_brand_link(brand, brand_html),
@@ -735,6 +757,7 @@ def render_category(
     theme: str = "",
     favicon: str = "",
     brand_html: str = "",
+    transition: str = "cube",
 ) -> str:
     """Render the listing for a content-less category label (404).
 
@@ -753,7 +776,7 @@ def render_category(
         else:
             doc.p("This section has no page of its own yet.")
     return str(
-        _layout(*_page_assets(), custom_css, theme, banner_design(menu, path, theme), favicon)(
+        _layout(*_page_assets(), custom_css, theme, banner_design(menu, path, theme), transition, favicon)(
             Title=f"{title} – {brand}" if brand else title,
             Brand=_brand_link(brand, brand_html),
             Nav=nav_html(menu, path),
@@ -772,6 +795,7 @@ def render_not_found(
     theme: str = "",
     favicon: str = "",
     brand_html: str = "",
+    transition: str = "cube",
 ) -> str:
     """Render a 404 page within the normal layout."""
     doc = E.article
@@ -779,7 +803,7 @@ def render_not_found(
         doc.h1("Not Found")
         doc.p(f"No article at /{path}. If there was before, it may have been deleted.")
     return str(
-        _layout(*_page_assets(), custom_css, theme, banner_design(menu, path, theme), favicon)(
+        _layout(*_page_assets(), custom_css, theme, banner_design(menu, path, theme), transition, favicon)(
             Title=f"Not Found – {brand}" if brand else "Not Found",
             Brand=_brand_link(brand, brand_html),
             Nav=nav_html(menu, path),
@@ -847,6 +871,7 @@ def render_analytics(
     theme: str = "",
     favicon: str = "",
     brand_html: str = "",
+    transition: str = "cube",
 ) -> str:
     """Render the analytics viewer as a normal page at /_a.
 
@@ -872,6 +897,7 @@ def render_analytics(
             custom_css,
             theme,
             banner_design(menu, "_a", theme),
+            transition,
             favicon,
         )(
             Title=f"Analytics – {brand}" if brand else "Analytics",

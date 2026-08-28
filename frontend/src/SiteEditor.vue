@@ -57,6 +57,10 @@ const theme = ref('')
 // Theme options come from the backend (theme folders on disk, see GET
 // /_api/settings), so added themes need no frontend changes.
 const themeOptions = ref([{ value: '', label: 'none' }])
+// Page transition (cube, crossfade, ...): a design folder with
+// transition.css under pagerite/themes/, injected as #pagerite-transition.
+const transition = ref('cube')
+const transitionOptions = ref([])
 
 async function loadSettings() {
   try {
@@ -72,6 +76,8 @@ async function loadSettings() {
       { value: '', label: 'none' },
       ...(s.themes || []).map((t) => ({ value: t, label: t })),
     ]
+    transition.value = s.transition || 'cube'
+    transitionOptions.value = s.transitions || []
   } catch { /* keep default */ }
 }
 
@@ -230,6 +236,7 @@ async function saveSettings(opts = {}) {
       theme: theme.value,
       custom_css: customCss.value,
       brand_html: brandHtml.value,
+      transition: transition.value,
       ...opts,
     }),
   })
@@ -283,6 +290,37 @@ async function onThemeChange() {
     el.remove()
   }
   loadPlain(path.value)
+}
+
+async function onTransitionChange() {
+  await saveSettings()
+  // Transition CSS is backend-served at /_themes/{name}/transition.css in
+  // both dev and prod (<link> in dev, inline <style> in prod), like the
+  // theme. Swap #pagerite-transition in place — it only styles view
+  // transitions, so no re-render of the page regions is needed.
+  let el = document.getElementById('pagerite-transition')
+  const url = `/_themes/${transition.value}/transition.css`
+  if (el?.tagName === 'STYLE') {
+    el.textContent = await (await fetch(url)).text()
+  } else if (el) {
+    el.href = url
+  } else {
+    // Missing (created before this feature, or "none" saved directly):
+    // re-create, keeping base < theme < design < transition < custom CSS.
+    if (import.meta.env.DEV) {
+      el = document.createElement('link')
+      el.rel = 'stylesheet'
+      el.href = url
+    } else {
+      el = document.createElement('style')
+      el.textContent = await (await fetch(url)).text()
+    }
+    el.id = 'pagerite-transition'
+    const before = document.getElementById('pagerite-banner')?.nextSibling
+      ?? document.getElementById('pagerite-user')
+    if (before) before.before(el)
+    else document.head.append(el)
+  }
 }
 
 // --- Site-wide custom CSS --------------------------------------------------
@@ -483,36 +521,70 @@ onUnmounted(() => {
     <div v-if="saveError">{{ saveError }}</div>
 
     <section class="block">
-      <label class="field">
-        <span class="field-label">site name</span>
-        <input
-          v-model="brand"
-          class="text-input"
-          title="Site name (header link and window title)"
-          @input="onBrandInput"
-        />
-      </label>
-      <div class="field">
-        <span class="field-label">theme</span>
-        <select
-          v-model="theme"
-          class="text-input theme-select"
-          title="Theme"
-          @change="onThemeChange"
-        >
-          <option v-for="opt in themeOptions" :key="opt.value" :value="opt.value">
-            {{ opt.label }}
-          </option>
-        </select>
-        <button
-          type="button"
-          class="font-btn"
-          :class="{ active: !!fontPicker }"
-          title="Fonts"
-          @click="toggleFontPanel"
-        >
-          A
-        </button>
+      <div class="field-grid">
+        <label class="field">
+          <span class="field-label">site name</span>
+          <input
+            v-model="brand"
+            class="text-input"
+            title="Site name (header link and window title)"
+            @input="onBrandInput"
+          />
+        </label>
+        <div class="field">
+          <span class="field-label">favicon</span>
+          <button
+            type="button"
+            class="favicon-tile"
+            title="upload favicon (ico, png, svg...)"
+            @click="faviconInput.click()"
+          >
+            <img v-if="favicon" :src="favicon" alt="current favicon" />
+            <span v-else>?</span>
+          </button>
+          <input
+            ref="faviconInput"
+            type="file"
+            accept="image/*"
+            hidden
+            @change="(ev) => { uploadFavicon(ev.target.files[0]); ev.target.value = '' }"
+          />
+        </div>
+        <div class="field">
+          <span class="field-label">theme</span>
+          <select
+            v-model="theme"
+            class="text-input theme-select"
+            title="Theme"
+            @change="onThemeChange"
+          >
+            <option v-for="opt in themeOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
+          <button
+            type="button"
+            class="font-btn"
+            :class="{ active: !!fontPicker }"
+            title="Fonts"
+            @click="toggleFontPanel"
+          >
+            A
+          </button>
+        </div>
+        <label class="field">
+          <span class="field-label">transition</span>
+          <select
+            v-model="transition"
+            class="text-input theme-select"
+            title="Page transition"
+            @change="onTransitionChange"
+          >
+            <option v-for="t in transitionOptions" :key="t" :value="t">
+              {{ t }}
+            </option>
+          </select>
+        </label>
       </div>
       <div v-if="fontPicker" class="font-picker">
         <div class="font-tabs">
@@ -554,25 +626,6 @@ onUnmounted(() => {
             </button>
           </div>
         </div>
-      </div>
-      <div class="field">
-        <span class="field-label">favicon</span>
-        <button
-          type="button"
-          class="favicon-tile"
-          title="upload favicon (ico, png, svg...)"
-          @click="faviconInput.click()"
-        >
-          <img v-if="favicon" :src="favicon" alt="current favicon" />
-          <span v-else>?</span>
-        </button>
-        <input
-          ref="faviconInput"
-          type="file"
-          accept="image/*"
-          hidden
-          @change="(ev) => { uploadFavicon(ev.target.files[0]); ev.target.value = '' }"
-        />
       </div>
     </section>
 
@@ -639,6 +692,26 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+/* Two-column grid (site name + favicon, theme + transition) so the rows
+   and labels align with each other. */
+.field-grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.4rem 1.5rem;
+}
+
+/* Labels share one narrow track per field, sized to the longest label
+   ("transition"), so they line up across rows without excess space. */
+.field-grid > .field {
+  display: grid;
+  grid-template-columns: 4.3rem 1fr auto;
+}
+
+.field-grid .field-label {
+  min-width: 0;
 }
 
 /* Fixed-width labels keep the settings rows aligned. */

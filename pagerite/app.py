@@ -364,12 +364,12 @@ file_store = FileStore(FILES_DIR)
 def _render_html(kind: str, path: str, base_url: str) -> str:
     """Render one of the generated pages (see _html_response)."""
     if kind == "page":
-        return views.render_page(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html, base_url)
+        return views.render_page(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html, base_url, transition=data.transition)
     if kind == "category":
-        return views.render_category(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html)
+        return views.render_category(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html, transition=data.transition)
     if kind == "not-found":
-        return views.render_not_found(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html)
-    return views.render_analytics(data.menu, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html)
+        return views.render_not_found(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html, transition=data.transition)
+    return views.render_analytics(data.menu, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html, transition=data.transition)
 
 
 @lru_cache(maxsize=128)
@@ -559,6 +559,8 @@ async def get_settings() -> dict:
         "favicon": f"/_f/{data.favicon}" if data.favicon else "",
         "themes": views._theme_names(),
         "banner_designs": views._banner_design_names(),
+        "transition": data.transition,
+        "transitions": views._transition_names(),
     }
 
 
@@ -569,6 +571,7 @@ class SettingsIn(BaseModel):
     theme: str
     custom_css: str
     brand_html: str = ""
+    transition: str = "cube"
 
 
 @app.put("/_api/settings", status_code=204)
@@ -579,6 +582,7 @@ async def put_settings(settings: SettingsIn) -> None:
         data.brand_html = settings.brand_html
         data.theme = settings.theme
         data.custom_css = settings.custom_css
+        data.transition = settings.transition
         data.version += 1
 
 
