@@ -126,7 +126,7 @@ export async function loadPlain(p) {
   } catch { return null }
   if (!doc.getElementById('main')) return null
   swapRegions(doc)
-  history.replaceState(null, '', finalUrl)
+  history.replaceState(history.state, '', finalUrl)
   runScripts(document.getElementById('page-banner'))
   runScripts(document.getElementById('main'))
   // Keep pagerite.js's in-memory page cache in sync with the fresh copy.

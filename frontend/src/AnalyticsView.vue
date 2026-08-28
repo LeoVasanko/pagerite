@@ -126,7 +126,7 @@ const readStats = computed(() => calcReadStats(visits.value))
 watch(range, (r) => {
   const url = new URL(location.href)
   url.hash = r
-  history.replaceState(null, '', url)
+  history.replaceState(history.state, '', url)
 })
 
 const clients = computed(() => data.value?.clients || {})

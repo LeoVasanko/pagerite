@@ -365,6 +365,13 @@ import "overlayscrollbars/overlayscrollbars.css";
     currentPath = location.pathname;
   });
 
+  // History position marker: every entry we create carries an incrementing
+  // idx so popstate can tell forward navigation from back (needed for the
+  // mirrored cube transition). replaceState calls below must preserve this
+  // state object instead of passing null.
+  let historyIdx = history.state?.idx ?? 0;
+  history.replaceState({ idx: historyIdx }, "");
+
   // --- Banner parallax ----------------------------------------------------
   // The banner artwork stays windowed in place while its contents drift
   // against the scroll. The --pry scroll parameter is also available to
@@ -420,7 +427,7 @@ import "overlayscrollbars/overlayscrollbars.css";
       const scrollable = document.documentElement.scrollHeight > innerHeight;
       const want = !scrollable || scrollY === 0 || !current ? "" : `#${current.id}`;
       if (want !== location.hash) {
-        history.replaceState(null, "", want || location.pathname + location.search);
+        history.replaceState(history.state, "", want || location.pathname + location.search);
       }
     });
   }, { passive: true });
@@ -696,7 +703,7 @@ import "overlayscrollbars/overlayscrollbars.css";
       doit();
     }
     currentPath = new URL(finalUrl, location.href).pathname;
-    if (push) history.pushState(null, "", finalUrl);
+    if (push) history.pushState({ idx: ++historyIdx }, "", finalUrl);
     // The open editor follows the URL: retarget the per-page tabs to the
     // navigated-to page (unsaved text of the previous page is discarded —
     // the article it previewed into is gone).
@@ -773,7 +780,7 @@ import "overlayscrollbars/overlayscrollbars.css";
     // drop the section hash — not a navigation, no analytics ping.
     if (a.getAttribute("href") === "" && url.pathname === location.pathname) {
       ev.preventDefault();
-      history.replaceState(null, "", location.pathname + location.search);
+      history.replaceState(history.state, "", location.pathname + location.search);
       scrollTo({ top: 0, behavior: reduceMotion.matches ? "instant" : "smooth" });
       return;
     }
@@ -792,10 +799,15 @@ import "overlayscrollbars/overlayscrollbars.css";
     });
   });
 
-  addEventListener("popstate", () => {
+  addEventListener("popstate", (ev) => {
     // Hash-only history entries are not navigations.
     if (location.pathname === currentPath) return;
-    load(location.href, false, true);
+    // Direction from the entry idx: forward navigation animates like an
+    // ordinary navigation; only actually going back mirrors the cube.
+    const target = ev.state?.idx ?? historyIdx - 1;
+    const back = target < historyIdx;
+    historyIdx = target;
+    load(location.href, false, back);
   });
 
   // --- Task-list checkboxes ------------------------------------------------
