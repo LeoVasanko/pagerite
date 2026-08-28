@@ -438,6 +438,121 @@ main {
   container-type: inline-size;
 }
 
+/* Child-entry card stacks: a category page (and the content-less category
+   404) lists its published children after the markdown content — one column
+   per child, the child's whole subtree flattened into the column in menu
+   order (see _cards in views.py). The row bleeds to full page width
+   (div.wide): the columns first grow to fill it, then shrink rather than
+   wrap. Every card has the same fixed 16/10 shape, covered entirely by the
+   page's share image (og:image heuristics, as a background — a gradient
+   placeholder when it has none) with the title overlaid on a translucent
+   band at the bottom. The card is one <a> holding only phrasing-level
+   spans; the spans lay out as blocks. */
+.cards {
+  display: flex;
+  /* Stacks stop growing at their cap; center the row in the bleed then. */
+  justify-content: center;
+  gap: 1.25rem;
+  margin-top: 2.5rem;
+  /* The full-bleed breakout (div.wide rules) lands the edges exactly on the
+     viewport's; this keeps the cards themselves off the edges. */
+  padding-inline: 1.25rem;
+}
+
+.cards .stack {
+  /* Grow to fill the row (up to the cap — full-width rows would make huge
+     cards), shrink (not wrap) when there are too many. */
+  flex: 1 1 0;
+  max-width: 24rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+/* Phones: the columns stack vertically instead of shrinking to slivers.
+   Text-only cards (gradient cover + description) then fit their content —
+   the fixed 16/10 shape only makes sense for image covers. */
+@media (max-width: 48rem) {
+  .cards {
+    flex-direction: column;
+  }
+
+  .card:has(.desc) {
+    aspect-ratio: auto;
+  }
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  aspect-ratio: 16 / 10;
+  /* Allow shrinking below the text's min-content width: without this the
+     text cards hold their stack wider than the image-only stacks. */
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+  transition: transform 0.2s, box-shadow 0.2s;
+  box-shadow: 0 0 0.1rem black;
+}
+
+.card:hover {
+  transform: scale(1.02);
+  box-shadow: 0 0 0.3rem black;
+}
+
+/* The cover fills the whole card; the text spans are positioned so they
+   paint above it. */
+.card .cover {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, var(--surface), var(--bg));
+  background-size: cover;
+  background-position: center;
+}
+
+.card .title {
+  position: relative;
+  display: block;
+  margin-top: auto;
+  padding: 0.75rem 1.25rem 0.9rem;
+  background: color-mix(var(--bg) 40%, transparent);
+  /* Pinned: the article a:hover accent must not leak through the card. */
+  color: var(--text);
+  font-family: var(--font-heading);
+  font-size: 1.25rem;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+/* Image-less cards carry the description under the title, extending the
+   same translucent band. */
+.card .title:has(+ .desc) {
+  padding-bottom: 0;
+}
+
+.card .desc {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  /* Four lines exactly: the text itself is truncated server-side (_cards),
+     this is just the safety net. max-height spans the lines plus the
+     vertical padding (border-box), so nothing bleeds past the clip. */
+  line-height: 1.4;
+  max-height: calc(4 * 1.4em + 1.3rem);
+  padding: 0.4rem 1.25rem 0.9rem;
+  background: color-mix(var(--bg) 30%, transparent);
+  color: var(--muted);
+  font-size: 0.95rem;
+  text-align: left;
+  hyphens: none;
+}
+
 article h1,
 article h2,
 article h3,
@@ -1102,6 +1217,7 @@ pre.wide {
    Multicol pages measure the bleed from main instead (cqw rules below),
    which insets for the editor automatically. */
 body.editing figure:has(.wide),
+body.editing div.wide,
 body.editing pre.wide {
   width: calc(100vw - var(--editor-w));
   margin-inline: calc(50% - (100vw - var(--editor-w)) / 2);
@@ -1118,6 +1234,7 @@ body.editing pre.wide {
    are below.) */
 @media (max-width: 102rem) {
   body:has(#sidebar):not(.editing):not(:has(.multicol)) figure:has(.wide),
+  body:has(#sidebar):not(.editing):not(:has(.multicol)) div.wide,
   body:has(#sidebar):not(.editing):not(:has(.multicol)) pre.wide {
     margin-inline: -13.25rem 0;
   }

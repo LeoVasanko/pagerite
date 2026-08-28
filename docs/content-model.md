@@ -6,7 +6,7 @@ The site structure is stored in the kanta database managed by `pagerite/data.py`
 
 `Data.menu` maps top-level slugs to `Node`s, each with `children` keyed by slug — the URL path is the slug chain. The front page is whichever top-level node has slug "" (parallel to the other main level pages, not their parent); it cannot have children, and renaming its slug away leaves no front page ("/" redirects to the first nav item).
 
-`Node.content` is the Markdown page, or None for a pure category label whose URL renders a placeholder page (while nav links to it point at its first child); every label's title and slug are editable.
+`Node.content` is the Markdown page, or None for a pure category label whose URL renders a 404 listing its children as cards (while nav links to it point at its first child); every label's title and slug are editable. A page with published children — a category page — lists them as cards after its markdown content; the sidebar sub-navigation renders only from the second level down, never on main-level pages.
 
 Siblings order by the fractional `Node.order` key: a moved item gets a fresh key relative to its new siblings, all others keep theirs. `resolve`/`find_slot` walk the tree by path; moves are slot detach/attach carrying the whole subtree. Legacy flat `Data.pages` (pre-tree databases) migrates into `menu` on startup. The app owns the `Data` object; reads are plain attribute access, writes in `kanta.transaction(...)`.
 

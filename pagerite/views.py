@@ -8,10 +8,11 @@ can swap them without reloading the page chrome.
 Navigation walks the Node tree directly (see data.py): nav_html lists the
 top level — the front page (slug "") is an ordinary top-level item, not
 the parent of the others — and sidebar_html the sub-navigation of the
-current top-level section, rendered only when the section offers at
-least two published items. Nodes without content are category labels; nav links
+current top-level section, rendered only from the second level down
+(main-level pages list their children as cards after the content instead,
+see page_content). Nodes without content are category labels; nav links
 to them point straight at their first child page (first_leaf), and their
-own URL renders a placeholder page (render_category).
+own URL renders a card-listing page (render_category, a 404).
 """
 
 from pathlib import Path
@@ -332,17 +333,19 @@ def sidebar_html(menu: dict[str, Node], current: str) -> HTML:
     The sidebar is the current main level section's sub-navigation: the
     section's direct children as the top list level, with each item's own
     published children nested under it (third level and deeper), so it
-    exists only when there is something to navigate: the section must
-    offer at least two published items, or exactly one while viewing
-    anything else than that only page — the section index, a 404, a
-    grandchild (otherwise those pages offer no way to reach the child) —
-    and viewing that only page itself still shows the sidebar when the
-    page has published children of its own to reach.
-    The front page, leaf pages, the sole childless page of a one-page
-    section and childless sections get no aside element at all (rather
-    than an empty or useless one-item box).
+    exists only when there is something to navigate. It renders only from
+    the second level down: main-level pages (and the front page) list
+    their children as cards after the content instead of a sidebar. From
+    there, the section must offer at least two published items, or exactly
+    one while viewing anything else than that only page — the section
+    index, a 404, a grandchild (otherwise those pages offer no way to
+    reach the child) — and viewing that only page itself still shows the
+    sidebar when the page has published children of its own to reach.
+    Leaf pages, the sole childless page of a one-page section and
+    childless sections get no aside element at all (rather than an empty
+    or useless one-item box).
     """
-    if not current:
+    if not current or "/" not in current:
         return HTML("")
     section = current.split("/", 1)[0]
     node = menu.get(section)
@@ -511,7 +514,11 @@ def banner_source(menu: dict[str, Node], path: str) -> str | None:
 
 
 def page_content(menu: dict[str, Node], path: str) -> HTML:
-    """Render the contents of the #main element for a page."""
+    """Render the contents of the #main element for a page.
+
+    A page with published children (a category page) lists them as cards
+    after the markdown content.
+    """
     node = resolve(menu, path)[-1]
     rendered = render(node.content or "", path, node.created, node.modified)
     # Long articles get .multicol: the article column cap lifts (see the
@@ -525,7 +532,67 @@ def page_content(menu: dict[str, Node], path: str) -> HTML:
         if not has_h1(node.content or ""):
             doc.h1(node.title)
         doc.div(HTML(rendered.html), class_="body")
+        _cards(doc, menu, node, path)
     return HTML(str(doc))
+
+
+def _cards(doc, menu: dict[str, Node], node: Node, path: str) -> None:
+    """Card stacks of the node's published children (nothing when childless).
+
+    One column per direct child, all in a single full-width row (the .wide
+    breakout): the columns grow to fill the page and shrink rather than
+    wrap. A column holds the child's whole subtree flattened in menu order
+    — nesting levels are not split out — starting with the first page that
+    has actual content (the child itself when it does, its first leaf
+    otherwise, recursively). Each card is one <a> showing the page's share
+    image (the same heuristics as og:image) as the cover and its title;
+    image-less cards get a gradient cover and also show the description.
+    Only phrasing-level elements (spans) go inside the <a>: as a formatting
+    element it would be cloned by the HTML parser around any block-level
+    child, splitting one card into several links.
+    """
+    items = [(s, c) for s, c in sorted_nodes(node.children) if c.published]
+    if not items:
+        return
+    with doc.div(class_="cards wide"):
+        for slug, child in items:
+            cpath = f"{path}/{slug}" if path else slug
+            entries = list(_walk(child, cpath))
+            if not entries:
+                continue
+            with doc.div(class_="stack"):
+                for epath, enode in entries:
+                    _card(doc, enode, epath)
+
+
+def _walk(node: Node, path: str):
+    """Published content pages of a subtree, pre-order in menu order: the
+    node itself first when it has content (the stack's landing card), then
+    its descendants (content-less nodes contribute only their subtree)."""
+    if node.content:
+        yield path, node
+    for slug, child in sorted_nodes(node.children):
+        if child.published:
+            yield from _walk(child, f"{path}/{slug}")
+
+
+def _card(doc, node: Node, path: str) -> None:
+    """One card in a stack: cover + title, plus the description when the
+    page has no image (its card shows a gradient cover instead)."""
+    image = description = ""
+    if node.content:
+        html = render(node.content, path, node.created, node.modified).html
+        image, _ = _media(html)
+        if not image:
+            description = _description(html, 150)
+    with doc.a(href=f"/{path}", class_="card"):
+        if image:
+            doc.span(class_="cover", style=f'background-image: url("{image}")')
+        else:
+            doc.span(class_="cover")
+        doc.span(_title(path.rpartition("/")[2], node), class_="title")
+        if description:
+            doc.span(description, class_="desc")
 
 
 _FIRST_P = re.compile(r"<p[^>]*>(.*?)</p>", re.S)
@@ -536,23 +603,34 @@ _ATTR_SRC = re.compile(r'src="([^"]+)"')
 _ATTR_CLASS = re.compile(r'class="([^"]*)"')
 
 
-def _share_media(html: str, base_url: str) -> tuple[str, str]:
-    """(image, video) share URLs from the rendered article.
+_SENTENCE_END = re.compile(r"[.!?][”'\")]*(?=\s|$)")
+
+
+def _description(html: str, limit: int = 200) -> str:
+    """Article description: the first paragraph's text, truncated at a
+    sentence end (or, failing that, a word boundary) within ``limit``.
+    Used for og:description."""
+    m = _FIRST_P.search(html)
+    text = unescape(_TAG.sub("", m.group(1) if m else ""))
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    # Prefer a clean cut: the last sentence ending within the limit, as
+    # long as it does not reduce the description to a tiny fragment.
+    if (end := max((m.end() for m in _SENTENCE_END.finditer(text[:limit])), default=0)) > limit // 2:
+        return text[:end]
+    return text[:limit].rsplit(" ", 1)[0] + "…"
+
+
+def _media(html: str) -> tuple[str, str]:
+    """Raw (image, video) srcs from rendered article HTML (relative ok).
 
     Image preference: an image with class "hero" (author override, may
     appear anywhere in the article), then the first raster image (SVGs
     rasterize poorly or not at all on many social scrapers), then the
     first SVG. Video: the first <video> — og:video is in the OGP spec and
-    honored mainly by Facebook; X/Twitter ignores it. Absolute URLs are
-    built from the request base, scrapers cannot use relative ones.
+    honored mainly by Facebook; X/Twitter ignores it.
     """
-    if not base_url:
-        return "", ""
-
-    def absolute(src: str) -> str:
-        src = unescape(src)
-        return src if src.startswith(("http://", "https://")) else f"{base_url}{src}"
-
     hero = raster = svg = video = ""
     for tag in _IMG_TAG.findall(html):
         if not (src := _ATTR_SRC.search(tag)):
@@ -571,7 +649,23 @@ def _share_media(html: str, base_url: str) -> tuple[str, str]:
         if m := _ATTR_SRC.search(tag):
             video = m.group(1)
             break
-    image = hero or raster or svg
+    return hero or raster or svg, video
+
+
+def _share_media(html: str, base_url: str) -> tuple[str, str]:
+    """(image, video) share URLs from the rendered article.
+
+    The _media picks as absolute URLs built from the request base —
+    social scrapers cannot use relative ones.
+    """
+    if not base_url:
+        return "", ""
+
+    def absolute(src: str) -> str:
+        src = unescape(src)
+        return src if src.startswith(("http://", "https://")) else f"{base_url}{src}"
+
+    image, video = _media(html)
     return (absolute(image) if image else "", absolute(video) if video else "")
 
 
@@ -587,11 +681,7 @@ def _social_meta(
     (social scrapers cannot use relative ones).
     """
     url = f"{base_url}/{path}" if base_url else ""
-    m = _FIRST_P.search(html)
-    text = unescape(_TAG.sub("", m.group(1) if m else ""))
-    text = " ".join(text.split())
-    if len(text) > 200:
-        text = text[:200].rsplit(" ", 1)[0] + "…"
+    text = _description(html)
     image, video = _share_media(html, base_url)
     return {
         "description": text,
@@ -648,20 +738,20 @@ def render_category(
     favicon: str = "",
     brand_html: str = "",
 ) -> str:
-    """Render the placeholder for a content-less category label (404).
+    """Render the listing for a content-less category label (404).
 
-    The node exists in the tree but has no page of its own. Nav links
-    point straight at its first child, so this is mainly seen in the site
-    editor, where the pen creates the landing page.
+    The node exists in the tree but has no page of its own: its published
+    children are listed as cards, like on a category page with content.
+    Nav links point straight at the first child, so this is mainly seen
+    in the site editor, where the pen creates the landing page.
     """
     node = resolve(menu, path)[-1]
     title = _title(path.rpartition("/")[2], node)
-    sidebar = sidebar_html(menu, path)
     doc = E.article
     with doc:
         doc.h1(title)
-        if sidebar:
-            doc.p("Pages in this section are listed in the menu on the left.")
+        if any(c.published for c in node.children.values()):
+            _cards(doc, menu, node, path)
         else:
             doc.p("This section has no page of its own yet.")
     return str(
@@ -669,7 +759,7 @@ def render_category(
             Title=f"{title} – {brand}" if brand else title,
             Brand=_brand_link(brand, brand_html),
             Nav=nav_html(menu, path),
-            Sidebar=sidebar,
+            Sidebar=sidebar_html(menu, path),
             Banner=banner_html(menu, path, theme),
             Main=HTML(str(doc)),
         ),
