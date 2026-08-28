@@ -46,7 +46,7 @@ Server run by CLI entry point `uv run pagerite` (no auto reloads, build needed).
     - Maintaining and owning the app's own `Data` object is preferable; Kanta never copies this, only edits in place
     - Note: besides opening it every access is immediate direct variable access: no `await`, no locks, no delays
   - **fastapi-vue** — template glue for serving/building the Vue frontend; keep its integration points (`Frontend`, build hook) intact.
-  - **markdown-it-py** — Markdown rendering with `html=True` raw passthrough; mdit-py-plugins for footnote/deflist/tasklists/attrs; **Pygments** for server-side code highlighting (`nowrap` spans, styled by `frontend/src/assets/pygments.css` which maps token classes 1:1 onto the `--code-*` variables; light/dark palette sets live in `pagerite.css` and resolve via `light-dark()` from the theme's `color-scheme` — themes pick a set, not individual colors).
+  - **markdown-it-py** — Markdown rendering with `html=True` raw passthrough; mdit-py-plugins for footnote/deflist/tasklists/attrs; in-body h1/h2 headings get auto slug ids + self-links when the body has 3+ of them (`python-slugify`, mirroring `slugify.js`); **Pygments** for server-side code highlighting (`nowrap` spans, styled by `frontend/src/assets/pygments.css` which maps token classes 1:1 onto the `--code-*` variables; light/dark palette sets live in `pagerite.css` and resolve via `light-dark()` from the theme's `color-scheme` — themes pick a set, not individual colors).
 
 ## Conventions
 

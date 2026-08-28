@@ -712,19 +712,18 @@ article.multicol {
   /* The side zone (not on phones): lane content indents 16rem; margin
      boxes ({.margin} / ::: margin blocks, ::: aside, {.margin} figures)
      float at the article's left edge — the same region the nav sidebar
-     overlays. Scoped to direct .body children (the backend render keeps
+     overlays. Scoped to direct article children (the backend render keeps
      margin blocks out of the column segments); nested ones keep the
      in-column float fallback. */
-  .multicol .body>.colseg,
-  .multicol .body>h1,
-  .multicol .body>h2,
-  article.multicol>h1 {
+  .multicol article>.colseg,
+  .multicol article>h1,
+  .multicol article>h2 {
     margin-left: 16rem;
   }
 
-  .multicol .body>.margin,
-  .multicol .body>.aside,
-  .multicol .body>figure:has(.margin) {
+  .multicol article>.margin,
+  .multicol article>.aside,
+  .multicol article>figure:has(.margin) {
     float: left;
     clear: left;
     width: 14rem;
@@ -734,9 +733,9 @@ article.multicol {
 
   /* Wide separators start below any margin box — their bleed must not
      wrap around it. */
-  .multicol .body>figure:has(.wide),
-  .multicol .body>div.wide,
-  .multicol .body>pre.wide {
+  .multicol article>figure:has(.wide),
+  .multicol article>div.wide,
+  .multicol article>pre.wide {
     clear: left;
   }
 }
@@ -768,16 +767,15 @@ article.multicol {
     max-width: 86rem;
   }
 
-  body:has(#sidebar):has(.multicol):not(.editing) .multicol .body>.colseg,
-  body:has(#sidebar):has(.multicol):not(.editing) .multicol .body>h1,
-  body:has(#sidebar):has(.multicol):not(.editing) .multicol .body>h2,
-  body:has(#sidebar):has(.multicol):not(.editing) article.multicol>h1 {
+  body:has(#sidebar):has(.multicol):not(.editing) .multicol article>.colseg,
+  body:has(#sidebar):has(.multicol):not(.editing) .multicol article>h1,
+  body:has(#sidebar):has(.multicol):not(.editing) .multicol article>h2 {
     margin-left: 0;
   }
 
-  body:has(#sidebar):has(.multicol):not(.editing) .multicol .body>.margin,
-  body:has(#sidebar):has(.multicol):not(.editing) .multicol .body>.aside,
-  body:has(#sidebar):has(.multicol):not(.editing) .multicol .body>figure:has(.margin) {
+  body:has(#sidebar):has(.multicol):not(.editing) .multicol article>.margin,
+  body:has(#sidebar):has(.multicol):not(.editing) .multicol article>.aside,
+  body:has(#sidebar):has(.multicol):not(.editing) .multicol article>figure:has(.margin) {
     float: left;
     clear: left;
     width: 12rem;
@@ -826,6 +824,19 @@ article.multicol {
 article h2 {
   font-size: 1.5rem;
   margin: 2.2rem 0 0.6rem;
+}
+
+/* Heading self-links (section anchors) look exactly like plain heading
+   text — click sets the hash, right-click copies the link. */
+article :is(h1, h2) a.anchor,
+article :is(h1, h2) a.anchor:hover {
+  color: inherit;
+  font-weight: inherit;
+}
+
+/* Anchored headings clear the fixed/sticky top nav when scrolled to. */
+article :is(h1, h2)[id] {
+  scroll-margin-top: 4rem;
 }
 
 article a {
@@ -1172,9 +1183,9 @@ figure:has(.margin) {
    editing the docked panel reshapes the gutters — in both they stay
    plain floats). */
 @media (min-width: 104rem) {
-  body:not(.editing):not(:has(.multicol)) .body>.margin,
-  body:not(.editing):not(:has(.multicol)) .body>.aside,
-  body:not(.editing):not(:has(.multicol)) .body>figure:has(.margin) {
+  body:not(.editing):not(:has(.multicol)) article>.margin,
+  body:not(.editing):not(:has(.multicol)) article>.aside,
+  body:not(.editing):not(:has(.multicol)) article>figure:has(.margin) {
     float: left;
     clear: left;
     width: 12rem;

@@ -388,6 +388,36 @@ import "overlayscrollbars/overlayscrollbars.css";
     }, { passive: true });
   }
 
+  // --- Section hash -------------------------------------------------------
+  // Reflect the section being read in the location hash: the last h1/h2
+  // above the middle of the viewport is current, even when already
+  // scrolled out of view. Above the first tagged heading the hash is
+  // removed — including at the very top of the document, where an early
+  // heading may sit in the top half. Pages too short to scroll never get
+  // a hash, and articles with few headings have no ids at all (the
+  // backend only anchors h1/h2 in bodies of 3+ such headings).
+  // replaceState keeps this out of history; fetch-navigation already
+  // handles anchor scrolling itself.
+  let hashQueued = false;
+  addEventListener("scroll", () => {
+    if (hashQueued) return;
+    hashQueued = true;
+    requestAnimationFrame(() => {
+      hashQueued = false;
+      const mid = innerHeight / 2;
+      let current = null;
+      for (const h of document.querySelectorAll("article :is(h1, h2)[id]")) {
+        if (h.getBoundingClientRect().top < mid) current = h;
+        else break;
+      }
+      const scrollable = document.documentElement.scrollHeight > innerHeight;
+      const want = !scrollable || scrollY === 0 || !current ? "" : `#${current.id}`;
+      if (want !== location.hash) {
+        history.replaceState(null, "", want || location.pathname + location.search);
+      }
+    });
+  }, { passive: true });
+
   // --- Analytics pings ---------------------------------------------------
   // Fire-and-forget POSTs to /_a with the fields as query parameters (a
   // beacon can carry no body, and query args show in server logs next to
@@ -660,7 +690,12 @@ import "overlayscrollbars/overlayscrollbars.css";
     }
     currentPath = new URL(finalUrl, location.href).pathname;
     if (push) history.pushState(null, "", finalUrl);
-    scrollTo(0, 0);
+    // Cross-page anchor links scroll to the section after the swap (the
+    // browser only does this itself on full page loads).
+    const hash = new URL(finalUrl, location.href).hash;
+    const target = hash && document.getElementById(hash.slice(1));
+    if (target) target.scrollIntoView();
+    else scrollTo(0, 0);
     return true;
   }
 
@@ -710,6 +745,14 @@ import "overlayscrollbars/overlayscrollbars.css";
     }
     // Same-page anchor links (footnotes etc.): let the browser handle them
     if (url.pathname === location.pathname && url.hash) return;
+    // The first in-body h1 self-links with href="": scroll to the top and
+    // drop the section hash — not a navigation, no analytics ping.
+    if (a.getAttribute("href") === "" && url.pathname === location.pathname) {
+      ev.preventDefault();
+      history.replaceState(null, "", location.pathname + location.search);
+      scrollTo({ top: 0, behavior: reduceMotion.matches ? "instant" : "smooth" });
+      return;
+    }
     // Machinery and auth endpoints are never fetch-navigated, except the
     // public analytics viewer page at /_a.
     if ((url.pathname.startsWith("/_") && url.pathname !== "/_a")

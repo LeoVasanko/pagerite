@@ -24,7 +24,7 @@ import re
 from html5tagger import HTML, Document, E, Template
 
 from pagerite.data import Node, prettify, resolve, sorted_nodes
-from pagerite.markdown import has_h1, render
+from pagerite.markdown import render
 
 SITE_NAME = "Pagerite"
 BUILD = Path(__file__).with_name("frontend-build")
@@ -520,18 +520,16 @@ def page_content(menu: dict[str, Node], path: str) -> HTML:
     after the markdown content.
     """
     node = resolve(menu, path)[-1]
-    rendered = render(node.content or "", path, node.created, node.modified)
+    # The title is injected into the markdown (as # title when it has no
+    # h1 of its own), so title and content render as one article.
+    rendered = render(node.content or "", path, node.created, node.modified, title=node.title)
     # Long articles get .multicol: the article column cap lifts (see the
-    # #content grid in pagerite.css) and the body's .cols segments lay out
-    # in at most two columns. The .body html is already segmented by
-    # render() — the whole layout is driven by these classes.
+    # #content grid in pagerite.css) and the .cols segments lay out in at
+    # most two columns. The html is already segmented by render() — the
+    # whole layout is driven by these classes.
     doc = E.article(class_="multicol") if rendered.multicol else E.article
     with doc:
-        # An h1 in the markdown owns the article heading; the title is
-        # only rendered as h1 when the markdown has none of its own.
-        if not has_h1(node.content or ""):
-            doc.h1(node.title)
-        doc.div(HTML(rendered.html), class_="body")
+        doc(HTML(rendered.html))
         _cards(doc, menu, node, path)
     return HTML(str(doc))
 

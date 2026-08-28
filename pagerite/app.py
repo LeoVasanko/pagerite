@@ -56,7 +56,7 @@ from pagerite.data import (
     resolve,
     sorted_nodes,
 )
-from pagerite.markdown import has_h1, render, toggle_task
+from pagerite.markdown import render, toggle_task
 
 # Site identity: the hostname comes from the CLI (first positional argument,
 # exported as PAGERITE_HOSTNAME) and names the per-site data directory
@@ -1122,16 +1122,18 @@ async def editor_ws(ws: WebSocket) -> None:
                         path,
                         node.created if node else None,
                         node.modified if node else None,
+                        # The title is injected as h1 when the markdown has
+                        # none; the editor's title field edits live-preview.
+                        title=msg.get("title") or (node.title if node else ""),
                     )
                     await ws.send_json({
                         "type": "html",
                         "path": path,
                         "html": rendered.html,
-                        # Column-layout flags: the preview toggles the
+                        # Column-layout flag: the preview toggles the
                         # article's .multicol class and swaps in the
-                        # segmented (.colseg/.cols) body html.
+                        # segmented (.colseg/.cols) article html.
                         "multicol": rendered.multicol,
-                        "has_h1": has_h1(markdown),
                     })
                 case "save":
                     move_from = (msg.get("move_from") or path).strip("/")

@@ -56,6 +56,7 @@ from typing import NamedTuple
 from markdown_it import MarkdownIt
 from markdown_it.common.utils import escapeHtml
 from markdown_it.renderer import RendererHTML
+from markdown_it.token import Token
 from mdit_py_plugins.admon import admon_plugin
 from mdit_py_plugins.attrs import attrs_plugin
 from mdit_py_plugins.attrs.parse import ParseError, parse as parse_attrs
@@ -70,6 +71,7 @@ from pygments import highlight
 from pygments.formatters import HtmlFormatter
 from pygments.lexers import get_lexer_by_name
 from pygments.util import ClassNotFound
+from slugify import slugify
 
 # Styles in /_assets/pygments-*.css match this formatter (regenerate:
 # HtmlFormatter(style="github-dark").get_style_defs("pre code"))
@@ -110,11 +112,11 @@ def _fence_rule(
     token = tokens[idx]
     info = token.info.strip() if token.info else ""
     lang = info.split(maxsplit=1)[0] if info else ""
-    highlighted = (_highlight(token.content, lang, "")
-                   or escapeHtml(token.content))
+    highlighted = _highlight(token.content, lang, "") or escapeHtml(token.content)
     code_class = f' class="{options.langPrefix}{lang}"' if lang else ""
-    return (f"<pre{self.renderAttrs(token)}><code{code_class}>"
-            f"{highlighted}</code></pre>\n")
+    return (
+        f"<pre{self.renderAttrs(token)}><code{code_class}>{highlighted}</code></pre>\n"
+    )
 
 
 def _image_rule(
@@ -157,8 +159,10 @@ def _unwrap_lone_figures(state) -> None:
             continue
         [child] = token.children if len(token.children) == 1 else [None]
         if child and child.type == "image":
-            if (tokens[i - 1].type == "paragraph_open"
-                    and tokens[i + 1].type == "paragraph_close"):
+            if (
+                tokens[i - 1].type == "paragraph_open"
+                and tokens[i + 1].type == "paragraph_close"
+            ):
                 # A lone image becomes a <figure> (see _image_rule); block
                 # attrs on the paragraph (e.g. a trailing {.wide} line) move
                 # onto the image so they survive the unwrap.
@@ -269,8 +273,11 @@ def _block_attrs(state) -> None:
         if token.type != "inline" or not token.children:
             continue
         text = token.children[-1]
-        if (text.type != "text" or not text.content.startswith("{")
-                or not text.content.endswith("}")):
+        if (
+            text.type != "text"
+            or not text.content.startswith("{")
+            or not text.content.endswith("}")
+        ):
             continue
         try:
             _, attrs = parse_attrs(text.content.strip())
@@ -292,9 +299,14 @@ def _block_attrs(state) -> None:
             if target.hidden:
                 pass
             elif standalone:
-                if (j != own and target.level == tokens[own].level
-                        and (target.nesting == 1
-                             or target.type in ("fence", "code_block", "hr"))):
+                if (
+                    j != own
+                    and target.level == tokens[own].level
+                    and (
+                        target.nesting == 1
+                        or target.type in ("fence", "code_block", "hr")
+                    )
+                ):
                     break
             elif target.nesting == 1:
                 break
@@ -308,6 +320,70 @@ def _block_attrs(state) -> None:
             tokens[i + 1].hidden = True
         else:
             del token.children[-2:]
+
+
+#: Minimum number of in-body h1/h2 headings for section anchors to be
+#: useful — shorter articles get no ids/self-links at all.
+ANCHOR_MIN_HEADINGS = 3
+
+
+def _heading_ids(state) -> None:
+    """Anchor the in-body h1/h2 headings of long-enough articles.
+
+    The markdown body's own h1 and h2 headings get a slug id and their
+    text is wrapped in a self-link (``<a class="anchor" href="#id">``) so
+    section links are copyable by click or right-click — but only when the
+    body has at least ANCHOR_MIN_HEADINGS of them; shorter articles stay
+    anchor-free. The FIRST h1 is the article title: like the implicit
+    page-title h1 it gets no id, does not count toward the threshold, and
+    its self-link is ``href=""`` (back to the top of the page). An
+    author-set `{#id}` always wins; auto ids slugify the heading text
+    (python-slugify, mirroring the editor's slugify.js) and dedupe with
+    -2/-3 suffixes per render. Headings that already contain a link are
+    left unwrapped. Deeper headings (h3+) are never navigable.
+    """
+    tokens = state.tokens
+
+    def wrap(i: int, token, href: str) -> None:
+        inline = tokens[i + 1]
+        if not inline.children or any(c.type == "link_open" for c in inline.children):
+            return
+        anchor = Token("link_open", "a", 1)
+        anchor.attrs = {"href": href, "class": "anchor"}
+        inline.children = [anchor, *inline.children, Token("link_close", "a", -1)]
+
+    # The first in-body h1 is the title: href="" self-link, never an id.
+    first_h1 = next(
+        (i for i, t in enumerate(tokens) if t.type == "heading_open" and t.tag == "h1"),
+        None,
+    )
+    if first_h1 is not None:
+        wrap(first_h1, tokens[first_h1], "")
+
+    heads = [
+        (i, token)
+        for i, token in enumerate(tokens)
+        if token.type == "heading_open" and token.tag in ("h1", "h2") and i != first_h1
+    ]
+    if len(heads) < ANCHOR_MIN_HEADINGS:
+        return
+    seen: set[str] = set()
+    for i, token in heads:
+        inline = tokens[i + 1]
+        hid = token.attrGet("id")
+        if not isinstance(hid, str) or not hid:
+            # Slug the visible text, not the raw markdown (`## [a](url)`).
+            text = "".join(
+                c.content for c in inline.children if c.type in ("text", "code_inline")
+            )
+            base = slugify(text) or "section"
+            hid, n = base, 2
+            while hid in seen:
+                hid = f"{base}-{n}"
+                n += 1
+            token.attrSet("id", hid)
+        seen.add(hid)
+        wrap(i, token, f"#{hid}")
 
 
 md = (
@@ -340,6 +416,7 @@ md.core.ruler.push("container_attrs", _container_attrs)
 md.core.ruler.push("unwrap_lone_figures", _unwrap_lone_figures)
 md.core.ruler.push("tag_task_checkboxes", _tag_task_checkboxes)
 md.core.ruler.push("shorten_autolinks", _shorten_autolinks)
+md.core.ruler.push("heading_ids", _heading_ids)
 
 
 # Text-length thresholds (visible characters, code blocks excluded) for the
@@ -353,7 +430,7 @@ _TAG_RE = re.compile(r"<[^>]+>")
 
 # Classes that take their block out of the column flow: .wide is a
 # full-width separator, .margin/.aside float in the side zone at the
-# article's left (they must be direct .body children for that — the zone
+# article's left (they must be direct article children for that — the zone
 # rules key off it — never inside a column).
 _WIDE = "wide"
 _BREAKOUT = ("margin", "aside")
@@ -419,8 +496,13 @@ def render(
     page_path: str = "",
     created: datetime | None = None,
     modified: datetime | None = None,
+    title: str | None = None,
 ) -> Rendered:
     """Render Markdown text to the article body's HTML and layout flags.
+
+    ``title`` injects a ``# {title}`` line at the top when the markdown has
+    no h1 of its own, so the implicit page title goes through the exact
+    same pipeline as an explicit one (first-h1 anchor treatment included).
 
     The top-level blocks are grouped into column segments: boundary blocks
     (h1/h2 headings, .wide, margin-breakout blocks — see _is_boundary) are
@@ -436,6 +518,8 @@ def render(
     right after the article's h1.
     """
     env = {"page_path": page_path}
+    if title and not has_h1(text):
+        text = f"# {title}\n\n{text}"
     blocks = _top_level_blocks(md.parse(text, env))
     # Group consecutive non-boundary blocks into segments (is_segment,
     # flat tokens); boundary blocks stand on their own between them.
@@ -460,9 +544,7 @@ def render(
             parts.append(html)
             continue
         nocols = any(
-            "nocols" in _classes(t)
-            for t in group
-            if t.type == "container_block_open"
+            "nocols" in _classes(t) for t in group if t.type == "container_block_open"
         )
         cols = " cols" if text_len > COLS_TEXT and not nocols else ""
         parts.append(f'<div class="colseg{cols}">{html}</div>')
@@ -485,9 +567,9 @@ def _dateline(created: datetime, modified: datetime | None) -> str:
 def has_h1(text: str) -> bool:
     """True if the Markdown source itself contains an h1 heading.
 
-    When it does, the article owns its heading and the page title is not
-    rendered as an additional h1 (the title is still used for the document
-    <title> and navigation labels).
+    When it does, the article owns its heading and render(title=...) does
+    not inject the page title as an h1 (the title is still used for the
+    document <title> and navigation labels).
     """
     return any(t.type == "heading_open" and t.tag == "h1" for t in md.parse(text))
 

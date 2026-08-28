@@ -83,7 +83,7 @@ function requestRender() {
   // No debounce: server-side rendering is fast enough per keystroke.
   if (!view) return
   dirty.value = true
-  send({ type: 'render', path: path.value, markdown: view.state.doc.toString() })
+  send({ type: 'render', path: path.value, title: title.value, markdown: view.state.doc.toString() })
 }
 
 function save() {
@@ -240,29 +240,24 @@ function runScripts(root) {
   }
 }
 
-function previewIntoArticle(html, hasH1, multicol) {
+function previewIntoArticle(html, multicol) {
   const article = document.querySelector('#main article')
   if (!article) return
-  // The server render owns the column layout: .multicol on the article,
-  // the segmented .colseg/.cols structure inside .body. Both arrive with
-  // the preview and must stay in sync as edits cross the thresholds.
+  // The server render owns the article completely — the injected title h1,
+  // the column layout (.multicol on the article, the .colseg/.cols
+  // segments) — so the whole article content swaps as one. Only the edit
+  // pen and the category cards survive: detach them before innerHTML wipes
+  // them. pagerite.js re-places the pen into the first visible h1 on
+  // pagerite:preview.
   article.classList.toggle('multicol', multicol)
-  const h1 = article.querySelector('h1')
-  const body = article.querySelector('.body')
-  // The edit pen may be tucked inside an h1 (title or markdown-owned);
-  // detach it before textContent/innerHTML wipes destroy the element.
-  // pagerite.js re-places it into the first visible h1 on pagerite:preview.
   const pen = article.querySelector('button.edit-link')
-  if (pen && (h1?.contains(pen) || body?.contains(pen))) article.prepend(pen)
-  if (h1) {
-    h1.style.display = hasH1 ? 'none' : ''
-    h1.textContent = title.value
-  }
-  if (body) {
-    body.innerHTML = html
-    runScripts(body)
-    dispatchEvent(new CustomEvent('pagerite:preview'))
-  }
+  if (pen) pen.remove()
+  const cards = article.querySelector(':scope > .cards')
+  if (cards) cards.remove()
+  article.innerHTML = html
+  if (cards) article.append(cards)
+  runScripts(article)
+  dispatchEvent(new CustomEvent('pagerite:preview'))
 }
 
 function onMessage(ev) {
@@ -274,7 +269,7 @@ function onMessage(ev) {
     requestRender()
     dirty.value = false // just loaded from the server, nothing unsaved
   } else if (msg.type === 'html' && msg.path === path.value) {
-    previewIntoArticle(msg.html, msg.has_h1, msg.multicol)
+    previewIntoArticle(msg.html, msg.multicol)
   } else if (msg.type === 'saved') {
     saveError.value = ''
     pendingSave = null
