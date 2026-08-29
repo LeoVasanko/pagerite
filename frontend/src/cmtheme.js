@@ -8,7 +8,7 @@ import { tags } from '@lezer/highlight'
 
 // The base theme sets monospace on .cm-scroller, so the font must be set
 // there, not on "&".
-export const cmTheme = EditorView.theme({
+const cmEditorTheme = EditorView.theme({
   "&": {
     backgroundColor: "var(--bg)",
     color: "var(--text)",
@@ -33,10 +33,24 @@ export const cmTheme = EditorView.theme({
   ".cm-cursor": { borderLeftColor: "var(--text)" },
   // basicSetup's active-line highlight assumes a dark theme.
   ".cm-activeLine": { backgroundColor: "transparent" },
-  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground":
-    { backgroundColor: "var(--line)" },
   "&.cm-focused": { outline: "none" },
 })
+
+// Selection color needs a baseTheme: only base themes support the
+// &light/&dark selectors, and @codemirror/view's own selection rules use
+// them — we must match its selectors exactly (equal specificity) and rely
+// on mounting later to win. Focused: the page's --selection-bg (the base
+// accents tint; themes may override it). Unfocused: hidden, like a normal
+// input (CodeMirror greys it by default).
+const cmSelection = EditorView.baseTheme({
+  "&light .cm-selectionBackground, &dark .cm-selectionBackground":
+    { backgroundColor: "transparent" },
+  "&light.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, &dark.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground":
+    { backgroundColor: "var(--selection-bg)" },
+})
+
+// Exported as one extension so the editors just list `cmTheme`.
+export const cmTheme = [cmEditorTheme, cmSelection]
 
 export const cmHighlight = syntaxHighlighting(HighlightStyle.define([
   { tag: tags.heading, fontWeight: "600", color: "var(--accent)" },

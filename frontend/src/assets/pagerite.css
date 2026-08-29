@@ -18,6 +18,9 @@
   /* Links stay quiet — mostly text color with a hint of the accent —
      and light up to the full accent on hover. */
   --link: color-mix(in oklab, var(--text) 50%, var(--accent));
+  /* Selection fill for page text and the CodeMirror editors; themes
+     override when the accent tint clashes with accent-colored text. */
+  --selection-bg: color-mix(var(--accent) 30%, transparent);
   /* Code highlighting palette, consumed by pygments.css: complete light and
      dark sets (background included), resolved by light-dark() from the
      used color-scheme. A theme picks a set simply by declaring
@@ -71,7 +74,7 @@
 }
 
 ::selection {
-  background: color-mix(var(--accent) 30%, transparent);
+  background: var(--selection-bg);
   color: inherit;
 }
 
