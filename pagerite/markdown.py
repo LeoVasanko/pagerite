@@ -289,9 +289,11 @@ def _block_attrs(state) -> None:
     """Apply `{.class key=value}` on a block's last line to the block.
 
     The inline attrs plugin only covers attributes right after an image,
-    code span or link; this extends the same brace syntax to whole blocks,
-    e.g. a paragraph ending with a `{.wide}` line (no blank line between)
-    gets the `wide` class and thereby breaks out of the column layout.
+    code span or link; this extends the same brace syntax to whole blocks.
+    A paragraph takes them at the end of its last line, either directly
+    (a trailing `{.wide}` line, no blank line between) or space-separated
+    at the end of the text (`some text {.small}`) — a space means the
+    braces belong to the block, not to an image or link before them.
     A lone `{...}` paragraph applies to the previous block instead (this
     is how headings take attributes, since a heading's next line always
     starts a new paragraph). Runs before the typographer so quotes inside
@@ -302,18 +304,20 @@ def _block_attrs(state) -> None:
         if token.type != "inline" or not token.children:
             continue
         text = token.children[-1]
-        if (
-            text.type != "text"
-            or not text.content.startswith("{")
-            or not text.content.endswith("}")
-        ):
+        if text.type != "text":
             continue
+        m = re.search(r"(\{[^{}]*\})\s*$", text.content)
+        if not m:
+            continue
+        start = m.start(1)
+        if start and not text.content[start - 1].isspace():
+            continue  # glued to the text — literal, or inline attrs
         try:
-            _, attrs = parse_attrs(text.content.strip())
+            _, attrs = parse_attrs(m.group(1))
         except ParseError:
             continue
         standalone = len(token.children) == 1
-        if not standalone and token.children[-2].type != "softbreak":
+        if not standalone and start == 0 and token.children[-2].type != "softbreak":
             continue
         # The target: the enclosing block for a trailing attrs line, or the
         # previous same-level block for a standalone attrs paragraph —
@@ -347,8 +351,15 @@ def _block_attrs(state) -> None:
             tokens[own].hidden = True
             token.children = []
             tokens[i + 1].hidden = True
-        else:
+        elif start == 0:
             del token.children[-2:]
+        else:
+            # Braces space-separated at the end of a text line: strip them
+            # (a whitespace-only remainder means they were on a line of
+            # their own after all — drop the softbreak too).
+            text.content = text.content[:start].rstrip()
+            if not text.content and token.children[-2].type == "softbreak":
+                del token.children[-2:]
 
 
 #: Minimum number of in-body h1/h2 headings for section anchors to be
