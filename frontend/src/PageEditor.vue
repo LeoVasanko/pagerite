@@ -144,10 +144,25 @@ async function uploadImage(file) {
     // lone image with a title renders as a captioned figure, and an empty
     // caption is as good as none.
     const insert = `![${alt}](${stored} "")`
-    const { from, to } = view.state.selection.main
+    // Images are never inline: the image always goes on a fresh line of
+    // its own, blank-separated from other content. On a non-empty line —
+    // notably when the cursor sits inside an existing image tag — the new
+    // image goes AFTER that line, never into it.
+    const doc = view.state.doc
+    const line = doc.lineAt(view.state.selection.main.from)
+    const prevNonEmpty = line.number > 1 && doc.line(line.number - 1).text.trim()
+    const nextNonEmpty = line.number < doc.lines && doc.line(line.number + 1).text.trim()
+    let pos, text
+    if (line.text.trim()) {
+      pos = line.to
+      text = '\n' + insert + (nextNonEmpty ? '\n' : '')
+    } else {
+      pos = line.from
+      text = (prevNonEmpty ? '\n' : '') + insert + (nextNonEmpty ? '\n' : '')
+    }
     view.dispatch({
-      changes: { from, to, insert },
-      selection: { anchor: from + insert.length - 2 },
+      changes: { from: pos, insert: text },
+      selection: { anchor: pos + text.indexOf(insert) + insert.length - 2 },
     })
     view.focus()
   }
@@ -529,16 +544,29 @@ function applyClass(cls, group) {
 
 function insertTable(cols, rows) {
   // A GFM table on its own blank-separated block, first header cell
-  // selected.
-  const { from, to } = view.state.selection.main
-  const before = from > 0 && view.state.doc.sliceString(from - 1, from) !== '\n' ? '\n\n' : ''
+  // selected. Like images, a table is block-level: on a fresh line of its
+  // own — a cursor on a non-empty line (e.g. inside an image tag) inserts
+  // after that line, never into it.
+  const doc = view.state.doc
+  const line = doc.lineAt(view.state.selection.main.from)
+  const prevNonEmpty = line.number > 1 && doc.line(line.number - 1).text.trim()
+  const nextNonEmpty = line.number < doc.lines && doc.line(line.number + 1).text.trim()
   const row = (cells) => `| ${cells.join(' | ')} |`
-  const table = `${before}${row(Array(cols).fill('column'))}\n`
+  const grid = `${row(Array(cols).fill('column'))}\n`
     + `${row(Array(cols).fill('---'))}\n`
-    + `${Array(rows).fill(row(Array(cols).fill(''))).join('\n')}\n`
+    + `${Array(rows).fill(row(Array(cols).fill(''))).join('\n')}`
+  let pos, text
+  if (line.text.trim()) {
+    pos = line.to
+    text = '\n' + grid + (nextNonEmpty ? '\n' : '')
+  } else {
+    pos = line.from
+    text = (prevNonEmpty ? '\n' : '') + grid + (nextNonEmpty ? '\n' : '')
+  }
+  const anchor = pos + text.indexOf(grid) + 2
   view.dispatch({
-    changes: { from, to, insert: table },
-    selection: { anchor: from + before.length + 2, head: from + before.length + 8 },
+    changes: { from: pos, insert: text },
+    selection: { anchor, head: anchor + 6 },
   })
   tablePicker.value = false
   view.focus()
