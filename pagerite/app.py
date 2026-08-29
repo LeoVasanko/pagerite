@@ -1459,9 +1459,11 @@ async def sitemap(request: Request) -> Response:
 
 @app.get("/robots.txt")
 async def robots_txt(request: Request) -> Response:
-    """Allow all crawling and point crawlers at the sitemap."""
+    """Allow content crawling, keep the SSO login (/auth/) and the
+    admin-gated API (/_api) out of search results, and point crawlers at
+    the sitemap."""
     base = SITE_URL or str(request.base_url).rstrip("/")
-    body = f"User-agent: *\nAllow: /\nSitemap: {base}/sitemap.xml\n"
+    body = f"User-agent: *\nAllow: /\nDisallow: /auth/\nDisallow: /_api\nSitemap: {base}/sitemap.xml\n"
     return Response(
         body,
         media_type="text/plain",
