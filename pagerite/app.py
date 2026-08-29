@@ -80,10 +80,18 @@ analytics_store = analytics.Store(ANALYTICS_PATH)
 # files on disk under hash-prefixed names, cached in RAM, served at /_f/.
 FILES_DIR = Path(os.getenv("PAGERITE_FILES", str(SITE_DIR / "files")))
 
-# Uploaded raster images are thumbnailed to this size and recompressed to
-# AVIF; the untouched original is kept alongside as ``<hash>.orig<ext>``.
+# Uploaded images are thumbnailed to this size and recompressed to AVIF
+# (primary), with WebP and JPEG fallbacks re-encoded from the AVIF at
+# somewhat lower quality (similar or smaller file size); the untouched
+# original is kept alongside as ``<hash>.orig<ext>`` (never served).
 IMAGE_MAXSIZE = 1920
 IMAGE_QUALITY = 60
+IMAGE_WEBP_QUALITY = 50
+IMAGE_JPG_QUALITY = 55
+
+# Favicons get the same derivatives but thumbnailed much smaller — 192px
+# is plenty (browsers scale down for the 16x16 tab icon themselves).
+FAVICON_MAXSIZE = 192
 
 # Live WebSocket clients for the analytics stream.
 _analytics_ws_clients: set[WebSocket] = set()
@@ -199,9 +207,21 @@ def _hash_name(body: bytes, orig: str) -> str:
 
 
 def _store_seed_file(markdown: str, banner: str, orig: str, body: bytes) -> tuple[str, str]:
-    """Store a seed file content-addressed and point references at /_f/."""
-    name = _hash_name(body, orig)
-    file_store.put(name, body)
+    """Store a seed file content-addressed and point references at /_f/.
+
+    Images get the same AVIF/WebP/JPEG derivatives as uploads and are
+    linked extension-less; other content is stored as-is with its
+    extension."""
+    digest = blake3.blake3(body).hexdigest()[:12]
+    derivatives = None if _ext(orig) == ".gif" else _image_derivatives(body, _ext(orig))
+    if derivatives is None:
+        file_store.put(digest + _ext(orig), body)
+        name = digest + _ext(orig)
+    else:
+        file_store.put(f"{digest}.svg" if _ext(orig) == ".svg" else f"{digest}.orig{_ext(orig)}", body)
+        for fmt, variant in derivatives.items():
+            file_store.put(f"{digest}.{fmt}", variant)
+        name = digest
     markdown = markdown.replace(f"]({orig}", f"](/_f/{name}")
     banner = banner.replace(f'src="/{orig}"', f'src="/_f/{name}"')
     banner = banner.replace(f'src="{orig}"', f'src="/_f/{name}"')
@@ -278,11 +298,51 @@ def _seed(data: Data) -> None:
         node.order = order
 
 
+def _backfill_derivatives() -> None:
+    """Create missing AVIF/WebP/JPEG derivatives for files stored before
+    they were introduced (older uploads may have only the original plus
+    AVIF, and SVGs no raster variants at all).  WebP/JPEG are re-encoded
+    from an existing AVIF when available, everything else from the
+    original (SVGs rasterized first)."""
+    try:
+        paths = [f for f in file_store.path.iterdir() if f.is_file()]
+    except FileNotFoundError:
+        return
+    groups: dict[str, list[Path]] = {}
+    for p in paths:
+        groups.setdefault(p.name.partition(".")[0], []).append(p)
+    for digest, files in groups.items():
+        names = {p.name for p in files}
+        source = next(
+            (p for p in files if ".orig." in p.name or p.suffix == ".svg"), None
+        )
+        if source is None:
+            continue  # plain as-is file, no derivatives to make
+        avif = file_store.get(f"{digest}.avif")
+        if avif is None:
+            ext = source.suffix
+            body = source.read_bytes()
+            if ext == ".svg":
+                png = _svg_to_png(body, IMAGE_MAXSIZE)
+                if png is None:
+                    continue
+                body, ext = png, ".png"
+            converted = _to_avif(body, ext)
+            if converted is None:
+                continue
+            file_store.put(f"{digest}.avif", converted)
+            avif = file_store.get(f"{digest}.avif")
+        for fmt, quality in (("webp", IMAGE_WEBP_QUALITY), ("jpg", IMAGE_JPG_QUALITY)):
+            if f"{digest}.{fmt}" not in names:
+                file_store.put(f"{digest}.{fmt}", _avif_to_format(avif[0], f".{fmt}", quality))
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Open the database, migrate legacy content, load assets, load GeoIP."""
     await kanta.open()
     await asyncio.to_thread(file_store.load)
+    await asyncio.to_thread(_backfill_derivatives)
     _migrate_legacy()
     await frontend.load()
     # Decompress/open the DB-IP MMDB once at startup.  Lookups are then
@@ -361,11 +421,11 @@ class FileStore:
         self._cache[name] = self._entry(body)
 
     def delete(self, name: str) -> None:
-        """Delete a file plus its derivative/original counterpart, if any.
+        """Delete a file plus its derivatives/original counterparts, if any.
 
-        An image upload is stored as a pair sharing the hash prefix
-        (``<hash>.orig.<ext>`` + ``<hash>.avif``); deleting either removes
-        both.
+        An image upload is stored as a group sharing the hash prefix
+        (``<hash>.orig.<ext>`` + ``<hash>.avif/.webp/.jpg``); deleting any
+        of the names removes them all.
         """
         stem = name.partition(".")[0]
         for key in [k for k in self._cache if k.partition(".")[0] == stem]:
@@ -611,15 +671,27 @@ async def put_settings(settings: SettingsIn) -> None:
 async def put_favicon(request: Request) -> dict[str, str]:
     """Upload a favicon into the content-addressed store and activate it.
 
-    Raw image body (ico/png/svg...); the stored name is a blake3 hash
-    prefix + extension, and pages link it as <link rel="icon">. Returns
+    Raw image body (ico/png/svg...). Decodable images are thumbnailed to
+    FAVICON_MAXSIZE (192px — browsers scale down from there themselves)
+    and stored as AVIF/WebP/JPEG derivatives linked extension-less; SVG
+    originals also stay servable under their ``.svg`` name. Undecodable
+    bodies are stored as-is. Pages link it as <link rel="icon">. Returns
     {"path": "/_f/..."}.
     """
     body = await request.body()
     if not body:
         raise HTTPException(400, "empty file")
-    stored = _hash_name(body, request.headers.get("x-filename", "favicon.ico"))
-    file_store.put(stored, body)
+    ext = _ext(request.headers.get("x-filename", "favicon.ico"))
+    digest = blake3.blake3(body).hexdigest()[:12]
+    derivatives = await asyncio.to_thread(_image_derivatives, body, ext, FAVICON_MAXSIZE)
+    if derivatives is None:  # undecodable (e.g. some .ico): store as-is
+        stored = digest + ext
+        file_store.put(stored, body)
+    else:
+        stored = digest
+        file_store.put(f"{digest}.svg" if ext == ".svg" else f"{digest}.orig{ext}", body)
+        for fmt, variant in derivatives.items():
+            file_store.put(f"{digest}.{fmt}", variant)
     with kanta.transaction("upload favicon"):
         data.favicon = stored
         data.version += 1
@@ -675,7 +747,7 @@ async def toggle_task_endpoint(body: ToggleTaskIn) -> dict[str, str]:
     return {"markdown": new_markdown}
 
 
-def _to_avif(body: bytes, ext: str) -> bytes | None:
+def _to_avif(body: bytes, ext: str, maxsize: int = IMAGE_MAXSIZE) -> bytes | None:
     """Recompress an image body to a thumbnailed AVIF via mediapreview's
     dispatch (pyvips for common formats, ffmpeg for HEIC/HEIF/AVIF), or
     None if the body is not a decodable image (stored as-is by the caller).
@@ -689,12 +761,62 @@ def _to_avif(body: bytes, ext: str) -> bytes | None:
             avif, _resp = dispatch(
                 Path(tmp.name),
                 quality=IMAGE_QUALITY,
-                maxsize=IMAGE_MAXSIZE,
+                maxsize=maxsize,
                 maxzoom=1,
             )
         except Exception:
             return None
         return avif
+
+
+def _svg_to_png(body: bytes, maxsize: int) -> bytes | None:
+    """Rasterize an SVG to PNG via pyvips, scaled so the long side is
+    ``maxsize`` — SVGs often carry no meaningful intrinsic resolution, so
+    we rasterize at full image size rather than the tiny nominal one."""
+    import pyvips
+
+    try:
+        img = pyvips.Image.new_from_buffer(body, "")
+        scale = maxsize / max(img.width, img.height) if img.width and img.height else maxsize
+        if scale != 1:
+            img = pyvips.Image.new_from_buffer(body, "", scale=scale)
+        return img.write_to_buffer(".png")
+    except pyvips.Error:
+        return None
+
+
+def _avif_to_format(avif: bytes, suffix: str, quality: int) -> bytes:
+    """Re-encode the AVIF derivative into a fallback format (WebP/JPEG)
+    via pyvips. JPEG has no alpha, so it is flattened onto white;
+    ``strip`` keeps metadata (EXIF) out of the fallbacks."""
+    import pyvips
+
+    img = pyvips.Image.new_from_buffer(avif, "")
+    if suffix == ".jpg" and img.hasalpha():
+        img = img.flatten(background=[255, 255, 255])
+    return img.write_to_buffer(suffix, Q=quality, strip=True)
+
+
+def _image_derivatives(body: bytes, ext: str, maxsize: int = IMAGE_MAXSIZE) -> dict[str, bytes] | None:
+    """The served variants of an uploaded image: ``avif`` (primary,
+    thumbnailed to ``maxsize``) plus ``webp`` and ``jpg`` fallbacks
+    re-encoded from it. SVGs are rasterized first (they are vector, so
+    the raster replaces nothing — the .svg itself stays servable).
+    Returns None for non-decodable content (stored as-is by the caller).
+    """
+    if ext == ".svg":
+        png = _svg_to_png(body, maxsize)
+        if png is None:
+            return None
+        body, ext = png, ".png"
+    avif = _to_avif(body, ext, maxsize)
+    if avif is None:
+        return None
+    return {
+        "avif": avif,
+        "webp": _avif_to_format(avif, ".webp", IMAGE_WEBP_QUALITY),
+        "jpg": _avif_to_format(avif, ".jpg", IMAGE_JPG_QUALITY),
+    }
 
 
 @app.put("/_api/files/{name}")
@@ -704,11 +826,14 @@ async def upload_file(name: str, request: Request) -> dict[str, str]:
     The stored name is a blake3 hash prefix + the original extension,
     served immutable at "/_f/{name}"; returns {"path": "/_f/..."}.
 
-    Raster images are additionally recompressed with mediapreview: the
-    original goes to ``<hash>.orig<ext>`` (kept for reprocessing) while
-    pages link the thumbnailed AVIF derivative ``<hash>.avif``. SVGs and
-    GIFs are stored as-is (vector/animation would be lost). Other content
-    and failed conversions fall back to plain storage.
+    Raster images and SVGs are recompressed (SVGs rasterized) into AVIF
+    (primary) plus WebP and JPEG fallbacks: the original goes to
+    ``<hash>.orig<ext>`` (kept for reprocessing, never served — it may
+    carry EXIF data; SVG originals stay servable as ``<hash>.svg`` since
+    vector carries no EXIF) and pages link the bare ``/_f/<hash>``, the
+    server picking the format from the request's Accept header. GIFs are
+    stored as-is (animation would be lost), as is other non-decodable
+    content.
     """
     if "/" in name or name in {".", ".."}:
         raise HTTPException(400, "bad file name")
@@ -717,18 +842,19 @@ async def upload_file(name: str, request: Request) -> dict[str, str]:
         raise HTTPException(400, "empty file")
     ext = _ext(name)
     digest = blake3.blake3(body).hexdigest()[:12]
-    avif = (
+    derivatives = (
         None
-        if ext in {".svg", ".gif"}
-        else await asyncio.to_thread(_to_avif, body, ext)
+        if ext == ".gif"
+        else await asyncio.to_thread(_image_derivatives, body, ext)
     )
-    if avif is None:  # not a decodable image: store the body as-is
+    if derivatives is None:  # not a decodable image: store the body as-is
         stored = digest + ext
         file_store.put(stored, body)
         return {"path": f"/_f/{stored}"}
-    file_store.put(f"{digest}.orig{ext}", body)
-    file_store.put(f"{digest}.avif", avif)
-    return {"path": f"/_f/{digest}.avif"}
+    file_store.put(f"{digest}.svg" if ext == ".svg" else f"{digest}.orig{ext}", body)
+    for fmt, variant in derivatives.items():
+        file_store.put(f"{digest}.{fmt}", variant)
+    return {"path": f"/_f/{digest}"}
 
 
 @app.delete("/_api/files/{name}", status_code=204)
@@ -786,19 +912,47 @@ async def stored_file(name: str, request: Request) -> Response:
     """Serve a file from the content-addressed store (immutable: the name
     is its own hash, so cache forever).  Bodies are served from the RAM
     cache, zstd-compressed when the client accepts it and compression
-    actually shrank the file."""
+    actually shrank the file.
+
+    A bare ``/_f/{hash}`` (no extension, how pages link uploaded images)
+    content-negotiates between the stored derivatives: a format is served
+    only when the Accept header lists it explicitly — ``image/avif`` →
+    AVIF, ``image/webp`` → WebP, anything else (including ``image/*`` and
+    ``*/*``) → JPEG. An explicit extension pins the format. ``.orig.``
+    originals are internal (they may carry EXIF data) and never served."""
+    if ".orig." in name:
+        raise HTTPException(404)
+    etag = name
+    vary = ""
     entry = file_store.get(name)
+    if entry is None and "." not in name:
+        # Extension-less image link: negotiate avif/webp/jpg by Accept.
+        vary = "accept"
+        accept = request.headers.get("accept", "")
+        if "image/avif" in accept:
+            order = ("avif", "webp", "jpg")
+        elif "image/webp" in accept:
+            order = ("webp", "jpg", "avif")
+        else:
+            order = ("jpg", "webp", "avif")
+        for ext in order:
+            etag = f"{name}.{ext}"
+            entry = file_store.get(etag)
+            if entry is not None:
+                break
     if entry is None:
         raise HTTPException(404)
-    if request.headers.get("if-none-match") == name:
+    if request.headers.get("if-none-match") == etag:
         return Response(status_code=304)
     body, compressed = entry
-    headers = {"etag": name, "cache-control": "public, max-age=31536000, immutable"}
+    headers = {"etag": etag, "cache-control": "public, max-age=31536000, immutable"}
     if compressed is not None and "zstd" in request.headers.get("accept-encoding", ""):
         headers["content-encoding"] = "zstd"
-        headers["vary"] = "accept-encoding"
+        vary = f"{vary}, accept-encoding".lstrip(", ")
         body = compressed
-    mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
+    if vary:
+        headers["vary"] = vary
+    mime = mimetypes.guess_type(etag)[0] or "application/octet-stream"
     return Response(body, media_type=mime, headers=headers)
 
 

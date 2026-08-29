@@ -815,7 +815,10 @@ def _share_media(html: str, base_url: str) -> tuple[str, str]:
     """(image, video) share URLs from the rendered article.
 
     The _media picks as absolute URLs built from the request base —
-    social scrapers cannot use relative ones.
+    social scrapers cannot use relative ones. Extension-less store links
+    (``/_f/<hash>``) are used as-is: the server negotiates the format
+    from the scraper's Accept header (no explicit image/avif|webp → JPEG,
+    which every scraper supports).
     """
     if not base_url:
         return "", ""
@@ -838,10 +841,17 @@ def _social_meta(
     share image the article's first <img> — authors lead with their most
     representative figure. Absolute URLs are built from the request's base
     (social scrapers cannot use relative ones).
+
+    ``twitter:image`` pins extension-less store links to the ``.webp``
+    variant: X only honors WebP via twitter:image (not og:image) and its
+    scraper cannot be trusted to negotiate via Accept.
     """
     url = f"{base_url}/{path}" if base_url else ""
     text = _description(html)
     image, video = _share_media(html, base_url)
+    twitter_image = (
+        re.sub(r"(/_f/[0-9a-f]{12})$", r"\1.webp", image) if image else ""
+    )
     return {
         "description": text,
         "canonical": url,
@@ -855,6 +865,7 @@ def _social_meta(
         "article:published_time": node.created.isoformat(),
         "article:modified_time": node.modified.isoformat(),
         "twitter:card": "summary_large_image" if image else "summary",
+        "twitter:image": twitter_image,
     }
 
 

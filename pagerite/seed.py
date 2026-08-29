@@ -51,7 +51,7 @@ The 🖊️ pens open a tabbed editor over the page you are viewing:
 
 The URL is the structure: a page at `docs/markdown` lives under `docs`, and the menus are derived from that. Slugs are lowercase ASCII (`a-z 0-9 - _`). A node without content is a category label — it renders a placeholder and its menu link points at its first child page. This site's own `docs` label demonstrates that, and the sidebar on this page shows the two submenu levels below it.
 
-Images and files uploaded anywhere land in a content-addressed store served from `/_f/{hash}.ext`, so links survive page moves. The article editor's format bar and copy-paste both upload images for you.
+Images and files uploaded anywhere land in a content-addressed store served from `/_f/{hash}`, so links survive page moves. The server picks AVIF, WebP or JPEG from your browser's Accept header. The article editor's format bar and copy-paste both upload images for you.
 
 {dates}
 """
