@@ -9,9 +9,9 @@ directory, e.g. `localhost/analytics.json`).
   `CrawlerHit`, `AbuseHit`, `Favicon`) and the `Store` (in-memory data + session map,
   atomic JSON persistence).
 - `pagerite/app.py` — entry-referer stashing in `show_page` (`_track_entry`),
-  the `POST /_a` ping endpoint, and `WebSocket /_api/ws/analytics`
+  the `/_ws` activity WebSocket, and `WebSocket /_api/ws/analytics`
   (admin-gated like every `/_api` endpoint).
-- `frontend/src/pagerite.js` — client navigation pings and the 📊 pen.
+- `frontend/src/pagerite.js` — the client activity channel and the 📊 pen.
 - `frontend/src/AnalyticsView.vue` — viewer component rendered inside the
   normal site layout on the `/_a` analytics page.
 - `frontend/src/analytics-main.js` — page entry that mounts `AnalyticsView`
@@ -19,46 +19,61 @@ directory, e.g. `localhost/analytics.json`).
 
 ## What is collected
 
-The client (`pagerite.js`) POSTs fire-and-forget pings to `/_a` with
-`fr`, `to`, `hide` and `read` as query parameters (`fr` = source path;
-falsy values are omitted):
+The client (`pagerite.js`) keeps a WebSocket connection to `/_ws` for the
+whole browsing session and sends activity messages over it — JSON text
+frames matching the server's `Ping` msgspec struct with the fields `fr`
+(source path), `to` (navigation target), `read` (active seconds on `fr`
+since the last report) and `hide`; falsy fields are omitted. One channel
+follows the session, so the activity of a visit stays tied together, and
+while the user is active the accumulated reading time is flushed every few
+seconds: the trail times are cumulative, so a disconnection simply leaves
+the last reported time in place (no close beacon). After 5 minutes without
+any activity the client closes the socket itself — a sleeping browser tab
+would lose it anyway — and the next activity reconnects as a fresh session;
+reconnects are attempted only on user activity, with an exponential backoff
+between attempts so a failing endpoint is never hammered. Idle-time link preloads
+stay plain `fetch()` calls so the browser may cache the responses; the
+WebSocket reports actual navigations and active time spent on a page.
 
 - **Initial page load**: only `to` — the loaded path — is sent, never `fr`
   (an `fr` equal to `to` would log a bogus self-transition when a session
-  already exists, e.g. a second tab). This ping is what starts
+  already exists, e.g. a second tab). This message is what starts
   the visit and counts the entry page view — the document GET alone records
   nothing, so bots never register (admin browsing does register, but
   flagged `hide`; see **Admins** below). JS-running crawlers
-  (Googlebot, GoogleOther, Applebot, ...) do ping, but their User-Agent
-  gives them away: pings whose UA matches `_is_bot_ua` (anything calling
+  (Googlebot, GoogleOther, Applebot, ...) do connect and report, but their
+  User-Agent gives them away: messages whose UA matches `_is_bot_ua`
+  (anything calling
   itself a "bot", plus known exceptions such as GoogleOther) are ignored
   server-side, and their document GETs land in the crawler list instead.
   No source-IP verification is done: a spoofed bot UA merely lands in the
   crawler stats, and scanners that probe telltale paths are caught by the
   abuse rules regardless. Reloads are not
-  visits: the ping is skipped (PerformanceNavigationTiming `reload`), so a
+  visits: the message is skipped (PerformanceNavigationTiming `reload`), so a
   refresh neither counts a second view nor logs a self-transition. The GET
   handler stashes a cross-origin https `Referer` (origin part only —
   unavailable to JS once the page has loaded) and any
-  `utm_*` query parameters in in-memory IP tables, consumed by the ping that
+  `utm_*` query parameters in in-memory IP tables, consumed by the first
+  message that
   starts the visit; internal or absent referers never touch the referer table.
 - **Internal fetch-navigations**: `to` is the target path, sent only after
   the swap actually happened (a failed swap falls back to a full load,
-  whose initial ping counts the view instead — no gap, no double count).
+  whose initial message counts the view instead — no gap, no double count).
 - **External links** (`https` only): `to` is the link's full URL. This is the
   exit-link record; the user may continue navigating afterwards (new tab,
   back), so the exit URL is not necessarily the last trail entry. Outbound
   links are stored by full URL so several links to the same domain remain
   distinct.
 - **Excluded**: back/forward (popstate) navigations, navigating *to* the
-  analytics page (`/_a` — its GET is untracked, and the server rejects it
-  as a ping target anyway), and everything while the user has the editor
+  analytics page (`/_a` — its GET is untracked, and the server cannot
+  record it as a navigation target anyway), and everything while the user has
+  the editor
   open (`body.editing`). Admin noise, not visits. Navigating *away* from
-  `/_a` does ping: the fetch-navigation already GET-ed the target page
-  without the preload header, and without the ping that GET would flush to
+  `/_a` does report: the fetch-navigation already GET-ed the target page
+  without the preload header, and without the message that GET would flush to
   the crawler list.
 - **Admins**: when SSO is in use and the session is known to be an admin,
-  the client still pings but adds `hide=1`. The activity is recorded as
+  the client still reports but adds `hide`. The activity is recorded as
   usual (navigations and all), but the `hide` flag is set on the **client
   record** — so it covers everything that client ever did: visits and
   crawler hits from before the login included. Hidden clients never appear
@@ -81,7 +96,7 @@ falsy values are omitted):
   extension matching the actual MIME).  The origin → file name mapping is
   recorded in `Analytics.favicons` (`Favicon.file`/`fetched`); misses are
   recorded too and retried only after 7 days.  Fetches are scheduled after
-  each ping and once at startup, which backfills icons for already-recorded
+  each activity message and once at startup, which backfills icons for already-recorded
   data.  The viewer payload carries `favicons` (origin → `/_f/...` path),
   and the viewer shows the icon wherever an external site is mentioned:
   referer/exit trail links in the visit table and the source/exit pills of
@@ -100,8 +115,8 @@ falsy values are omitted):
   `host`; local/reserved/multicast addresses are skipped.  If a DB-IP MMDB
   file (`dbip-*.mmdb` or `dbip-*.mmdb.gz`) is present in the repository
   root, it is loaded at startup and used to look up `country`/`city`.  These
-  lookups run in background tasks after the event is stored, so the `/_a`
-  response is never delayed.  The decompressed `dbip-*.mmdb` file is kept in
+  lookups run in background tasks after the event is stored, so WebSocket
+  message handling is never delayed.  The decompressed `dbip-*.mmdb` file is kept in
   the repository root and ignored by git.  The CLI flag `--dbip`
   (`uv run pagerite --dbip`) downloads the latest
   `dbip-city-lite-YYYY-MM.mmdb.gz` from DB-IP before the server starts,
@@ -110,10 +125,11 @@ falsy values are omitted):
   file is used.
 - **Crawler hits**: every document GET is queued in RAM as a pending crawler
   hit — except idle-time link preloads from pagerite.js, which carry an
-  `x-pagerite-preload` header and are not tracked at all (the ping sent when
-  the user actually navigates to a preloaded page does the counting; forging
+  `x-pagerite-preload` header and are not tracked at all (the navigation
+  message sent when the user actually navigates to a preloaded page does
+  the counting; forging
   the header only hides a GET from the crawler stats, the path-based abuse
-  classification is unaffected).  If a ping
+  classification is unaffected).  If a message
   from the same client arrives within 10 seconds the hit is discarded;
   otherwise it is written to `crawlers` — unless the client is hidden
   (admin), in which case the hit is discarded on expiry too.  Crawlers do not count as
@@ -131,7 +147,7 @@ falsy values are omitted):
   random-UA scanner no longer pollutes the crawler stats of the legitimate
   bot it impersonates.  Once classified, every document GET and 404 from the
   IP is recorded as an abuse hit with the full request path (query string
-  included), and its pings are ignored.  The classified IP set (`abuse_ips`)
+  included), and its activity messages are ignored.  The classified IP set (`abuse_ips`)
   is persisted in the JSON file; the plain-404 counters are RAM-only.  In the
   viewer, abuse hits are grouped by IP (never by client/UA — scanners
   randomize theirs) in a separate "Abuse" table.  Identical paths are
@@ -145,9 +161,9 @@ falsy values are omitted):
 There are no cookies. A visit is tied together by a client hash — the first
 6 bytes of a blake3 digest over the prettified IP (IPv4 unchanged, IPv6
 /64 network), the raw `User-Agent` string and the extracted
-`Accept-Language` tag.  The first ping from a client hash starts a new
-visit; subsequent pings extend it.  Pings arriving with no known session
-(server restart) start a fresh visit from the first ping — treated as
+`Accept-Language` tag.  The first message from a client hash starts a new
+visit; subsequent messages extend it.  Messages arriving with no known session
+(server restart) start a fresh visit from the first message — treated as
 missing data rather than dropped.  The client-hash → visit map and the IP →
 entry-referer/UTM tables are in-memory only; client metadata is stored in
 `Analytics.clients` keyed by the client hash.
@@ -164,7 +180,7 @@ Each `Client` record:
 - `ua` — raw `User-Agent` string,
 - `ua_pretty` — compact display form of the UA (browser/OS/device) when
   parsable, otherwise the raw string,
-- `hide` — true for admin clients (`hide=1` ping): all their visits,
+- `hide` — true for admin clients (`hide` message field): all their visits,
   crawler hits and abuse hits are recorded but excluded from every
   statistic and from the viewer payload.
 
@@ -180,7 +196,7 @@ Each `Visit` record:
   reading time in seconds (`read`) and the most recent HTTP status seen
   for the target (`status`). Re-visiting an already seen target updates
   its item instead of appending.
-- `navs` — every navigation ping (`fr`, `to`), keyed by its timestamp,
+- `navs` — every navigation message (`fr`, `to`), keyed by its timestamp,
   repeats included. The aggregates are computed from this log at display
   time.
 - `utm` — `utm_*` query parameters from the landing URL, as a dict.
@@ -227,7 +243,8 @@ shapes, part of the WebSocket payload (`Display` struct alongside `visits`,
 
 - `transitions`: time series of page transitions, sparse nested dict
   `from -> to -> bucket -> count` with 5-minute bucketing. `from` is the
-  referer origin or `"(direct)"` for initial loads, a page path for pings.
+  referer origin or `"(direct)"` for initial loads, a page path for
+  navigations.
 - `views`: time series of page loads, `path -> bucket -> count`, sparse: only
   non-zero 5-minute buckets exist (bucket key is its floored ISO timestamp).
   Every load counts, including repeats within a visit; external exit origins

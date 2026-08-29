@@ -32,10 +32,10 @@ from xml.sax.saxutils import escape as xml_escape
 
 import blake3
 import httpx
+import msgspec
 from fastapi import (
     FastAPI,
     HTTPException,
-    Query,
     Request,
     WebSocket,
     WebSocketDisconnect,
@@ -935,7 +935,7 @@ async def delete_page(path: str) -> None:
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 
-def _client_ip(request: Request) -> str:
+def _client_ip(request: Request | WebSocket) -> str:
     """Client IP: first X-Forwarded-For hop (we sit behind a proxy), else
     the direct peer."""
     forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
@@ -1108,48 +1108,54 @@ async def analytics_page(request: Request) -> Response:
     )
 
 
-@app.post("/_a", status_code=204)
-async def analytics_ping(
-    request: Request,
-    fr: str = Query(""),
-    to: str | None = Query(None),
-    hide: int = Query(0),
-    read: int = Query(0),
-) -> None:
-    """Record a navigation ping (?fr=&to=&hide=&read=); fire-and-forget.
+@app.websocket("/_ws")
+async def activity_ws(ws: WebSocket) -> None:
+    """Collect visitor activity: navigations and reading-time updates.
 
-    The initial page-load ping carries only ``to``: the entry is attributed
-    to the referer/UTM tags stashed by the document GET (see _track_entry),
-    which JS cannot see once the page has loaded.
-
-    The reverse-DNS and DB-IP geoip lookups happen in a background task so
-    the response is never delayed by slow DNS or the first MMDB decompress.
+    Public, like the pages themselves (only /_api is gated); one connection
+    follows a browsing session.  Messages are ``analytics.Ping`` structs as
+    JSON text frames; ``to`` set is a navigation, ``read`` alone a
+    reading-time update.  The reverse-DNS and DB-IP geoip lookups happen in
+    background tasks so message handling is never delayed by slow DNS or
+    the first MMDB decompress.
     """
-    ip = _client_ip(request)
-    visit_index, flushed_clients = analytics_store.ping(
-        fr,
-        to,
-        ip,
-        request.headers.get("user-agent", ""),
-        request.headers.get("accept-language", ""),
-        hide=bool(hide),
-        read=read,
-    )
-    if visit_index is not None:
-        visit = analytics_store.data.visits[visit_index]
-        asyncio.create_task(_enrich_client(visit.client))
-    _schedule_client_enrichment(flushed_clients)
-    _schedule_favicon_fetch()
+    await ws.accept()
+    ip = _client_ip(ws)
+    ua = ws.headers.get("user-agent", "")
+    accept_language = ws.headers.get("accept-language", "")
+    try:
+        while True:
+            text = await ws.receive_text()
+            try:
+                msg = msgspec.json.decode(text.encode(), type=analytics.Ping)
+            except msgspec.DecodeError:
+                continue
+            visit_index, flushed_clients = analytics_store.ping(
+                msg.fr,
+                msg.to or None,
+                ip,
+                ua,
+                accept_language,
+                hide=msg.hide,
+                read=msg.read,
+            )
+            if visit_index is not None:
+                visit = analytics_store.data.visits[visit_index]
+                asyncio.create_task(_enrich_client(visit.client))
+            _schedule_client_enrichment(flushed_clients)
+            _schedule_favicon_fetch()
+    except WebSocketDisconnect:
+        pass
 
 
 def _track_entry(path: str, request: Request, *, status: int = 200) -> list[bytes]:
     """Stash the referer/UTM tags and queue a pending crawler hit for the GET.
 
-    Nothing is counted on the GET itself — the client's /_a ping starts the
-    visit, so bots never register as visits (JS-running crawlers ping too,
-    but the ping handler ignores known bot UAs).  (Admin clients ping too,
-    but with hide=1, which flags their visit hidden: it is recorded but
-    excluded from all statistics and from the crawler list.)
+    Nothing is counted on the GET itself — the client's first /_ws message
+    starts the visit, so bots never register as visits (JS-running crawlers
+    connect too, but the WebSocket handler ignores known bot UAs).  (Admin
+    clients report too, but with hide, which flags their visit hidden: it is
+    recorded but excluded from all statistics and from the crawler list.)
 
     The devserver's health probe (``GET /?from=devserver.py`` from
     ``127.0.0.1``) is ignored: it is not real traffic and would otherwise be
@@ -1161,7 +1167,8 @@ def _track_entry(path: str, request: Request, *, status: int = 200) -> list[byte
     """
     if request.headers.get("x-pagerite-preload"):
         # Idle-time page-cache warm-up by pagerite.js, not a page view: the
-        # ping sent when the user actually navigates does the counting.
+        # activity message sent when the user actually navigates does the
+        # counting.
         # (Forging the header only hides a GET from the crawler stats; the
         # path-based abuse classification is unaffected.)
         return []

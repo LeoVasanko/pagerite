@@ -347,8 +347,8 @@ import "overlayscrollbars/overlayscrollbars.css";
     for (const url of urls) {
       if (pageCache.has(url)) continue;
       // x-pagerite-preload: idle cache warm-up, not a page view — the
-      // server excludes these GETs from analytics (the ping sent on actual
-      // navigation does the counting).
+      // server excludes these GETs from analytics (the navigation message
+      // sent on actual navigation does the counting).
       fetch(url, { headers: { "x-pagerite-preload": "1" } })
         .then((r) => (r.ok && (r.headers.get("content-type") || "").includes("text/html")
           ? r.text() : ""))
@@ -432,61 +432,111 @@ import "overlayscrollbars/overlayscrollbars.css";
     });
   }, { passive: true });
 
-  // --- Analytics pings ---------------------------------------------------
-  // Fire-and-forget POSTs to /_a with the fields as query parameters (a
-  // beacon can carry no body, and query args show in server logs next to
-  // the document GET they refer to): on the initial page load (starts the
-  // visit — the server counts nothing from the document GET alone), for
-  // internal fetch-navigations, for external https exits, and on window
-  // close. ``read`` is the active time (ms) spent on ``fr``.
-  // Reading time pauses after 1 minute of inactivity and resumes on the
-  // next mouse/touch/scroll/keyboard event.
-  // Excluded: back/forward (popstate never pings), everything while the
+  // --- Analytics over WebSocket ------------------------------------------
+  // One /_ws connection follows the whole browsing session: the initial page
+  // load (starts the visit — the server counts nothing from the document GET
+  // alone), internal fetch-navigations, external https exits, and frequent
+  // active reading-time updates. Messages are JSON text frames matching the
+  // server's msgspec Ping struct: {fr?, to?, read?, hide?} — falsy fields
+  // are omitted. ``read`` is the active time (ms) accumulated on ``fr`` since
+  // the last report; reading time pauses after 1 minute of inactivity and
+  // resumes on the next mouse/touch/scroll/keyboard event. While the user is
+  // active, accumulated reading time is flushed every few seconds, so a
+  // disconnect simply leaves the last reported time on the server — no close
+  // beacon is needed. After 5 minutes without any activity the client closes
+  // the channel itself (a sleeping tab would lose it anyway); the next
+  // activity reconnects and the server sees a new session.
+  // Excluded: back/forward (popstate never reports), everything while the
   // editor is open (body.editing — admin noise, not visits), and
-  // navigations TO the analytics page (/_a — admin machinery, and the
-  // server rejects it as a ping target anyway). Navigations AWAY from /_a
-  // must ping: load() already fetched the target page without the preload
-  // header, and without the ping that GET would flush to the crawler list.
+  // navigations TO the analytics page (/_a — admin machinery). Navigations
+  // AWAY from /_a must report: load() already fetched the target page
+  // without the preload header, and without the message that GET would flush
+  // to the crawler list.
   // Admins (when SSO is actually in use — with no auth proxy "admin" is
-  // everyone's state) ping normally but with hide=1: the server then
-  // records nothing and scrubs any session the same browser accumulated
-  // before logging in, so admins never show up as visits or crawlers.
+  // everyone's state) report normally but with hide: the server then flags
+  // the client record, scrubbing everything it ever did from the statistics,
+  // so admins never show up as visits or crawlers.
   // See docs/analytics.md.
 
-  // fetch wrapper: every key of ``params`` becomes a query arg on /_a
-  // (falsy values are omitted). Admins get hide=1. ``beacon`` uses
-  // sendBeacon when available, for unload-time pings.
-  function pingFetch(params, { beacon = false } = {}) {
-    const query = new URLSearchParams();
-    if (ssoAvailable && isAdmin) params = { ...params, hide: 1 };
-    for (const [key, value] of Object.entries(params)) {
-      if (value) query.set(key, value);
-    }
-    const url = `/_a?${query}`;
+  // The activity WebSocket. Messages sent before the connection opens are
+  // queued (the queue keeps the interim activity). Reconnects are driven by
+  // user activity only — never by timers while the page sits idle — with an
+  // exponential falloff between attempts so a failing endpoint cannot make
+  // us hammer the server (or trip its security limits). After a longer
+  // stretch without any activity we close the socket proactively: the user
+  // has moved on and left the tab open (a sleeping browser tab would lose
+  // the connection anyway), so the next activity reconnects and registers
+  // as a fresh session. Analytics must never break navigation: every send
+  // is wrapped, and a server without the endpoint just leaves the socket
+  // failing in the background.
+  let ws = null;
+  const wsQueue = [];
+  let wsReconnectMs = 1000;
+  let wsNotBefore = 0;
+
+  function activityWs() {
+    if (ws || Date.now() < wsNotBefore) return;
+    const url = new URL("/_ws", location.href);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     try {
-      if (beacon && navigator.sendBeacon) {
-        navigator.sendBeacon(url);
-      } else {
-        fetch(url, { method: "POST", keepalive: true });
-      }
-    } catch { /* analytics must never break navigation */ }
+      ws = new WebSocket(url);
+    } catch {
+      return;
+    }
+    ws.onopen = () => {
+      wsReconnectMs = 1000;
+      for (const msg of wsQueue.splice(0)) ws.send(JSON.stringify(msg));
+    };
+    ws.onclose = () => {
+      ws = null;
+      // No timer here: the next user activity retries, after the backoff.
+      wsNotBefore = Date.now() + wsReconnectMs;
+      wsReconnectMs = Math.min(wsReconnectMs * 2, 30_000);
+    };
+    ws.onerror = () => ws.close();
   }
 
-  function ping({ to, fr = currentPath, read = 0, beacon = false } = {}) {
+  function report(msg) {
     if (document.body.classList.contains("editing")) return;
-    if (to === "/_a") return;
-    pingFetch({ fr, to, read: Math.round(read / 1000) }, { beacon });
+    if (msg.to === "/_a") return;
+    if (ssoAvailable && isAdmin) msg.hide = true;
+    activityWs();
+    if (ws?.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify(msg));
+        return;
+      } catch { /* fall through to queueing */ }
+    }
+    wsQueue.push(msg);
+  }
+
+  function ping({ to, fr = currentPath, read = 0 } = {}) {
+    // Reading-time updates from the analytics page itself are not tracked
+    // (/_a is admin machinery; the server would reject the path anyway).
+    if (!to && currentPath === "/_a") return;
+    const msg = {};
+    if (fr) msg.fr = fr;
+    if (to) msg.to = to;
+    const secs = Math.round(read / 1000);
+    if (secs > 0) msg.read = secs;
+    if (!msg.to && !msg.read) return;
+    report(msg);
   }
 
   // Active reading time for the current page. The clock stops after 1 minute
   // without activity and restarts on the next mouse/touch/scroll/keyboard
-  // event.
+  // event. Every READ_FLUSH_MS of accumulated activity is reported. After
+  // IDLE_MS with no activity at all, the remaining read time is flushed and
+  // the WebSocket is closed: the user has moved on, and the next activity
+  // reconnects as a new session.
   const INACTIVE_MS = 60_000;
+  const READ_FLUSH_MS = 5_000;
+  const IDLE_MS = 5 * 60_000;
   let readStart = performance.now();
   let readElapsed = 0;
   let reading = true;
   let readInactivityTimer = null;
-  let closePingedFor = null;
+  let idleTimer = null;
 
   function markReadActivity() {
     if (!reading) {
@@ -500,6 +550,24 @@ import "overlayscrollbars/overlayscrollbars.css";
         reading = false;
       }
     }, INACTIVE_MS);
+    // Any activity is a sign of life: (re)connect the channel if it was
+    // dropped or idle-closed (not while editing — admin noise), and push
+    // the idle disconnect forward.
+    if (!document.body.classList.contains("editing")) activityWs();
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      if (ws) {
+        // Flush what is left unsent, then hang up. report() would try to
+        // reconnect a dead socket, which is exactly what we avoid here.
+        const left = takeReadTime();
+        if (Math.round(left / 1000) > 0) ping({ read: left });
+        ws.close();
+      }
+    }, IDLE_MS);
+    // Frequently update the article read time on the server.
+    if (readElapsed + performance.now() - readStart >= READ_FLUSH_MS) {
+      ping({ read: takeReadTime() });
+    }
   }
 
   function takeReadTime() {
@@ -519,28 +587,19 @@ import "overlayscrollbars/overlayscrollbars.css";
     clearTimeout(readInactivityTimer);
   }
 
-  function sendClosePing() {
-    if (closePingedFor === currentPath) return;
-    closePingedFor = currentPath;
-    const read = takeReadTime();
-    if (Math.round(read / 1000) <= 0) return;
-    ping({ read, beacon: true });
-  }
-
   for (const ev of ["mousemove", "mousedown", "touchstart", "touchmove", "scroll", "keydown"]) {
     addEventListener(ev, markReadActivity, { passive: true });
   }
-  addEventListener("pagehide", sendClosePing);
 
-  // The initial page load pings too — it is what starts the visit and
+  // The initial page load reports too — it is what starts the visit and
   // counts the entry page view (the document GET alone records nothing).
   // It carries only ``to``: the server attributes the entry to the referer
   // it saw on the document GET (unavailable to JS once loaded), and an
   // ``fr`` equal to ``to`` would log a bogus self-transition when a
   // session already exists (e.g. a second tab).
   // Sent once per load, after the auth probes so the admin gate applies;
-  // the pageshow re-probe must not ping again. Reloads are not visits:
-  // pinging them would double-count the view and log a self-transition.
+  // the pageshow re-probe must not report again. Reloads are not visits:
+  // reporting them would double-count the view and log a self-transition.
   let entryPinged = false;
   function pingEntryOnce() {
     if (entryPinged) return;
@@ -770,7 +829,6 @@ import "overlayscrollbars/overlayscrollbars.css";
       // External link: the browser navigates; record the full https URL so
       // different links to the same domain stay distinct in analytics.
       if (url.protocol === "https:") {
-        closePingedFor = currentPath;
         ping({ to: url.href, read: takeReadTime() });
       }
       return;
@@ -794,7 +852,6 @@ import "overlayscrollbars/overlayscrollbars.css";
     const from = currentPath;
     load(url).then((ok) => {
       if (!ok) return;
-      closePingedFor = null;
       ping({ to: url.pathname, fr: from, read: takeReadTime() });
       resetReadTime();
     });

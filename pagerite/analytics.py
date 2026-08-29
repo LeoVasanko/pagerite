@@ -1,18 +1,23 @@
 """Server-side visit analytics (collection only; see docs/analytics.md).
 
-Events come from navigation pings POSTed to /_a by pagerite.js: the first
-ping on page load starts a visit, later pings extend it, and pings with no
-known session start a fresh one (missing data, not dropped). The document
+Events come from pagerite.js over the /_ws WebSocket (``Ping`` messages as
+JSON text frames): the first navigation message on page load starts a
+visit, later messages extend it, and messages with no known session start a
+fresh one (missing data, not dropped). Active reading time is reported as
+frequent ``read`` updates while the user is active; the times are
+cumulative per trail item, so a disconnect simply leaves the last logged
+time in place. The document
 GET handler stashes the entry referer (external https origin) and any
-utm_* query parameters in in-memory IP tables, consumed when the ping
-starts the visit; nothing is counted without a ping (plain bots that only
-fetch documents end up in the crawler list).  JS-running crawlers
-(Googlebot, GoogleOther, Applebot, ...) do ping, but their UA gives them
-away (``_is_bot_ua``) and their pings are ignored, so they land in the
+utm_* query parameters in in-memory IP tables, consumed when the first
+message starts the visit; nothing is counted without a message (plain bots
+that only fetch documents end up in the crawler list).  JS-running crawlers
+(Googlebot, GoogleOther, Applebot, ...) do connect and send messages, but
+their UA gives them
+away (``_is_bot_ua``) and their messages are ignored, so they land in the
 crawler list too.  Idle-time link preloads from pagerite.js carry an
-``x-pagerite-preload`` header and are not tracked at all — the ping sent
-when the user actually navigates does the counting.
-Admin clients ping with ``hide=1``: the client record is flagged ``hide``,
+``x-pagerite-preload`` header and are not tracked at all — the navigation
+message sent when the user actually navigates does the counting.
+Admin clients send ``hide``: the client record is flagged ``hide``,
 which covers everything that client ever did — visits and crawler hits
 from before the login included.  Aggregates (site visits, page views,
 transitions) are not stored; they are computed at display time from the
@@ -68,6 +73,27 @@ def _compact_user_agent(ua: str) -> str:
         dev = ""
     parts = [f"{browser}/{ver}" if browser else "", os_name, dev]
     return " ".join(p for p in parts if p).strip()
+
+
+class Ping(msgspec.Struct, omit_defaults=True):
+    """One client message on the /_ws activity WebSocket.
+
+    Sent as a JSON text frame (msgspec-encoded, decoded to str for the
+    wire).  ``to`` set: a navigation — internal page path or external https
+    exit URL.  ``read`` alone (with ``fr``): an active reading-time update
+    for the page ``fr``; these arrive frequently while the user is active
+    and accumulate on the trail item.  ``hide`` flags the client as an
+    admin: everything it ever did is excluded from the statistics.
+    """
+
+    #: Path of the page the activity happened on ("" for the initial load).
+    fr: str = ""
+    #: Navigation target: internal path or external https exit URL.
+    to: str = ""
+    #: Active reading time (seconds) spent on ``fr`` since the last report.
+    read: int = 0
+    #: Admin client: record but hide everything from the statistics.
+    hide: bool = False
 
 
 class Client(msgspec.Struct, omit_defaults=True):
@@ -151,7 +177,7 @@ class Visit(msgspec.Struct, omit_defaults=True):
 
 
 class CrawlerHit(msgspec.Struct, omit_defaults=True):
-    """A document GET that was never followed by an analytics ping.
+    """A document GET that was never followed by an activity message.
 
     Client metadata is held in ``Analytics.clients`` keyed by ``client``.
     """
@@ -392,19 +418,19 @@ class Store:
         #: client hash -> index of the current visit in data.visits
         self.sessions: dict[bytes, int] = {}
         #: ip -> external https origin of the latest document GET carrying
-        #: one, stashed for the visit the client's initial ping starts.
+        #: one, stashed for the visit the client's initial message starts.
         #: Internal or absent referers never touch the table.
         self.pending_referers: dict[str, str] = {}
         #: ip -> utm_* query parameters from the latest document GET that
-        #: carried any, stashed for the visit the client's initial ping starts.
+        #: carried any, stashed for the visit the client's initial message starts.
         #: Only non-empty sets are stored, so a later parameter-less page
         #: does not overwrite an earlier tagged landing URL.
         self.pending_utms: dict[str, dict[str, str]] = {}
-        #: Document GETs that have not yet been matched by a ping.  Kept
+        #: Document GETs that have not yet been matched by a message.  Kept
         #: in RAM only; expired entries are written to ``data.crawlers``.
         self.pending_crawlers: list[CrawlerHit] = []
         #: client hash -> {path: status} for recent document GETs, consumed
-        #: by the matching ping to record the status of each visited path.
+        #: by the matching message to record the status of each visited path.
         self.pending_statuses: dict[bytes, dict[str, int]] = {}
         #: ip -> number of plain (non-telltale) 404s seen, in RAM only;
         #: reaching ``_ABUSE_404_THRESHOLD`` classifies the IP as abuse.
@@ -721,16 +747,16 @@ class Store:
     ) -> list[bytes]:
         """Stash the entry referer/UTM tags and queue a pending crawler hit.
 
-        Nothing is counted here — the client's initial /_a ping starts the
-        visit (only non-admin clients ping). Only a cross-origin https
+        Nothing is counted here — the client's first /_ws message starts the
+        visit (only non-admin clients report). Only a cross-origin https
         referer updates the table; an internal or absent referer leaves any
         stashed origin untouched.  UTM parameters are kept only when the
         landing URL actually carries them, so a subsequent parameter-less page
         does not erase an earlier tagged landing.
 
-        Every document GET is also queued as a pending crawler hit.  If a ping
-        from the same client arrives within ``_CRAWLER_TIMEOUT``, the hit is
-        discarded; otherwise it is flushed to ``data.crawlers``.  The
+        Every document GET is also queued as a pending crawler hit.  If a
+        message from the same client arrives within ``_CRAWLER_TIMEOUT``, the
+        hit is discarded; otherwise it is flushed to ``data.crawlers``.  The
         Accept-Language header is stored on the client record immediately;
         host/geoip are filled in later by async enrichment.
 
@@ -794,15 +820,16 @@ class Store:
         hide: bool = False,
         read: int = 0,
     ) -> tuple[int | None, list[bytes]]:
-        """Record a client navigation ping ({from, to, read} from pagerite.js).
+        """Record a client activity message (``Ping`` from pagerite.js over /_ws).
 
         ``to`` is an internal path ("/...") or an https URL for exit links; a
-        missing/empty ``to`` means the page is being closed and only the
+        missing/empty ``to`` means a pure reading-time update and only the
         ``read`` time should be recorded. The transition is always counted when
         ``to`` is present; the trail only grows on first sight of a page within
-        the visit. ``read`` is the active time (seconds) spent on ``from_``.
+        the visit. ``read`` is the active time (seconds) spent on ``from_``
+        since the previous report.
 
-        A ping with no known session starts a fresh visit, consuming the
+        A message with no known session starts a fresh visit, consuming the
         referer and UTM tags stashed by the document GET if there are any.
 
         ``hide`` is set by admin clients: the client record is flagged
@@ -811,7 +838,7 @@ class Store:
         normally.  Hidden clients are excluded from every statistic and list
         at display time, and their pending crawler hits are discarded.
 
-        Pings from IPs classified as abuse, and pings whose User-Agent
+        Messages from IPs classified as abuse, and messages whose User-Agent
         claims a JS-running crawler identity (``_is_bot_ua``), are ignored
         entirely — the crawler's pending hits stay queued and flush to
         ``data.crawlers`` normally.
