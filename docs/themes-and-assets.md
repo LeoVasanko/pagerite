@@ -14,6 +14,18 @@ The `::view-transition*` rules are not in the base stylesheet: they live in the 
 
 Themes are folders in `pagerite/themes/{name}/` containing `theme.css` and/or `banner.css` (+ `banner.svg` artwork and any extra assets the CSS references, like summer's `grass.svg`). They are served by the backend at `/_themes/{name}/...` — read from disk per request (etag by mtime), never built, so on-disk edits show on the next page load even in prod.
 
+Themes are searched across several roots, most specific first (see `views.THEME_DIRS`):
+
+1. `themes/` under the current working directory
+2. `<site-dir>/themes/` (the site's own folder, e.g. `localhost/themes/`)
+3. The platform user data dir's `pagerite/themes/` (Linux: `~/.local/share/pagerite/themes/`, Windows: `%LOCALAPPDATA%\pagerite\themes\`)
+4. The platform system data dirs' `pagerite/themes/` (Linux: `/usr/local/share/pagerite/themes/`, `/usr/share/pagerite/themes/`, ...; Windows: `%PROGRAMDATA%\pagerite\themes\`) — several combine
+5. `pagerite/themes/` (built-in package dir, fallback)
+
+The data dirs come from `platformdirs` (`views._data_roots`).
+
+All roots combine: listings are the union of folder names, and each file resolves from the first root that has it. So users can add completely new themes in any root, shadow a built-in file with their own (`<site>/themes/corporate/theme.css`), or extend a built-in theme with extra files (any files the user folder doesn't provide still come from the built-in). Since everything is read per request, new or changed folders take effect without a server restart.
+
 `Data.theme` selects the active theme (empty = none/base only) and the site editor can switch it, choosing from the theme folders found on disk. Vue may add per-component styles on top where needed.
 
 The site editor shows a light/dark-mode indicator in front of each theme name, read from the theme's `color-scheme` declaration in `theme.css`: ☀️ for light-only, 🌙 for dark-only, and 🌓 for themes that support both. The base theme (`none`) is light-only.
@@ -24,6 +36,15 @@ Current themes:
 - `corporate` — light-first with automatic `prefers-color-scheme` dark mode, Montserrat/Inter and a huge solid brand.
 - `nitro` — racing/HUD style following `prefers-color-scheme` (warm light-grey page, deep violet in dark), Montserrat/Literata, black as an accent only, a straight orange blade under the banner, and an orange racing-tab nav clipped with a bezier `shape()`.
 - `summer` — light playful meadow, one palette sampled from its illustrated `banner.svg` (sky/grass/sun/flower pink), Fraunces/Literata, a tilted gradient brand, flower bullets, and a layered-parallax banner (sun rises, clouds drift, nearer hills move less) with idle animations (swaying flowers, floating clouds, breathing sun glow) wrapped in `prefers-reduced-motion: no-preference`.
+
+## User fonts
+
+Fonts are shared across themes, so user fonts live in `fonts/` folders next to the theme roots (same list minus the built-in fallback: `views.FONT_DIRS`, e.g. `localhost/fonts/` for the site; built-in fonts ship with the Vite build). A font is a folder `fonts/{name}/` with:
+
+- `font.css` — `@font-face` rules with URLs relative to the folder (files served at `/_fonts/{name}/...`, per request like themes), plus a `:root { --font-{name}: "Family Name", serif; }` stack variable so themes and custom CSS reference it like the built-in `--font-*` variables.
+- the font files the CSS references (e.g. `{name}.woff2`).
+
+Every font.css is linked on all pages (after the base stylesheet, before the theme). The site editor's font picker lists user fonts too, with label and serif/sans grouping parsed from the `--font-{name}` stack. Everything is read per request, so new fonts appear without a restart.
 
 ## Banner designs
 

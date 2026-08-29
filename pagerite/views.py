@@ -22,18 +22,62 @@ import os
 import re
 
 from html5tagger import HTML, Document, E, Template
+from platformdirs import site_data_dir, user_data_path
 
 from pagerite.data import Node, prettify, resolve, sorted_nodes
 from pagerite.markdown import render
 
 SITE_NAME = "Pagerite"
 BUILD = Path(__file__).with_name("frontend-build")
-THEMES = Path(__file__).parent / "themes"
+
+
+def _data_roots() -> list[Path]:
+    """Platform data dirs for user-provided assets (platformdirs), most
+    specific first: user data dir, then the system-wide data dirs."""
+    roots = [user_data_path("pagerite", appauthor=False)]
+    # site_data_dir keeps the multipath (site_data_path collapses it to the
+    # first entry, since a Path cannot hold several).
+    roots += site_data_dir("pagerite", appauthor=False, multipath=True).split(os.pathsep)
+    return [Path(r) for r in roots]
+
+
+def _theme_dirs() -> list[Path]:
+    """Theme search roots, most specific first; first match wins per file.
+
+    Users can add new themes or override/extend built-in ones file by file
+    by placing folders in any of these roots (all combine into one listing):
+    cwd, the site folder, and the platform user/system data dirs
+    (e.g. ~/.local/share/pagerite, /usr/share/pagerite on Linux;
+    %LOCALAPPDATA%\\pagerite, %PROGRAMDATA%\\pagerite on Windows).
+    The built-in package themes are the final fallback.
+    """
+    return [
+        Path("themes"),
+        Path(os.getenv("PAGERITE_HOSTNAME", "localhost")) / "themes",
+        *(root / "themes" for root in _data_roots()),
+        Path(__file__).parent / "themes",
+    ]
+
+
+THEME_DIRS = _theme_dirs()
+
+# User fonts are shared across themes, so they live in fonts/ folders next
+# to the themes/ roots (no built-in fallback: built-in fonts ship with the
+# Vite build). A font folder {name}/ carries font.css with @font-face rules
+# (relative URLs resolve under /_fonts/{name}/) and a :root --font-{name}
+# stack variable, so themes and custom CSS can reference it like the
+# built-in --font-* variables.
+FONT_DIRS = [
+    Path("fonts"),
+    Path(os.getenv("PAGERITE_HOSTNAME", "localhost")) / "fonts",
+    *(root / "fonts" for root in _data_roots()),
+]
 
 # The base CSS is built by Vite as a separate entry so the backend can link
 # it independently of the theme. Themes and banner designs are plain .css
-# files in THEMES/{name}/, served by the backend at /_themes/{name}/... and
-# re-read from disk on every request (see app.py), so they are never built.
+# files in {THEME_DIRS}/{name}/, served by the backend at /_themes/{name}/...
+# and re-read from disk on every request (see app.py), so they are never
+# built and edits/new folders show without a restart.
 _BASE_CSS_KEY = "src/assets/pagerite.css"
 
 _manifest_cache: dict | None = None
@@ -53,7 +97,9 @@ def _theme_color_schemes(theme: str) -> set[str]:
     Reads the first ``color-scheme:`` declaration in the file. An empty set
     means the theme did not declare one.
     """
-    path = THEMES / theme / "theme.css"
+    path = theme_file(theme, "theme.css")
+    if path is None:
+        return set()
     try:
         css = path.read_text()
     except (OSError, ValueError):
@@ -82,32 +128,95 @@ def _theme_mode(theme: str) -> str:
 def _theme_info() -> list[dict[str, str]]:
     """Theme folders on disk, each with its name and supported color mode."""
     return [
-        {"name": d.name, "mode": _theme_mode(d.name)}
-        for d in sorted(THEMES.iterdir(), key=lambda d: d.name)
-        if d.is_dir() and (d / "theme.css").exists()
+        {"name": name, "mode": _theme_mode(name)}
+        for name in _theme_folder_names(("theme.css",))
     ]
 
 
 def _banner_design_names() -> list[str]:
     """Available banner designs: theme folders with artwork and/or styles."""
-    return sorted(
-        d.name
-        for d in THEMES.iterdir()
-        if d.is_dir()
-        and any((d / f).exists() for f in ("banner.css", "banner.svg", "banner.html"))
-    )
+    return _theme_folder_names(("banner.css", "banner.svg", "banner.html"))
 
 
 def _transition_names() -> list[str]:
     """Available page-transition designs: theme folders with transition.css."""
+    return _theme_folder_names(("transition.css",))
+
+
+def _theme_folder_names(required: tuple[str, ...]) -> list[str]:
+    """Sorted union of theme folder names across THEME_DIRS containing any
+    of the required files."""
     return sorted(
-        d.name for d in THEMES.iterdir() if d.is_dir() and (d / "transition.css").exists()
+        name
+        for root in THEME_DIRS
+        if root.is_dir()
+        for name in {d.name: d for d in root.iterdir() if d.is_dir()}
+        if any(theme_file(name, f) for f in required)
+    )
+
+
+def _user_fonts() -> list[dict]:
+    """User font folders on disk: FONT_DIRS/{name}/ with a font.css.
+
+    The label and serif flag are read from the font.css ``--font-{name}``
+    stack variable; the stylesheet itself is linked on every page (see
+    _layout) so the variable and @font-face rules just exist.
+    """
+    fonts = []
+    for name in _font_folder_names():
+        path = font_file(name, "font.css")
+        css = path.read_text(errors="replace") if path else ""
+        m = re.search(
+            rf"--font-{re.escape(name)}\s*:\s*([^;]+);",
+            re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL),
+        )
+        stack = m.group(1) if m else ""
+        family = re.search(r'"([^"]+)"|\'([^\']+)\'', stack)
+        fonts.append(
+            {
+                "name": name,
+                "label": (family.group(1) or family.group(2)) if family else name,
+                "serif": bool(re.search(r"(^|,\s*)serif\s*$", stack)),
+            }
+        )
+    return fonts
+
+
+def _font_folder_names() -> list[str]:
+    """Sorted union of font folder names across FONT_DIRS with a font.css."""
+    return sorted(
+        d.name
+        for root in FONT_DIRS
+        if root.is_dir()
+        for d in root.iterdir()
+        if d.is_dir() and (d / "font.css").is_file()
     )
 
 
 def _valid_name(name: str) -> bool:
     """Guard against path traversal in theme/design names."""
     return bool(name) and "/" not in name and not name.startswith(".")
+
+
+def theme_file(name: str, filename: str) -> Path | None:
+    """Resolve a theme file across THEME_DIRS; the first root with the file
+    wins, so users can override or extend built-in themes file by file."""
+    return _user_file(THEME_DIRS, name, filename)
+
+
+def font_file(name: str, filename: str) -> Path | None:
+    """Resolve a user font file across FONT_DIRS (first match wins)."""
+    return _user_file(FONT_DIRS, name, filename)
+
+
+def _user_file(dirs: list[Path], name: str, filename: str) -> Path | None:
+    if not _valid_name(name) or not _valid_name(filename):
+        return None
+    for root in dirs:
+        path = root / name / filename
+        if path.is_file():
+            return path
+    return None
 
 
 def _base_css_url(vite_url: str | None) -> str | None:
@@ -123,25 +232,21 @@ def _base_css_url(vite_url: str | None) -> str | None:
 
 def _theme_css_url(theme: str) -> str | None:
     """URL for the theme stylesheet, served by the backend (dev and prod)."""
-    if theme and _valid_name(theme) and (THEMES / theme / "theme.css").exists():
+    if theme and theme_file(theme, "theme.css"):
         return f"/_themes/{theme}/theme.css"
     return None
 
 
 def _banner_css_url(design: str) -> str | None:
     """URL for a banner design's stylesheet, served by the backend."""
-    if design and _valid_name(design) and (THEMES / design / "banner.css").exists():
+    if design and theme_file(design, "banner.css"):
         return f"/_themes/{design}/banner.css"
     return None
 
 
 def _transition_css_url(transition: str) -> str | None:
     """URL for a page-transition stylesheet, served by the backend."""
-    if (
-        transition
-        and _valid_name(transition)
-        and (THEMES / transition / "transition.css").exists()
-    ):
+    if transition and theme_file(transition, "transition.css"):
         return f"/_themes/{transition}/transition.css"
     return None
 
@@ -167,13 +272,16 @@ def _inline_asset(url: str) -> str:
     """Read a served asset's content for inlining into the page (prod only).
 
     Handles build assets (``/_assets/...`` from the Vite build) and theme
-    files (``/_themes/{name}/...`` from pagerite/themes/).
+    or user-font files (``/_themes/{name}/...``, ``/_fonts/{name}/...``,
+    resolved across THEME_DIRS / FONT_DIRS).
     """
-    if url.startswith("/_themes/"):
-        name, _, file = url.removeprefix("/_themes/").partition("/")
-        if _valid_name(name) and _valid_name(file):
-            return (THEMES / name / file).read_text()
-        raise ValueError(f"not a theme asset: {url}")
+    for prefix, resolver in (("/_themes/", theme_file), ("/_fonts/", font_file)):
+        if url.startswith(prefix):
+            name, _, file = url.removeprefix(prefix).partition("/")
+            path = resolver(name, file)
+            if path is None:
+                raise ValueError(f"not a theme/font asset: {url}")
+            return path.read_text()
     return (BUILD / url.lstrip("/")).read_text()
 
 
@@ -213,8 +321,9 @@ def _layout(
     analytics) stay external in both modes.
 
     Order matters and is fixed: base (Vite build, absent in dev where Vite
-    injects it from JS), theme, banner design and page transition (from
-    pagerite/themes/),
+    injects it from JS), user fonts (from FONT_DIRS, so themes and custom
+    CSS can reference their --font-* variables), theme, banner design and
+    page transition (from THEME_DIRS),
     entry-specific stylesheets (e.g. overlayscrollbars.css), then the user's
     custom CSS last so it always wins.
 
@@ -272,6 +381,10 @@ def _layout(
     # per sheet, and fetch-navigation can carry them across swaps whole.
     sheets = [
         ("pagerite-base", _base_css_url(vite_url)),
+        *[
+            (f"pagerite-font-{name}", f"/_fonts/{name}/font.css")
+            for name in _font_folder_names()
+        ],
         ("pagerite-theme", _theme_css_url(theme)),
         ("pagerite-banner", _banner_css_url(banner_design)),
         ("pagerite-transition", _transition_css_url(transition)),
@@ -489,14 +602,10 @@ def _design_banner(design: str) -> HTML:
     """
     if not _valid_name(design):
         return HTML("")
-    html = THEMES / design / "banner.html"
-    svg = THEMES / design / "banner.svg"
-    if html.exists():
-        body = html.read_text()
-    elif svg.exists():
-        body = svg.read_text()
-    else:
+    path = theme_file(design, "banner.html") or theme_file(design, "banner.svg")
+    if path is None:
         return HTML("")
+    body = path.read_text()
     return HTML(f'<div data-design="{design}">{body}</div>')
 
 
@@ -504,10 +613,7 @@ def theme_banner_design(theme: str) -> str:
     """The theme's own banner design (a theme folder doubles as a banner
     design when it ships banner.css, banner.svg or banner.html), "" if it
     has none."""
-    if _valid_name(theme) and any(
-        (THEMES / theme / f).exists()
-        for f in ("banner.css", "banner.svg", "banner.html")
-    ):
+    if any(theme_file(theme, f) for f in ("banner.css", "banner.svg", "banner.html")):
         return theme
     return ""
 

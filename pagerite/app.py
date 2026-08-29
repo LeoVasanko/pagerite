@@ -550,7 +550,8 @@ async def update_structure(op: StructureOp) -> None:
 @app.get("/_api/settings")
 async def get_settings() -> dict:
     """Site-wide settings (brand, theme, custom CSS and favicon URL), plus
-    the themes and banner designs available on disk for the selectors."""
+    the themes, banner designs and user fonts available on disk for the
+    selectors."""
     return {
         "brand": data.brand,
         "brand_html": data.brand_html,
@@ -559,6 +560,7 @@ async def get_settings() -> dict:
         "favicon": f"/_f/{data.favicon}" if data.favicon else "",
         "themes": views._theme_info(),
         "banner_designs": views._banner_design_names(),
+        "fonts": views._user_fonts(),
         "transition": data.transition,
         "transitions": views._transition_names(),
     }
@@ -678,38 +680,45 @@ async def delete_file(name: str) -> None:
     file_store.delete(name)
 
 
-@app.get("/_themes/{name}/{filename}")
-async def theme_file(name: str, filename: str, request: Request) -> Response:
-    """Serve a theme/banner-design file from pagerite/themes/{name}/.
+async def _serve_user_file(path: Path | None, request: Request) -> Response:
+    """Serve a user-asset file resolved on disk, with mtime etag.
 
-    Stylesheets plus any extra assets the CSS references (like summer's
-    grass.svg). Read from disk on every request (etag by mtime+size):
-    theme files are never built or content-hashed, so edits on disk show
-    on the next page load, in prod as well as dev.
+    Read from disk on every request (etag by mtime+size): user assets are
+    never built or content-hashed, so edits on disk show on the next page
+    load, in prod as well as dev.
     """
-    if (
-        "/" in filename
-        or filename.startswith(".")
-        or "/" in name
-        or name.startswith(".")
-    ):
+    if path is None:
         raise HTTPException(404)
-    path = views.THEMES / name / filename
-    try:
-        stat = path.stat()
-    except FileNotFoundError:
-        raise HTTPException(404) from None
-    if not path.is_file():
-        raise HTTPException(404)
+    stat = path.stat()
     etag = f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304)
-    mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     return Response(
         path.read_bytes(),
         media_type=mime,
         headers={"etag": etag, "cache-control": "no-cache"},
     )
+
+
+@app.get("/_themes/{name}/{filename}")
+async def theme_file(name: str, filename: str, request: Request) -> Response:
+    """Serve a theme/banner-design file, resolved across views.THEME_DIRS.
+
+    Stylesheets plus any extra assets the CSS references (like summer's
+    grass.svg).
+    """
+    return await _serve_user_file(views.theme_file(name, filename), request)
+
+
+@app.get("/_fonts/{name}/{filename}")
+async def user_font_file(name: str, filename: str, request: Request) -> Response:
+    """Serve a user font file, resolved across views.FONT_DIRS.
+
+    The folder's font.css (@font-face rules + --font-{name} stack variable)
+    is linked on every page; the woff2 files it references come from here.
+    """
+    return await _serve_user_file(views.font_file(name, filename), request)
 
 
 @app.get("/_f/{name}")

@@ -14,7 +14,7 @@ Pagerite is a CMS. See `docs` for the full design and implementation details. Ke
   - `data.py` — msgspec Structs for the kanta database.
   - `migrations.py` — kanta schema migrations (`migrate_vN`), e.g. v1 moves legacy in-db file blobs to the on-disk store.
   - `markdown.py` — markdown-it-py renderer.
-  - `views.py` — shared page layout and rendering.
+  - `views.py` — shared page layout and rendering; theme/user-font resolution across `THEME_DIRS` / `FONT_DIRS` (cwd, site, platform data roots, then built-in `pagerite/themes/`, see `docs/themes-and-assets.md`).
   - `seed.py` — demo content, written only on first database creation.
   - `analytics.py` — visit analytics collection (see `docs/analytics.md`).
 - `frontend/src/` — Vue editor and public-page JS entries.
@@ -28,7 +28,7 @@ Server run by CLI entry point `uv run pagerite` (no auto reloads, build needed).
 
 ## Toolchain
 
-- Python >= 3.14, managed with **uv**. Dependencies: `fastapi[standard]`, `fastapi-vue`, `html5tagger`, `kanta`, `markdown-it-py`, `mdit-py-plugins`, `pygments`, `tracerite`; dev group has `httpx`. Run anything via `uv run ...` (the venv is `.venv`).
+- Python >= 3.14, managed with **uv**. Dependencies: `fastapi[standard]`, `fastapi-vue`, `html5tagger`, `kanta`, `markdown-it-py`, `mdit-py-plugins`, `platformdirs`, `pygments`, `tracerite`; dev group has `httpx`. Run anything via `uv run ...` (the venv is `.venv`).
 - Key libraries:
   - **html5tagger** — all HTML generation (`E`, `Document`, `Template`, `HTML` for trusted/raw HTML).
     - To create stand alone pages, begin with `doc = Document(...)` that gives a HTML5 page header
@@ -46,6 +46,7 @@ Server run by CLI entry point `uv run pagerite` (no auto reloads, build needed).
     - Maintaining and owning the app's own `Data` object is preferable; Kanta never copies this, only edits in place
     - Note: besides opening it every access is immediate direct variable access: no `await`, no locks, no delays
   - **fastapi-vue** — template glue for serving/building the Vue frontend; keep its integration points (`Frontend`, build hook) intact.
+  - **platformdirs** — platform user/system data dirs for the theme and font search roots (`views.THEME_DIRS` / `views.FONT_DIRS`; use `site_data_dir(..., multipath=True)`, not `site_data_path`, which collapses multipath).
   - **markdown-it-py** — Markdown rendering with `html=True` raw passthrough; mdit-py-plugins for footnote/deflist/tasklists/attrs; in-body h1/h2 headings get auto slug ids + self-links when the body has 3+ of them (`python-slugify`, mirroring `slugify.js`); **Pygments** for server-side code highlighting (`nowrap` spans, styled by `frontend/src/assets/pygments.css` which maps token classes 1:1 onto the `--code-*` variables; light/dark palette sets live in `pagerite.css` and resolve via `light-dark()` from the theme's `color-scheme` — themes pick a set, not individual colors).
 
 ## Conventions

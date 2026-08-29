@@ -85,6 +85,14 @@ async function loadSettings() {
     ]
     transition.value = s.transition || 'cube'
     transitionOptions.value = s.transitions || []
+    fontOptions.value = [
+      ...BASE_FONT_OPTIONS,
+      ...(s.fonts || []).map((f) => ({
+        value: `var(--font-${f.name})`,
+        label: f.label,
+        serif: f.serif,
+      })),
+    ]
   } catch { /* keep default */ }
 }
 
@@ -374,7 +382,7 @@ function setCssDocument(text) {
 // inline with other content, and those must be stripped/parsed too or
 // re-picking a font would insert a duplicate row.
 const FONT_DECL = /--font-(?:body|heading|brand)\s*:\s*var\(--font-[a-z0-9-]+\)\s*;/g
-const FONT_OPTIONS = [
+const BASE_FONT_OPTIONS = [
   { value: 'var(--font-source-serif)', label: 'Source Serif 4', serif: true },
   { value: 'var(--font-fraunces)', label: 'Fraunces', serif: true },
   { value: 'var(--font-literata)', label: 'Literata', serif: true },
@@ -388,6 +396,10 @@ const FONT_OPTIONS = [
   { value: 'var(--font-exo2)', label: 'Exo 2', serif: false },
   { value: 'var(--font-fira-code)', label: 'Fira Code', serif: false },
 ]
+// Built-in options plus user fonts reported by the backend (fonts/
+// folders on disk, see GET /_api/settings), so added fonts need no
+// frontend changes.
+const fontOptions = ref(BASE_FONT_OPTIONS)
 const fontHeading = ref('')
 const fontBody = ref('')
 const fontBrand = ref('')
@@ -397,8 +409,8 @@ const fontBrand = ref('')
 // the candidate font at the size and weight of the element being styled.
 const fontPicker = ref(null) // open tab: 'heading' | 'body' | 'brand' | null
 let fontTabLast = 'body'
-const serifFonts = computed(() => FONT_OPTIONS.filter((o) => o.serif))
-const sansFonts = computed(() => FONT_OPTIONS.filter((o) => !o.serif))
+const serifFonts = computed(() => fontOptions.value.filter((o) => o.serif))
+const sansFonts = computed(() => fontOptions.value.filter((o) => !o.serif))
 
 function toggleFontPanel() {
   if (fontPicker.value) {
