@@ -1,6 +1,6 @@
 # Pagerite
 
-A CMS for people who are done patching WordPress. There's no PHP or Node.js to exploit — the whole editing surface sits behind your own SSO proxy, so the server the internet can talk to just renders plain pages that search engines and social media can read too. Further, the articles have rich layout and don't look boxed in like in most web publishing platforms. The software is lightweight and fast enough to serve any number of visitors you have.
+A CMS for people who are done patching WordPress. There's no PHP or Node.js to exploit — the whole editing surface sits behind your own SSO proxy, so the server the internet can talk to just renders plain pages that search engines and social media can read too. Further, the articles have rich layout and don't look boxed in like with most web publishing platforms. The software is lightweight and fast enough to serve any number of visitors you have.
 
 We run our own site [vasanko.com](https://vasanko.com/) on it, in case you wish to have a quick look.
 
@@ -10,7 +10,7 @@ We run our own site [vasanko.com](https://vasanko.com/) on it, in case you wish 
 uvx pagerite localhost
 ```
 
-That serves a demo site on localhost. When you take it to production, pass your domain name instead. Our [setup guide](https://git.zi.fi/LeoVasanko/pagerite/src/branch/main/docs/setup.md) walks through the whole production arrangement.
+That serves a demo site on localhost using [uv](https://docs.astral.sh/uv/getting-started/installation/). When you take it to production, pass your domain name instead. Our [setup guide](https://git.zi.fi/LeoVasanko/pagerite/src/branch/main/docs/setup.md) walks through the whole production arrangement.
 
 ## What it's like
 
