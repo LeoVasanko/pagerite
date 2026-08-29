@@ -26,7 +26,16 @@ export default defineConfig({
     },
   },
   appType: 'mpa', // no SPA fallback; every HTML page is served by FastAPI
+  resolve: {
+    alias: {
+      // All components are precompiled SFCs — drop the runtime template
+      // compiler (~60 kB min) from the bundle.
+      vue: 'vue/dist/vue.runtime.esm-bundler.js',
+    },
+  },
   build: {
+    // The main editor bundle (CodeMirror + Vue) is intentionally one chunk.
+    chunkSizeWarningLimit: 1200,
     // Mirror the URL space in the build output: hashed files land under
     // frontend-build/_assets/ and the Frontend serves the build directory
     // at the site root (frontend/public/favicon.ico -> /favicon.ico).
