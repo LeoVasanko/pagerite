@@ -20,6 +20,7 @@ import os
 import re
 import shutil
 import socket
+import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
@@ -42,6 +43,7 @@ from fastapi import (
 from fastapi.responses import RedirectResponse, Response
 from fastapi_vue import Frontend
 from kanta import Kanta
+from mediapreview import dispatch
 from pydantic import BaseModel
 from zstandard import ZstdCompressor
 
@@ -77,6 +79,11 @@ analytics_store = analytics.Store(ANALYTICS_PATH)
 # Content-addressed file store (uploads, seed assets, fetched favicons):
 # files on disk under hash-prefixed names, cached in RAM, served at /_f/.
 FILES_DIR = Path(os.getenv("PAGERITE_FILES", str(SITE_DIR / "files")))
+
+# Uploaded raster images are thumbnailed to this size and recompressed to
+# AVIF; the untouched original is kept alongside as ``<hash>.orig<ext>``.
+IMAGE_MAXSIZE = 1920
+IMAGE_QUALITY = 60
 
 # Live WebSocket clients for the analytics stream.
 _analytics_ws_clients: set[WebSocket] = set()
@@ -181,10 +188,14 @@ BUILD_DIR = Path(__file__).with_name("frontend-build")
 frontend = Frontend(BUILD_DIR, spa=False, cached="/_assets/")
 
 
+def _ext(orig: str) -> str:
+    """Sanitized lowercase extension (with dot) of an original file name."""
+    return "".join(c for c in Path(orig).suffix.lower() if c.isalnum() or c == ".")
+
+
 def _hash_name(body: bytes, orig: str) -> str:
     """Content-addressed file name: blake3 hash prefix + original extension."""
-    ext = "".join(c for c in Path(orig).suffix.lower() if c.isalnum() or c == ".")
-    return blake3.blake3(body).hexdigest()[:12] + ext
+    return blake3.blake3(body).hexdigest()[:12] + _ext(orig)
 
 
 def _store_seed_file(markdown: str, banner: str, orig: str, body: bytes) -> tuple[str, str]:
@@ -350,9 +361,17 @@ class FileStore:
         self._cache[name] = self._entry(body)
 
     def delete(self, name: str) -> None:
-        self._cache.pop(name, None)
-        with suppress(FileNotFoundError):
-            (self.path / name).unlink()
+        """Delete a file plus its derivative/original counterpart, if any.
+
+        An image upload is stored as a pair sharing the hash prefix
+        (``<hash>.orig.<ext>`` + ``<hash>.avif``); deleting either removes
+        both.
+        """
+        stem = name.partition(".")[0]
+        for key in [k for k in self._cache if k.partition(".")[0] == stem]:
+            self._cache.pop(key, None)
+            with suppress(FileNotFoundError):
+                (self.path / key).unlink()
 
     def __contains__(self, name: str) -> bool:
         return name in self._cache
@@ -656,19 +675,60 @@ async def toggle_task_endpoint(body: ToggleTaskIn) -> dict[str, str]:
     return {"markdown": new_markdown}
 
 
+def _to_avif(body: bytes, ext: str) -> bytes | None:
+    """Recompress an image body to a thumbnailed AVIF via mediapreview's
+    dispatch (pyvips for common formats, ffmpeg for HEIC/HEIF/AVIF), or
+    None if the body is not a decodable image (stored as-is by the caller).
+    Dispatch needs a real file for format routing, so the body goes
+    through a temp file.
+    """
+    with tempfile.NamedTemporaryFile(suffix=ext) as tmp:
+        tmp.write(body)
+        tmp.flush()
+        try:
+            avif, _resp = dispatch(
+                Path(tmp.name),
+                quality=IMAGE_QUALITY,
+                maxsize=IMAGE_MAXSIZE,
+                maxzoom=1,
+            )
+        except Exception:
+            return None
+        return avif
+
+
 @app.put("/_api/files/{name}")
 async def upload_file(name: str, request: Request) -> dict[str, str]:
     """Store an upload (image, video...) in the content-addressed store.
 
     The stored name is a blake3 hash prefix + the original extension,
     served immutable at "/_f/{name}"; returns {"path": "/_f/..."}.
+
+    Raster images are additionally recompressed with mediapreview: the
+    original goes to ``<hash>.orig<ext>`` (kept for reprocessing) while
+    pages link the thumbnailed AVIF derivative ``<hash>.avif``. SVGs and
+    GIFs are stored as-is (vector/animation would be lost). Other content
+    and failed conversions fall back to plain storage.
     """
     if "/" in name or name in {".", ".."}:
         raise HTTPException(400, "bad file name")
     body = await request.body()
-    stored = _hash_name(body, name)
-    file_store.put(stored, body)
-    return {"path": f"/_f/{stored}"}
+    if not body:
+        raise HTTPException(400, "empty file")
+    ext = _ext(name)
+    digest = blake3.blake3(body).hexdigest()[:12]
+    avif = (
+        None
+        if ext in {".svg", ".gif"}
+        else await asyncio.to_thread(_to_avif, body, ext)
+    )
+    if avif is None:  # not a decodable image: store the body as-is
+        stored = digest + ext
+        file_store.put(stored, body)
+        return {"path": f"/_f/{stored}"}
+    file_store.put(f"{digest}.orig{ext}", body)
+    file_store.put(f"{digest}.avif", avif)
+    return {"path": f"/_f/{digest}.avif"}
 
 
 @app.delete("/_api/files/{name}", status_code=204)
