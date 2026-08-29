@@ -664,9 +664,10 @@ function onEditorShown() {
 //
 // Editor → page follows the CURSOR, not the editor viewport: the cursor's
 // fractional line (soft-wrap included, so moving inside a wrapped
-// paragraph tracks smoothly) maps to its page position, shown at a fixed
-// anchor height in the window — the cursor on the last line lands at the
-// end of the page, no ramping needed. Only cursor/selection changes drive
+// paragraph tracks smoothly) maps to its page position. The page only
+// scrolls when that position leaves the viewport (with an edge margin),
+// and then just enough to bring it back inside — cursor movement within
+// view never drags the page along. Only cursor/selection changes drive
 // this direction: editor wheel-scrolling repositions the text, not the
 // page, which removes the scroll→scroll echo entirely.
 // Page → editor anchors a viewport fraction that grows with page progress
@@ -719,8 +720,8 @@ function editorTopFor(line) {
   return Math.min(max, block.top + (line - n) * block.height)
 }
 
-//: Window height fraction where the cursor's page position is shown.
-const CURSOR_ANCHOR = 1 / 3
+//: Edge margin (window height fraction) for cursor-driven page scrolls.
+const CURSOR_MARGIN = 1 / 8
 
 function syncWindowToEditor() {
   if (syncingScroll || !view) return
@@ -728,7 +729,10 @@ function syncWindowToEditor() {
   requestAnimationFrame(() => {
     const pts = syncPoints()
     if (pts) {
-      // The cursor's page position, shown at a fixed window height.
+      // Scroll the page only when the cursor's page position leaves the
+      // viewport (minus an edge margin): while it stays visible the page
+      // keeps its position, so cursor movement does not drag the page
+      // along; crossing an edge scrolls just enough to bring it back.
       const pos = view.state.selection.main.head
       const coords = view.coordsAtPos(pos)
       if (coords) {
@@ -739,8 +743,14 @@ function syncWindowToEditor() {
           ? Math.max(0, Math.min(1, (docY - block.top) / block.height))
           : 0
         const line = view.state.doc.lineAt(pos).number + frac
-        const y = interp(pts, line, 0, 1) - CURSOR_ANCHOR * innerHeight
-        if (Math.abs(scrollY - y) > 1) scrollTo({ top: Math.max(0, y), behavior: 'instant' })
+        const y = interp(pts, line, 0, 1)
+        const margin = CURSOR_MARGIN * innerHeight
+        let target = null
+        if (y < scrollY + margin) target = y - margin
+        else if (y > scrollY + innerHeight - margin) target = y - innerHeight + margin
+        if (target !== null && Math.abs(scrollY - target) > 1) {
+          scrollTo({ top: Math.max(0, target), behavior: 'instant' })
+        }
       }
     }
     requestAnimationFrame(() => { syncingScroll = false })
