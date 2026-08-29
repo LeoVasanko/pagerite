@@ -261,24 +261,6 @@ def _remove_page_content(menu: dict[str, Node], path: str) -> None:
         del slot[0][slot[1]]
 
 
-def _migrate_legacy() -> None:
-    """Rebuild the legacy flat page store as a tree (one-time migration)."""
-    if not data.pages:
-        return
-    with kanta.transaction("migrate pages to tree"):
-        for path, page in data.pages.items():
-            node = _ensure(data.menu, path)
-            node.title = page.title
-            node.content = page.markdown
-            node.banner = page.banner
-            node.published = page.published
-            node.order = page.order
-            node.created = page.created
-            node.modified = page.modified
-        data.pages.clear()
-        data.version += 1
-
-
 @kanta.bootstrap
 def _seed(data: Data) -> None:
     """Write the demo pages on database creation (never on existing dbs)."""
@@ -298,52 +280,11 @@ def _seed(data: Data) -> None:
         node.order = order
 
 
-def _backfill_derivatives() -> None:
-    """Create missing AVIF/WebP/JPEG derivatives for files stored before
-    they were introduced (older uploads may have only the original plus
-    AVIF, and SVGs no raster variants at all).  WebP/JPEG are re-encoded
-    from an existing AVIF when available, everything else from the
-    original (SVGs rasterized first)."""
-    try:
-        paths = [f for f in file_store.path.iterdir() if f.is_file()]
-    except FileNotFoundError:
-        return
-    groups: dict[str, list[Path]] = {}
-    for p in paths:
-        groups.setdefault(p.name.partition(".")[0], []).append(p)
-    for digest, files in groups.items():
-        names = {p.name for p in files}
-        source = next(
-            (p for p in files if ".orig." in p.name or p.suffix == ".svg"), None
-        )
-        if source is None:
-            continue  # plain as-is file, no derivatives to make
-        avif = file_store.get(f"{digest}.avif")
-        if avif is None:
-            ext = source.suffix
-            body = source.read_bytes()
-            if ext == ".svg":
-                png = _svg_to_png(body, IMAGE_MAXSIZE)
-                if png is None:
-                    continue
-                body, ext = png, ".png"
-            converted = _to_avif(body, ext)
-            if converted is None:
-                continue
-            file_store.put(f"{digest}.avif", converted)
-            avif = file_store.get(f"{digest}.avif")
-        for fmt, quality in (("webp", IMAGE_WEBP_QUALITY), ("jpg", IMAGE_JPG_QUALITY)):
-            if f"{digest}.{fmt}" not in names:
-                file_store.put(f"{digest}.{fmt}", _avif_to_format(avif[0], f".{fmt}", quality))
-
-
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Open the database, migrate legacy content, load assets, load GeoIP."""
+    """Open the database (migrations run inside kanta.open), load assets, load GeoIP."""
     await kanta.open()
     await asyncio.to_thread(file_store.load)
-    await asyncio.to_thread(_backfill_derivatives)
-    _migrate_legacy()
     await frontend.load()
     # Decompress/open the DB-IP MMDB once at startup.  Lookups are then
     # read-only and safe to run in background ``to_thread`` workers.
@@ -451,12 +392,25 @@ def _render_html(kind: str, path: str, base_url: str) -> str:
     return views.render_analytics(data.menu, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html, transition=data.transition)
 
 
+# Render generation: bumped (and the body cache cleared) by every
+# content/settings write, so page ETags and cached copies invalidate when
+# navigation-affecting changes happen. In-memory only — not database state.
+_render_gen = 0
+
+
+def _invalidate_pages() -> None:
+    """Drop cached page bodies and bump the render generation (ETags)."""
+    global _render_gen
+    _render_gen += 1
+    _cached_body.cache_clear()
+
+
 @lru_cache(maxsize=128)
-def _cached_body(kind: str, path: str, base_url: str, version: int, zstd: bool) -> bytes:
-    """Rendered page body. Every input the output depends on is in the key:
-    data.version bumps on any content/settings change, base_url feeds the
-    social meta URLs, and zstd selects the stored encoding (both variants
-    are cached rather than re-compressed).
+def _cached_body(kind: str, path: str, base_url: str, zstd: bool) -> bytes:
+    """Rendered page body; cleared by _invalidate_pages on any
+    content/settings change. base_url feeds the social meta URLs and zstd
+    selects the stored encoding (both variants are cached rather than
+    re-compressed).
     """
     body = _render_html(kind, path, base_url).encode()
     return _zstd.compress(body) if zstd else body
@@ -493,8 +447,8 @@ def _html_response(
         identity = _render_html(kind, path, base_url).encode()
         body = _zstd.compress(identity) if zstd else identity
     else:
-        identity = _cached_body(kind, path, base_url, data.version, False)
-        body = _cached_body(kind, path, base_url, data.version, True) if zstd else identity
+        identity = _cached_body(kind, path, base_url, False)
+        body = _cached_body(kind, path, base_url, True) if zstd else identity
     h = dict(headers or {})
     if zstd:
         h["vary"] = "accept-encoding"
@@ -562,7 +516,7 @@ async def save_page(path: str, page: PageIn) -> None:
         if page.banner is not None:
             node.banner = page.banner
         node.modified = datetime.now(UTC)
-        data.version += 1
+        _invalidate_pages()
 
 
 class StructureOp(BaseModel):
@@ -623,7 +577,7 @@ async def update_structure(op: StructureOp) -> None:
         elif op.order is not None:
             node.order = op.order
         node.modified = datetime.now(UTC)
-        data.version += 1
+        _invalidate_pages()
 
 
 @app.get("/_api/settings")
@@ -657,14 +611,14 @@ class SettingsIn(BaseModel):
 
 @app.put("/_api/settings", status_code=204)
 async def put_settings(settings: SettingsIn) -> None:
-    """Update site-wide settings; bumps the version so ETags invalidate."""
+    """Update site-wide settings; invalidates cached pages and ETags."""
     with kanta.transaction("update settings"):
         data.brand = settings.brand
         data.brand_html = settings.brand_html
         data.theme = settings.theme
         data.custom_css = settings.custom_css
         data.transition = settings.transition
-        data.version += 1
+        _invalidate_pages()
 
 
 @app.put("/_api/settings/favicon")
@@ -694,7 +648,7 @@ async def put_favicon(request: Request) -> dict[str, str]:
             file_store.put(f"{digest}.{fmt}", variant)
     with kanta.transaction("upload favicon"):
         data.favicon = stored
-        data.version += 1
+        _invalidate_pages()
     return {"path": f"/_f/{stored}"}
 
 
@@ -706,7 +660,7 @@ async def delete_favicon() -> None:
     """
     with kanta.transaction("clear favicon"):
         data.favicon = ""
-        data.version += 1
+        _invalidate_pages()
 
 
 class ToggleTaskIn(BaseModel):
@@ -743,7 +697,7 @@ async def toggle_task_endpoint(body: ToggleTaskIn) -> dict[str, str]:
     with kanta.transaction("toggle task", extra=path):
         node.content = new_markdown
         node.modified = datetime.now(UTC)
-        data.version += 1
+        _invalidate_pages()
     return {"markdown": new_markdown}
 
 
@@ -975,7 +929,7 @@ async def delete_page(path: str) -> None:
             node.modified = datetime.now(UTC)
         else:
             del slot[0][slot[1]]
-        data.version += 1
+        _invalidate_pages()
 
 
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
@@ -1428,7 +1382,7 @@ async def editor_ws(ws: WebSocket) -> None:
                         if "banner_design" in msg:
                             node.banner_design = msg["banner_design"]
                         node.modified = datetime.now(UTC)
-                        data.version += 1
+                        _invalidate_pages()
                     await ws.send_json({"type": "saved", "path": path})
     except WebSocketDisconnect:
         pass
@@ -1552,7 +1506,7 @@ async def show_page(request: Request, path: str) -> Response:
         # from pagerite.js's in-memory page cache (preload everything, never
         # fetch on navigation); the ETag just makes those one-time preload
         # fetches and any revalidation cheap.
-        etag = f'"{path}@{node.modified.timestamp()}v{data.version}"'
+        etag = f'"{path}@{node.modified.timestamp()}g{_render_gen}"'
         if request.headers.get("if-none-match") == etag:
             return Response(status_code=304)
         if _is_trackable_path(path):

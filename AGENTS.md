@@ -12,7 +12,7 @@ Pagerite is a CMS. See `docs` for the full design and implementation details. Ke
 - `pagerite/` — Python backend package (hatchling build target).
   - `app.py` — FastAPI app and route registration.
   - `data.py` — msgspec Structs for the kanta database.
-  - `migrations.py` — kanta schema migrations (`migrate_vN`), e.g. v1 moves legacy in-db file blobs to the on-disk store.
+  - `migrations.py` — kanta migrations (`migrate_vN`); ALL schema/storage upgrades live here (raw state dict before struct decoding), never in the app lifespan: v1 moves legacy in-db file blobs to the on-disk store and rebuilds the legacy flat `pages` as the menu tree, v2 rewrites `/_f/{hash}.ext` image links to the extension-less form, backfills AVIF/WebP/JPEG derivatives on disk and drops the obsolete `version` field.
   - `markdown.py` — markdown-it-py renderer.
   - `views.py` — shared page layout and rendering; theme/user-font resolution across `THEME_DIRS` / `FONT_DIRS` (cwd, site, platform data roots, then built-in `pagerite/themes/`, see `docs/themes-and-assets.md`).
   - `seed.py` — demo content, written only on first database creation.

@@ -50,34 +50,11 @@ class Node(msgspec.Struct, omit_defaults=True):
     )
 
 
-class Page(msgspec.Struct, omit_defaults=True):
-    """Legacy flat page record, from before the tree model.
-
-    Kept only so old databases still decode; app.py migrates any entries
-    into ``Data.menu`` on startup and clears this.
-    """
-
-    title: str
-    markdown: str
-    published: bool = True
-    order: float = 0
-    banner: str = ""
-    created: datetime = msgspec.field(
-        default_factory=lambda: datetime.now(UTC),
-    )
-    modified: datetime = msgspec.field(
-        default_factory=lambda: datetime.now(UTC),
-    )
-
-
 class Data(msgspec.Struct):
     """Root object of the kanta database. Owned and edited in place by us."""
 
     #: Top-level menu items by slug; "" is the front page.
     menu: dict[str, Node] = {}
-    #: Bumped on every structure/content write, so page ETags (which embed
-    #: it) invalidate cached copies when navigation-affecting changes happen.
-    version: int = 0
     #: Site name shown in the header and <title> suffix; editable in the
     #: site editor. Empty = no brand link in the header, no title suffix.
     brand: str = "Pagerite"
@@ -101,9 +78,6 @@ class Data(msgspec.Struct):
     #: linked as <link rel="icon"> on every page. Empty = the build's
     #: /favicon.ico.
     favicon: str = ""
-    #: Legacy flat page store (pre-tree databases); migrated into `menu`
-    #: on startup, then cleared. Never written otherwise.
-    pages: dict[str, Page] = {}
 
 
 def prettify(slug: str) -> str:
