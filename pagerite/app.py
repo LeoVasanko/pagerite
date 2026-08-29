@@ -557,7 +557,7 @@ async def get_settings() -> dict:
         "theme": data.theme,
         "custom_css": data.custom_css,
         "favicon": f"/_f/{data.favicon}" if data.favicon else "",
-        "themes": views._theme_names(),
+        "themes": views._theme_info(),
         "banner_designs": views._banner_design_names(),
         "transition": data.transition,
         "transitions": views._transition_names(),

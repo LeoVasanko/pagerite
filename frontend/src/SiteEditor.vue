@@ -56,11 +56,18 @@ const brand = ref('')
 const theme = ref('')
 // Theme options come from the backend (theme folders on disk, see GET
 // /_api/settings), so added themes need no frontend changes.
-const themeOptions = ref([{ value: '', label: 'none' }])
+const themeOptions = ref([{ value: '', label: '☀️ none' }])
 // Page transition (cube, crossfade, ...): a design folder with
 // transition.css under pagerite/themes/, injected as #pagerite-transition.
 const transition = ref('cube')
 const transitionOptions = ref([])
+
+// Mode icons match the ones used in the Paskia auth frontend.
+const MODE_ICONS = { light: '☀️', dark: '🌙', both: '🌓' }
+
+function themeLabel(t) {
+  return `${MODE_ICONS[t.mode] || MODE_ICONS.light} ${t.name}`
+}
 
 async function loadSettings() {
   try {
@@ -73,8 +80,8 @@ async function loadSettings() {
     customCss.value = s.custom_css || ''
     favicon.value = s.favicon || ''
     themeOptions.value = [
-      { value: '', label: 'none' },
-      ...(s.themes || []).map((t) => ({ value: t, label: t })),
+      { value: '', label: `${MODE_ICONS.light} none` },
+      ...(s.themes || []).map((t) => ({ value: t.name, label: themeLabel(t) })),
     ]
     transition.value = s.transition || 'cube'
     transitionOptions.value = s.transitions || []

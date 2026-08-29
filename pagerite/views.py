@@ -47,11 +47,45 @@ def _manifest() -> dict:
     return _manifest_cache
 
 
-def _theme_names() -> list[str]:
-    """Theme folders on disk (a folder is a theme when it has theme.css)."""
-    return sorted(
-        d.name for d in THEMES.iterdir() if d.is_dir() and (d / "theme.css").exists()
-    )
+def _theme_color_schemes(theme: str) -> set[str]:
+    """Return the color-scheme keywords (``light``/``dark``) from theme.css.
+
+    Reads the first ``color-scheme:`` declaration in the file. An empty set
+    means the theme did not declare one.
+    """
+    path = THEMES / theme / "theme.css"
+    try:
+        css = path.read_text()
+    except (OSError, ValueError):
+        return set()
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
+    m = re.search(r"color-scheme\s*:\s*([^;]+);", css, re.IGNORECASE)
+    if not m:
+        return set()
+    return {tok.lower() for tok in m.group(1).split() if tok.lower() in {"light", "dark"}}
+
+
+def _theme_mode(theme: str) -> str:
+    """Light/dark mode support of a theme, derived from its CSS.
+
+    Returns one of ``"light"``, ``"dark"``, or ``"both"``. Themes without a
+    ``color-scheme`` declaration are treated as light-only.
+    """
+    schemes = _theme_color_schemes(theme)
+    if "light" in schemes and "dark" in schemes:
+        return "both"
+    if "dark" in schemes:
+        return "dark"
+    return "light"
+
+
+def _theme_info() -> list[dict[str, str]]:
+    """Theme folders on disk, each with its name and supported color mode."""
+    return [
+        {"name": d.name, "mode": _theme_mode(d.name)}
+        for d in sorted(THEMES.iterdir(), key=lambda d: d.name)
+        if d.is_dir() and (d / "theme.css").exists()
+    ]
 
 
 def _banner_design_names() -> list[str]:

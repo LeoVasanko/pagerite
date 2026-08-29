@@ -16,6 +16,8 @@ Themes are folders in `pagerite/themes/{name}/` containing `theme.css` and/or `b
 
 `Data.theme` selects the active theme (empty = none/base only) and the site editor can switch it, choosing from the theme folders found on disk. Vue may add per-component styles on top where needed.
 
+The site editor shows a light/dark-mode indicator in front of each theme name, read from the theme's `color-scheme` declaration in `theme.css`: ☀️ for light-only, 🌙 for dark-only, and 🌓 for themes that support both. The base theme (`none`) is light-only.
+
 Current themes:
 
 - `purple` — dark dusk palette with Fraunces/Literata and a tilted oversized gradient brand.
