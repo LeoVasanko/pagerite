@@ -4,6 +4,8 @@
 import { computed, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState } from '@codemirror/state'
+import { keymap } from '@codemirror/view'
+import { indentWithTab } from '@codemirror/commands'
 import { html } from '@codemirror/lang-html'
 import { cmHighlight, cmTheme } from './cmtheme'
 import { dropPageCache, loadPlain, runScripts } from './swapdoc'
@@ -261,6 +263,8 @@ onMounted(async () => {
       doc: '',
       extensions: [
         basicSetup,
+        // Tab/Shift-Tab indent and dedent instead of moving focus.
+        keymap.of([indentWithTab]),
         html(),
         cmTheme,
         cmHighlight,

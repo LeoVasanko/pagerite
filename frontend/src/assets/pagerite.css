@@ -78,6 +78,21 @@
   color: inherit;
 }
 
+/* Text size classes for any block ({.small} {.large} {.huge}, set via the
+   format bar or by hand): em units on the single 1rem base scale, so they
+   compose with the theme's typography. */
+.small {
+  font-size: 0.7em;
+}
+
+.large {
+  font-size: 1.5em;
+}
+
+.huge {
+  font-size: 3em;
+}
+
 /* Links never underline — including SVG link text, which the UA stylesheet
    underlines by default. */
 a {
@@ -110,7 +125,10 @@ html {
 
 body {
   font-family: var(--font-body);
-  font-size: 1.05rem;
+  /* 1rem exactly: the text scale (headings, .small/.large/.huge) keys off
+     one base size — no per-context tweaking, or consistent sizing becomes
+     impossible. */
+  font-size: 1rem;
   line-height: 1.65;
   /* Tabular numerals wherever the active font supports them; avoids
      numbers jumping in width as counters/values change. */
@@ -1280,6 +1298,24 @@ figure:has(.left) {
   margin: 0.3rem 1em 1rem 0;
 }
 
+/* The same floats for other blocks: ::: left / ::: right containers
+   (rendered div.left/right), paragraphs, code fences, blockquotes and
+   tables all take the class directly ({.right} at the end of a
+   paragraph's last line, a trailing {.left} line after a fence, ...). */
+:is(div, p, pre, blockquote, table).right {
+  float: right;
+  width: 30%;
+  max-width: 50%;
+  margin: 0.3rem 0 1rem 1em;
+}
+
+:is(div, p, pre, blockquote, table).left {
+  float: left;
+  width: 30%;
+  max-width: 50%;
+  margin: 0.3rem 1em 1rem 0;
+}
+
 /* An image with an explicit width attribute shrink-wraps instead: the
    figure fits the image and, per the auto inline margins above, centers
    in the column. Placed after the percentage widths above so it
@@ -1460,8 +1496,8 @@ article h2 {
 
 /* Phones and other narrow viewports: single-column layout with the
    sidebar lifted above the article as a wrapping link strip, and no
-   floats at all — .left/.right/.margin figures fall back to plain
-   centered figures (explicit img widths still shrink-wrap), margin boxes
+   floats at all — .left/.right/.margin figures and blocks fall back to
+   plain full-width (explicit img widths still shrink-wrap), margin boxes
    go full width, while .wide keeps its full viewport bleed. */
 @media (max-width: 48rem) {
 
@@ -1533,6 +1569,14 @@ article h2 {
     width: 100%;
     max-width: none;
     margin: 0 auto 1.5rem;
+  }
+
+  /* Non-figure floated blocks flatten to plain full-width blocks too. */
+  :is(div, p, pre, blockquote, table):is(.right, .left) {
+    float: none;
+    width: auto;
+    max-width: none;
+    margin: 0 0 1rem;
   }
 
   /* Margin boxes go full width too — no room for side floats on a

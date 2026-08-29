@@ -16,6 +16,8 @@
 import { onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState } from '@codemirror/state'
+import { keymap } from '@codemirror/view'
+import { indentWithTab } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
 import { cmHighlight, cmTheme } from './cmtheme'
 import { dropPageCache, loadPlain } from './swapdoc'
@@ -131,11 +133,6 @@ function close() {
   if (dirty.value) loadPlain(path.value)
 }
 
-function insertAtCursor(text) {
-  view.dispatch(view.state.replaceSelection(text))
-  view.focus()
-}
-
 async function uploadImage(file) {
   if (!file) return
   const name = file.name.replace(/[^\w.-]/g, '-')
@@ -143,7 +140,16 @@ async function uploadImage(file) {
   if (res.ok) {
     const { path: stored } = await res.json()
     const alt = name.replace(/\.[^.]+$/, '')
-    insertAtCursor(`![${alt}](${stored})`)
+    // Always include an empty caption (""), cursor inside the quotes: a
+    // lone image with a title renders as a captioned figure, and an empty
+    // caption is as good as none.
+    const insert = `![${alt}](${stored} "")`
+    const { from, to } = view.state.selection.main
+    view.dispatch({
+      changes: { from, to, insert },
+      selection: { anchor: from + insert.length - 2 },
+    })
+    view.focus()
   }
 }
 
@@ -170,26 +176,165 @@ function wrapInline(mark) {
   view.focus()
 }
 
-function insertCode() {
-  // On an empty line with no selection: a fenced code block, cursor inside.
-  // Otherwise an inline code wrap (toggling).
+// --- Fenced blocks (``` code, ::: containers) ------------------------------
+// Fences are never nested, and both kinds behave identically in the
+// toolbar: clicked with the cursor/selection inside a fence of its kind,
+// the button REMOVES the fence lines and selects the whole content;
+// otherwise it wraps the selection — expanded to whole lines, so partial
+// line selections and a bare cursor on a line count as that line — in a
+// fence, keeping the content selected. A cursor on an empty line inserts
+// an empty fence with the cursor inside.
+
+// Find the fence block around a line range by parity (no nesting): an odd
+// count of marker lines above the range means it is inside a block. The
+// range's own first/last lines may be the fence lines themselves.
+function enclosingFence(fromNo, toNo, markerRe) {
+  const doc = view.state.doc
+  const isFence = (n) => markerRe.test(doc.line(n).text.trimStart())
+  let above = 0
+  for (let n = 1; n < fromNo; n++) if (isFence(n)) above++
+  let openNo = null
+  if (above % 2 === 1) {
+    for (let n = fromNo - 1; n >= 1; n--) {
+      if (isFence(n)) { openNo = n; break }
+    }
+  } else if (isFence(fromNo)) {
+    openNo = fromNo
+  }
+  if (openNo === null) return null
+  for (let n = Math.max(toNo, openNo + 1); n <= doc.lines; n++) {
+    if (isFence(n)) return { open: doc.line(openNo), close: doc.line(n) }
+  }
+  return null
+}
+
+// Remove the fence block enclosing the selection, selecting its whole
+// content. Returns true when there was one.
+function removeEnclosingFence(markerRe) {
+  const doc = view.state.doc
   const { from, to } = view.state.selection.main
-  const line = view.state.doc.lineAt(from)
-  if (from === to && !line.text.trim()) {
+  const fence = enclosingFence(doc.lineAt(from).number, doc.lineAt(to).number, markerRe)
+  if (!fence) return false
+  const { open, close } = fence
+  // One atomic replace: fences out, content stays where it lands.
+  const hasAfter = close.to < doc.length
+  const end = hasAfter ? close.to + 1 : doc.length
+  const content = hasAfter
+    ? doc.sliceString(open.to + 1, close.from) // trailing newline kept
+    : doc.sliceString(open.to + 1, Math.max(open.to + 1, close.from - 1))
+  const head = content.endsWith('\n') ? content.length - 1 : content.length
+  view.dispatch({
+    changes: { from: open.from, to: end, insert: content },
+    selection: { anchor: open.from, head: open.from + Math.max(0, head) },
+  })
+  view.focus()
+  return true
+}
+
+// Wrap the selection — expanded to whole lines (a bare cursor counts as
+// its line) — in a fence, cursor left at the end of the opener line. On
+// an empty line with no selection, insert an empty fence with the cursor
+// at the END of the opener line (no blank content line): for ``` a
+// language word can be typed right away, for ::: the container name
+// (aside) can be rewritten.
+function wrapInFence(openText, closeText) {
+  const doc = view.state.doc
+  const { from, to } = view.state.selection.main
+  const fromLine = doc.lineAt(from)
+  if (from === to && !fromLine.text.trim()) {
     view.dispatch({
-      changes: { from: line.from, to: line.to, insert: '```\n\n```' },
-      selection: { anchor: line.from + 4 },
+      changes: { from: fromLine.from, to: fromLine.to, insert: `${openText}\n${closeText}` },
+      selection: { anchor: fromLine.from + openText.length },
     })
-    view.focus()
+  } else {
+    const bf = fromLine.from
+    // A selection ending exactly at a line start excludes that (possibly
+    // empty) line — only the selected lines go inside the fence.
+    let lastLine = doc.lineAt(to)
+    if (to === lastLine.from && to > from) lastLine = doc.line(lastLine.number - 1)
+    const bt = lastLine.to
+    view.dispatch({
+      changes: [
+        { from: bt, insert: `\n${closeText}` },
+        { from: bf, insert: `${openText}\n` },
+      ],
+      // Cursor at the end of the opening fence line, selection cleared —
+      // a language word (or container name) can be typed right away.
+      selection: { anchor: bf + openText.length },
+    })
+  }
+  view.focus()
+}
+
+function insertCode() {
+  // Toggling, selection-preserving code helper:
+  // - inside a fenced block: remove the fences, content selected (above)
+  // - selection covering whole line(s) or spanning lines: fenced block
+  // - empty line, no selection: a fenced block, cursor inside
+  // - otherwise an inline wrap; the inner text stays selected both ways,
+  //   and a repeated click removes the backtick run around it
+  const state = view.state
+  const doc = state.doc
+  const { from, to } = state.selection.main
+  const fromLine = doc.lineAt(from)
+  const toLine = doc.lineAt(to)
+  const inline = from !== to && fromLine.number === toLine.number
+    && !(from === fromLine.from && to === toLine.to)
+  if (!inline && removeEnclosingFence(/^```/)) return
+  if (from === to) {
+    if (!fromLine.text.trim()) wrapInFence('```', '```')
+    else wrapInline('`')
     return
   }
-  wrapInline('`')
+  if (!inline) {
+    wrapInFence('```', '```')
+    return
+  }
+  // Inline: a matching backtick run on both sides unwraps; otherwise wrap
+  // (double ticks when the text itself contains a backtick).
+  let l = 0
+  while (l < from && doc.sliceString(from - l - 1, from - l) === '`') l++
+  let r = 0
+  while (doc.sliceString(to + r, to + r + 1) === '`') r++
+  if (l > 0 && l === r) {
+    view.dispatch({
+      changes: [{ from: to, to: to + r }, { from: from - l, to: from }],
+      selection: { anchor: from - l, head: to - l },
+    })
+  } else {
+    const mark = doc.sliceString(from, to).includes('`') ? '``' : '`'
+    view.dispatch({
+      changes: { from, to, insert: mark + doc.sliceString(from, to) + mark },
+      selection: { anchor: from + mark.length, head: to + mark.length },
+    })
+  }
+  view.focus()
 }
 
 function insertLink() {
-  // Selected text becomes the link label — or the URL if it looks like one.
+  // Toggle: with the cursor or selection anywhere inside an existing
+  // [label](url) on this line, unwrap it (the label stays selected).
+  // Otherwise the selected text becomes the label — or the URL if it
+  // looks like one.
   const { from, to } = view.state.selection.main
-  const text = view.state.sliceDoc(from, to)
+  const doc = view.state.doc
+  const line = doc.lineAt(from)
+  const linkRe = /\[([^\]]*)\]\(([^)]*)\)/g
+  let m
+  while ((m = linkRe.exec(line.text))) {
+    if (line.text[m.index - 1] === '!') continue // image, not a link
+    const start = line.from + m.index
+    if (from >= start && to <= start + m[0].length) {
+      const label = m[1]
+      view.dispatch({
+        changes: { from: start, to: start + m[0].length, insert: label },
+        selection: { anchor: start, head: start + label.length },
+      })
+      view.focus()
+      return
+    }
+  }
+  const text = doc.sliceString(from, to)
   const isUrl = /^https?:\/\/\S+$/.test(text)
   const insert = isUrl ? `[](${text})` : `[${text}]()`
   const urlStart = from + insert.length - 1 // inside the parens
@@ -200,11 +345,187 @@ function insertLink() {
   view.focus()
 }
 
+// ::: aside container, toggling like code fences (shared machinery above):
+// inside one it is removed (content selected); otherwise the selection —
+// or the cursor's line — becomes the content, selected. The placement
+// buttons below work on the ::: line itself.
+function insertAside() {
+  if (!removeEnclosingFence(/^:::/)) wrapInFence('::: aside', ':::')
+}
+
+// Block placement classes: .left/.right float, .wide full bleed, .margin
+// a margin note; plus the text size classes .small/.large/.huge. The
+// button toggles the class in the brace attributes of the block at the
+// cursor (figure/image line, paragraph, code fence); classes within one
+// group are mutually exclusive. ::: containers are the exception: a
+// placement class replaces the container name (::: margin, etc.), a size
+// class takes braces (::: aside {.small}). A blank cursor line targets
+// the block above (a trailing {...} line applies there).
+const PLACEMENTS = ['left', 'right', 'wide', 'margin']
+const SIZES = ['small', 'large', 'huge']
+
+// Toggle .cls in a line's trailing brace attributes, preserving the other
+// tokens (language, #id, other groups' classes) and the original spacing;
+// returns the new text.
+function toggleAttrClass(text, cls, group) {
+  const m = text.match(/(\s*)\{([^{}]*)\}(\s*)$/)
+  if (!m) {
+    // A lone image takes the braces directly attached, others spaced.
+    const tight = /^\s*!\[[^\]]*\]\([^)]*\)$/.test(text.trimEnd()) ? '' : ' '
+    return text.trimEnd() + tight + `{.${cls}}`
+  }
+  const tokens = m[2].trim() ? m[2].trim().split(/\s+/) : []
+  const tok = `.${cls}`
+  let next
+  if (tokens.includes(tok)) {
+    next = tokens.filter((t) => t !== tok)
+  } else {
+    next = tokens.filter((t) => !group.some((c) => t === `.${c}`))
+    next.push(tok)
+  }
+  const base = text.slice(0, m.index).trimEnd()
+  return next.length ? base + (m[1] || ' ') + `{${next.join(' ')}}` : base
+}
+
+// Locate where block classes live for the block at the cursor:
+// { line } — trailing brace attributes on that line (paragraph, image,
+// fence info line); { container } — a ::: container's opener line; or
+// { fence, attrLine } — a code fence, whose classes live on a line of
+// their own after the closing fence (attrLine null when not written yet).
+// A blank cursor line targets the block above. Shared by the class
+// toggles and the pickers' current-class indicator.
+function classTarget() {
+  const doc = view.state.doc
+  let line = doc.lineAt(view.state.selection.main.head)
+  while (!line.text.trim() && line.number > 1) line = doc.line(line.number - 1)
+  if (!line.text.trim()) return null
+  // ``` fence context: an odd count of fence lines above means the cursor
+  // is inside the fence or on its closing fence.
+  let open = false
+  for (let n = 1; n < line.number; n++) {
+    if (doc.line(n).text.trimStart().startsWith('```')) open = !open
+  }
+  if (open) {
+    let n = line.number
+    while (n <= doc.lines && !doc.line(n).text.trimStart().startsWith('```')) n++
+    if (n > doc.lines) return null // unclosed fence — nothing to attach to
+    const fence = doc.line(n)
+    const after = fence.number < doc.lines ? doc.line(fence.number + 1) : null
+    return {
+      fence,
+      attrLine: after && /^\s*\{[^{}]*\}\s*$/.test(after.text) ? after : null,
+    }
+  }
+  // ::: container context: same parity (containers are not nested) — on
+  // the opener, inside, or on the closing fence.
+  let above = 0
+  for (let n = 1; n < line.number; n++) {
+    if (doc.line(n).text.trimStart().startsWith(':::')) above++
+  }
+  if (above % 2 === 1) {
+    for (let n = line.number - 1; n >= 1; n--) {
+      if (doc.line(n).text.trimStart().startsWith(':::')) {
+        return { container: doc.line(n) }
+      }
+    }
+    return null
+  }
+  if (/^\s*:::\s*\w/.test(line.text)) return { container: line }
+  return { line }
+}
+
+function togglePlacement(cls, group = PLACEMENTS) {
+  const t = classTarget()
+  if (!t) {
+    view.focus()
+    return
+  }
+  let line
+  if (t.container) {
+    // Placement replaces the container name (clicking the active one
+    // reverts to aside); sizes and other classes take brace attributes.
+    if (PLACEMENTS.includes(cls)) {
+      const m = t.container.text.match(/^(\s*:::\s*)(\w+)/)
+      const name = m[2] === cls ? 'aside' : cls
+      view.dispatch({
+        changes: { from: t.container.from, to: t.container.to, insert: `${m[1]}${name}` },
+      })
+      view.focus()
+      return
+    }
+    line = t.container
+  } else if (t.fence) {
+    if (!t.attrLine) {
+      view.dispatch({ changes: { from: t.fence.to, insert: `\n{.${cls}}` } })
+      view.focus()
+      return
+    }
+    line = t.attrLine
+  } else {
+    line = t.line
+  }
+  const text = toggleAttrClass(line.text, cls, group)
+  if (text !== line.text) {
+    view.dispatch({ changes: { from: line.from, to: line.to, insert: text } })
+  }
+  view.focus()
+}
+
+// The class set of the block at the cursor (names without the dot): brace
+// tokens, plus the container name when it is a placement (::: margin).
+function braceClasses(text) {
+  const m = text.match(/\{([^{}]*)\}\s*$/)
+  if (!m) return new Set()
+  return new Set(
+    m[1].split(/\s+/).filter((tok) => tok.startsWith('.')).map((tok) => tok.slice(1)),
+  )
+}
+
+function currentClasses() {
+  const t = classTarget()
+  if (!t) return new Set()
+  if (t.container) {
+    const s = braceClasses(t.container.text)
+    const name = t.container.text.match(/^\s*:::\s*(\w+)/)?.[1]
+    if (PLACEMENTS.includes(name)) s.add(name)
+    return s
+  }
+  if (t.fence) return t.attrLine ? braceClasses(t.attrLine.text) : new Set()
+  return braceClasses(t.line.text)
+}
+
 // Table size picker: a hover grid popup (cols × rows) under the toolbar.
 const tablePicker = ref(false)
 const tableSize = ref({ cols: 0, rows: 0 })
 const TABLE_MAX_COLS = 8
 const TABLE_MAX_ROWS = 6
+
+// Class pickers: popup listing the block class toggles (placement ↔︎,
+// text size AA), closed after applying. The block's current class of the
+// group is marked; choosing "normal" (or the current class) removes it.
+const classPicker = ref(null) // 'place' | 'size' | null
+const activeClasses = ref(new Set())
+
+function openClassPicker(which) {
+  classPicker.value = classPicker.value === which ? null : which
+  if (classPicker.value) activeClasses.value = currentClasses()
+}
+
+function isClassActive(cls, group) {
+  return cls === 'normal'
+    ? !group.some((c) => activeClasses.value.has(c))
+    : activeClasses.value.has(cls)
+}
+
+function applyClass(cls, group) {
+  if (cls === 'normal') {
+    const cur = group.find((c) => activeClasses.value.has(c))
+    if (cur) togglePlacement(cur, group) // present → toggles off
+  } else {
+    togglePlacement(cls, group)
+  }
+  classPicker.value = null
+}
 
 function insertTable(cols, rows) {
   // A GFM table on its own blank-separated block, first header cell
@@ -506,6 +827,8 @@ onMounted(() => {
       doc: '',
       extensions: [
         basicSetup,
+        // Tab/Shift-Tab indent and dedent instead of moving focus.
+        keymap.of([indentWithTab]),
         markdown(),
         cmTheme,
         cmHighlight,
@@ -589,17 +912,59 @@ onUnmounted(() => {
       >💾</button>
     </header>
     <div class="format-bar">
-      <button type="button" title="bold" @click="wrapInline('**')"><b>B</b></button>
-      <button type="button" title="italic" @click="wrapInline('*')"><i>I</i></button>
-      <button type="button" title="code (empty line: code block)" @click="insertCode"><code>&lt;/&gt;</code></button>
-      <button type="button" title="link" @click="insertLink">🔗</button>
+      <button type="button" class="code-btn" title="code — inline wrap, or a fenced block for line-spanning selections; click again to unwrap" @click="insertCode"><code>&lt;/&gt;</code></button>
+      <button type="button" title="link (toggle: click inside a link to unwrap it)" @click="insertLink">🔗︎</button>
       <button
         type="button"
         title="table"
         :class="{ active: tablePicker }"
         @click="tablePicker = !tablePicker"
-      >▦</button>
-      <button type="button" title="insert image (upload) — pasting works too" @click="fileInput.click()">🖼️</button>
+      >⊞</button>
+      <button type="button" title="insert image (upload) — pasting works too" @click="fileInput.click()">🖼︎</button>
+      <button type="button" title="aside box (::: aside) — wraps the selection or the cursor's line; clicked inside one, removes it" @click="insertAside">◧</button>
+      <span class="picker">
+        <button
+          type="button"
+          title="block placement class"
+          :class="{ active: classPicker === 'place' }"
+          @click="openClassPicker('place')"
+        >↔︎</button>
+        <span v-if="classPicker === 'place'" class="picker-pop">
+          <button
+            v-for="c in ['normal', ...PLACEMENTS]"
+            :key="c"
+            type="button"
+            :class="{ active: isClassActive(c, PLACEMENTS), normal: c === 'normal' }"
+            :title="c === 'normal'
+              ? 'remove the block\'s placement class'
+              : `${c} on the block at the cursor`"
+            @click="applyClass(c, PLACEMENTS)"
+          >{{ c }}</button>
+        </span>
+      </span>
+      <button type="button" title="bold" @click="wrapInline('**')"><b>B</b></button>
+      <button type="button" title="italic" @click="wrapInline('*')"><i>i</i></button>
+      <span class="picker">
+        <button
+          type="button"
+          title="text size class"
+          class="aa"
+          :class="{ active: classPicker === 'size' }"
+          @click="openClassPicker('size')"
+        ><span>A</span>A</button>
+        <span v-if="classPicker === 'size'" class="picker-pop">
+          <button
+            v-for="c in ['small', 'normal', 'large', 'huge']"
+            :key="c"
+            type="button"
+            :class="{ active: isClassActive(c, SIZES), normal: c === 'normal' }"
+            :title="c === 'normal'
+              ? 'remove the block\'s size class'
+              : `${c} on the block at the cursor`"
+            @click="applyClass(c, SIZES)"
+          >{{ c }}</button>
+        </span>
+      </span>
       <div v-if="tablePicker" class="table-picker" @mouseleave="tableSize = { cols: 0, rows: 0 }">
         <div class="tp-grid" :style="{ gridTemplateColumns: `repeat(${TABLE_MAX_COLS}, 1fr)` }">
           <button
@@ -699,9 +1064,9 @@ onUnmounted(() => {
 
 .format-bar button {
   min-width: 1.7rem;
-  padding: 0.15rem 0.3rem;
+  padding: 0.05rem 0.2rem;
   font: inherit;
-  font-size: 0.85rem;
+  font-size: 1.05rem;
   color: var(--muted);
   background: none;
   border: 1px solid transparent;
@@ -709,10 +1074,58 @@ onUnmounted(() => {
   cursor: pointer;
 }
 
+/* Hover and selected (active) states: text color alone, no borders. */
 .format-bar button:hover,
 .format-bar button.active {
   color: var(--text);
-  border-color: var(--line);
+}
+
+/* The glyphs are small relative to the button boxes; scaling them up
+   (transform, so layout is unaffected) fills the empty space between
+   symbols. The code symbol is larger than the rest, so it scales less. */
+.format-bar > button,
+.picker > button {
+  transform: scale(1.5);
+}
+
+.format-bar > button.code-btn {
+  transform: scale(1.25);
+}
+
+/* Class pickers: a button opening a small popup of class toggles (like
+   the table picker), anchored under its own button. */
+.picker {
+  position: relative;
+  display: flex;
+}
+
+/* The size icon: two capital As at different sizes. */
+.aa span {
+  font-size: 0.65em;
+}
+
+.picker-pop {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 20;
+  display: flex;
+  gap: 0.15rem;
+  padding: 0.3rem;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px #0004;
+}
+
+.picker-pop button {
+  font-family: var(--font-code, monospace);
+  font-size: 0.85rem;
+}
+
+/* "normal" (the reset entry) reads as text, not a class name. */
+.picker-pop button.normal {
+  font-family: inherit;
 }
 
 /* Table size picker: hover grid popup below the format bar; the hovered

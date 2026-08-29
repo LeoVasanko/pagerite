@@ -54,20 +54,16 @@ function onSwitchEvent(ev) {
 // Closing the shell hides it but keeps it mounted (main.js); the tabs stay
 // cached in KeepAlive the whole time, so no state is ever lost until a real
 // page reload. On re-show each active tab re-applies its window title and
-// preview via its own pagerite:editor-shown listener.
-function onKeydown(ev) {
-  if (ev.key === 'Escape' && document.body.classList.contains('editing')) close()
-}
+// preview via its own pagerite:editor-shown listener. No Escape-to-close:
+// it fired too easily by accident (e.g. dismissing an editor popup).
 
 onMounted(() => {
   document.body.dataset.editorMode = activeMode.value
   addEventListener('pagerite:switch-editor', onSwitchEvent)
-  addEventListener('keydown', onKeydown)
 })
 
 onUnmounted(() => {
   removeEventListener('pagerite:switch-editor', onSwitchEvent)
-  removeEventListener('keydown', onKeydown)
 })
 </script>
 
