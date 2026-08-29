@@ -34,16 +34,17 @@ const props = defineProps({
 
 const handlers = inject('structureHandlers')
 
-// Live-filter the slug inputs as they are typed (oninput): invalid
-// characters are simply not accepted, spaces become hyphens and unicode
-// folds to ASCII (see slugify.js). Existing rows commit on change, the
-// pending row is v-modeled.
-function onSlugInput(ev) {
-  ev.target.value = slugify(ev.target.value)
-}
-
-function onPendingSlugInput(element, ev) {
-  element.slug = slugify(ev.target.value)
+// Slug inputs accept free typing; the only live rewrites are turning
+// spaces into hyphens and lowercasing (both keep the length for ASCII,
+// so the cursor stays put). Anything else (unicode folding, stripping,
+// collapsing) is left for commit time, where the value is run through
+// slugify before talking to the server (StructureEditor). `element` is
+// the pending row (v-modeled), null for existing rows (plain :value
+// binding, read back on commit).
+function onSlugInput(element, ev) {
+  const v = ev.target.value.replace(/\s/g, '-').toLowerCase()
+  ev.target.value = v
+  if (element) element.slug = v
 }
 
 // Focus the title input of a fresh pending row.
@@ -113,7 +114,7 @@ function onEnd() {
               class="edit slug-edit"
               :placeholder="slugify(element.title)"
               title="Slug (last path segment) — empty: derived from the title"
-              @input="onPendingSlugInput(element, $event)"
+              @input="onSlugInput(element, $event)"
               @keyup.enter="handlers.commitPending()"
               @keyup.esc="handlers.discardPending()"
             />
@@ -135,7 +136,7 @@ function onEnd() {
               :value="element.slug"
               placeholder="front page"
               title="Slug (last path segment) — renames move the whole subtree. Empty at top level = front page"
-              @input="onSlugInput"
+              @input="onSlugInput(null, $event)"
               @change="handlers.commitSlug(element, $event)"
             />
             <span class="acts">

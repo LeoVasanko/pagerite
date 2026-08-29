@@ -106,7 +106,8 @@ function discardPending() {
 async function commitPending() {
   const node = pending.value
   if (!node) return
-  // Empty slug: derive one from the title (transliterated to ASCII).
+  // The typed slug is slugified at commit; empty derives one from the
+  // title (transliterated to ASCII).
   const slug = slugify(node.slug.trim()) || slugify(node.title)
   if (!slug) {
     return
@@ -216,10 +217,13 @@ function onTitleInput(node, ev) {
   })
 }
 
-// The slug inputs are filtered as you type (StructureTree onSlugInput,
-// see slugify.js); the server re-validates and its reason is shown.
+// Slug inputs are typed freely (spaces become hyphens live, see
+// StructureTree onSlugInput); the value is slugified here at commit
+// (blur/Enter) before talking to the server, which re-validates (e.g.
+// reserved names) and its reason is shown.
 async function commitSlug(node, ev) {
-  const slug = ev.target.value.trim()
+  const slug = slugify(ev.target.value.trim())
+  ev.target.value = slug
   if (slug === node.slug) return
   const parent = node.path.split('/').slice(0, -1).join('/')
   // Empty slug at top level = the front page (path "").
