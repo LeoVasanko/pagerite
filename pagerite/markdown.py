@@ -180,7 +180,13 @@ def _unwrap_lone_figures(state) -> None:
     for i, token in enumerate(tokens):
         if token.type != "inline" or not token.children:
             continue
-        [child] = token.children if len(token.children) == 1 else [None]
+        # Attrs consumed out of the text (e.g. {style=...} space-separated
+        # on the image's own line) leave empty text tokens behind — strip
+        # them so the lone-image check is not thrown off by user styling.
+        children = [c for c in token.children if c.type != "text" or c.content]
+        if children:
+            token.children = children
+        [child] = children if len(children) == 1 else [None]
         if child and child.type == "image":
             if (
                 tokens[i - 1].type == "paragraph_open"
