@@ -25,14 +25,18 @@ schemes stay visible; manually labelled links are untouched), and
 ``H~2~O`` / ``x^2^`` give sub/superscripts.
 
 render() also builds the layout structure: the top-level blocks are
-segmented for the column layout — h1/h2 headings, ``.wide`` blocks and
-margin-breakout blocks (``.margin``, ``::: aside``) stand on their own,
-the runs between them are wrapped in ``<div class="colseg">`` (tagged
+segmented for the column layout — h1/h2 headings and ``.wide`` blocks
+stand on their own, the runs between them are wrapped in
+``<div class="colseg">`` (tagged
 ``.cols`` when the segment holds enough text — COLS_TEXT — in at least
 COLS_PARAS paragraphs or one paragraph long enough to turn .breakable,
 unless a ``::: nocols`` container opts it out;
 in column segments, paragraphs past BREAKABLE_TEXT are marked
-``.breakable`` so they may split across columns). The result carries
+``.breakable`` so they may split across columns). Margin-breakout boxes
+(``.margin``, ``::: aside``) stay inside the segment at their anchor
+point; pagerite.css takes them out of flow (absolute, off the article's
+left border, into the side zone), so the columns flow through as if the
+box wasn't there. The result carries
 ``multicol`` when the whole body justifies columns (views.py puts the
 class on the article); how many columns (never more than two), whether
 the margin breakout applies and every other viewport adaptation is then
@@ -268,8 +272,8 @@ def _container_attrs(state) -> None:
     The container plugin's default render is a plain renderToken, so the
     name and brace attributes must live on the token itself — and being a
     core rule (rather than a render rule) lets the segmentation in
-    render() see the classes (::: aside's margin breakout, the ::: nocols
-    opt-out, {.wide} containers).
+    render() see the classes (the ::: nocols opt-out, {.wide}
+    containers).
     """
     for token in state.tokens:
         if token.type != "container_block_open":
@@ -493,11 +497,12 @@ _PARA_OPEN_RE = re.compile(r"<p[\s>]")
 _PARA_RE = re.compile(r"<p((?:\s[^>]*)?)>(.*?)</p>", re.S)
 
 # Classes that take their block out of the column flow: .wide is a
-# full-width separator, .margin/.aside float in the side zone at the
-# article's left (they must be direct article children for that — the zone
-# rules key off it — never inside a column).
+# full-width separator that splits the column segments. Margin-breakout
+# boxes (.margin/.aside) are NOT boundaries: they stay inside the segment
+# at their anchor point, and CSS positions them absolutely out of the
+# article's left border (the zone rules anchor off the article), so the
+# column flow is unaffected.
 _WIDE = "wide"
-_BREAKOUT = ("margin", "aside")
 
 
 class Rendered(NamedTuple):
@@ -557,14 +562,10 @@ def _top_level_blocks(tokens: list) -> list[list]:
 
 def _is_boundary(block: list) -> bool:
     """True for blocks that never go inside a column segment (see the
-    _WIDE/_BREAKOUT comment above): h1/h2 headings, anything carrying
-    .wide, and blocks whose own element carries .margin/.aside — for a
-    lone-image paragraph (which renders as a <figure>) the image's classes
-    count as the block's own."""
+    _WIDE comment above): h1/h2 headings and anything carrying .wide."""
     first = block[0]
     if first.type == "heading_open" and first.tag in ("h1", "h2"):
         return True
-    own = _classes(first)
     for token in block:
         if _WIDE in _classes(token):
             return True
@@ -572,9 +573,7 @@ def _is_boundary(block: list) -> bool:
             children = token.children or []
             if any(_WIDE in _classes(c) for c in children):
                 return True
-            if len(children) == 1 and children[0].type == "image":
-                own |= _classes(children[0])
-    return bool(own & set(_BREAKOUT))
+    return False
 
 
 def render(
@@ -591,8 +590,8 @@ def render(
     same pipeline as an explicit one (first-h1 anchor treatment included).
 
     The top-level blocks are grouped into column segments: boundary blocks
-    (h1/h2 headings, .wide, margin-breakout blocks — see _is_boundary) are
-    rendered bare, the runs between them wrapped in <div class="colseg">.
+    (h1/h2 headings, .wide — see _is_boundary) are rendered bare, the runs
+    between them wrapped in <div class="colseg">.
     A segment is tagged .cols when it holds enough text (COLS_TEXT) in at
     least two paragraphs (COLS_PARAS) or one breakable-length paragraph,
     and no ::: nocols container; its long paragraphs are marked .breakable;

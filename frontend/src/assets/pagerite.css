@@ -818,7 +818,7 @@ article dd {
    two fluid lanes (36rem minimum, never more than two) once they fit
    beside the zone, capped at 102rem total. The zone — the region the nav
    sidebar overlays — is a margin indent on the lane content; margin
-   boxes float into it, and the text never moves. */
+   boxes are placed into it out of flow, and the text never moves. */
 article.multicol {
   margin-inline: auto;
   max-width: 58rem; /* 42rem lane + 16rem zone */
@@ -827,32 +827,27 @@ article.multicol {
 @container (min-width: 45rem) {
   /* The side zone (not on phones): lane content indents 16rem; margin
      boxes ({.margin} / ::: margin blocks, ::: aside, {.margin} figures)
-     float at the article's left edge — the same region the nav sidebar
-     overlays. Scoped to direct article children (the backend render keeps
-     margin blocks out of the column segments); nested ones keep the
-     in-column float fallback. */
+     are taken out of flow and placed against the article's left edge —
+     the same region the nav sidebar overlays. The boxes stay in the
+     column segment at their anchor point (the backend render no longer
+     splits segments around them); absolute positioning off the article —
+     always position: relative — pins the horizontal side to the zone
+     regardless of any column layout inside, while the unset top keeps
+     the box at the vertical position where it occurs in the text. */
   article.multicol>.colseg,
   article.multicol>h1,
   article.multicol>h2 {
     margin-left: 16rem;
   }
 
-  article.multicol>.margin,
-  article.multicol>.aside,
-  article.multicol>figure:has(.margin) {
-    float: left;
-    clear: left;
+  article.multicol .margin,
+  article.multicol .aside,
+  article.multicol figure:has(.margin) {
+    position: absolute;
+    left: 0;
     width: 14rem;
     max-width: none;
-    margin: 0.3rem 2rem 1rem 0;
-  }
-
-  /* Wide separators start below any margin box — their bleed must not
-     wrap around it. */
-  article.multicol>figure:has(.wide),
-  article.multicol>div.wide,
-  article.multicol>pre.wide {
-    clear: left;
+    margin: 0.3rem 0 0;
   }
 }
 
@@ -896,11 +891,10 @@ article.multicol {
     margin-left: 0;
   }
 
-  body:has(#sidebar):has(.multicol):not(.editing) article.multicol>.margin,
-  body:has(#sidebar):has(.multicol):not(.editing) article.multicol>.aside,
-  body:has(#sidebar):has(.multicol):not(.editing) article.multicol>figure:has(.margin) {
-    float: left;
-    clear: left;
+  body:has(#sidebar):has(.multicol):not(.editing) article.multicol .margin,
+  body:has(#sidebar):has(.multicol):not(.editing) article.multicol .aside,
+  body:has(#sidebar):has(.multicol):not(.editing) article.multicol figure:has(.margin) {
+    position: absolute;
     /* Attached to the article's left border (1.25rem gap), hanging into
        the left lane and growing leftward with it: 12rem when the lane is
        tight, up to 150% (18rem) when the track or the surplus has room
@@ -909,7 +903,8 @@ article.multicol {
     --box-w: min(18rem, var(--lane) + 100cqw - 100% - 1.25rem);
     width: var(--box-w);
     max-width: none;
-    margin: 0.3rem 0 1rem calc(-1.25rem - var(--box-w));
+    left: calc(-1.25rem - var(--box-w));
+    margin: 0.3rem 0 0;
   }
 }
 
@@ -1093,14 +1088,17 @@ blockquote p + p {
   --admonition-color: var(--accent3);
 }
 
-/* Side boxes: ::: aside is a muted floated box (consecutive asides stack
-   via clear: left); {.margin} / ::: margin is a plainer margin note, and
-   figures take {.margin} like {.left}. On multicol pages they float in
-   the composition's left side zone — or in the sidebar's track when the
-   layout reserves one (see the article section); on wide single-column
-   pages they lean into the left gutter (with the figure rules below);
-   otherwise they stay in-column left floats. Headings already clear
-   floats, so boxes never bleed into the next section. */
+/* Side boxes: ::: aside is a muted floated box; {.margin} / ::: margin
+   is a plainer margin note, and figures take {.margin} like {.left}.
+   Where the layout has room for a side zone — multicol pages, the
+   sidebar's track, the wide single-column gutter (see the article
+   section and the figure rules below) — the boxes are taken out of flow
+   and absolutely positioned into it, off the article's left border, each
+   at the vertical spot where it occurs in the text (boxes occurring
+   closer together than their heights may overlap — keep them apart);
+   otherwise they stay in-column left floats (consecutive floats stack
+   via clear: left). Headings already clear floats, so in-column boxes
+   never bleed into the next section. */
 .aside {
   float: left;
   clear: left;
@@ -1351,18 +1349,19 @@ figure:has(.margin) {
 /* Wide single-column pages: margin boxes lean into the vacant left
    gutter instead (below 104rem the gutter cannot hold the box, and while
    editing the docked panel reshapes the gutters — in both they stay
-   plain floats). The box grows with the gutter up to 150% (18rem), its
-   right side 1.25rem off the article's left border. */
+   plain floats). Out of flow like on multicol pages: the box hangs off
+   the article's left border, growing with the gutter up to 150% (18rem),
+   its right side 1.25rem off the border. */
 @media (min-width: 104rem) {
-  body:not(.editing):not(:has(.multicol)) article>.margin,
-  body:not(.editing):not(:has(.multicol)) article>.aside,
-  body:not(.editing):not(:has(.multicol)) article>figure:has(.margin) {
-    float: left;
-    clear: left;
+  body:not(.editing):not(:has(.multicol)) article .margin,
+  body:not(.editing):not(:has(.multicol)) article .aside,
+  body:not(.editing):not(:has(.multicol)) article figure:has(.margin) {
+    position: absolute;
     --box-w: min(18rem, (100vw - 78rem) / 2 - 1.25rem);
     width: var(--box-w);
     max-width: none;
-    margin: 0.3rem 0 1rem calc(-1.25rem - var(--box-w));
+    left: calc(-1.25rem - var(--box-w));
+    margin: 0.3rem 0 0;
   }
 }
 
