@@ -18,6 +18,11 @@
   /* Links stay quiet — mostly text color with a hint of the accent —
      and light up to the full accent on hover. */
   --link: color-mix(var(--text) 50%, var(--accent));
+  /* Inline code tint in body paragraphs: halfway between text and muted.
+     Both endpoints are theme constants, so the mix is a definite color
+     per theme — themes may also pin it outright. Outside paragraphs code
+     inherits the context's color (accent headings stay accent). */
+  --code-inline: color-mix(var(--text), var(--muted));
   /* Selection fill for page text and the CodeMirror editors; themes
      override when the accent tint clashes with accent-colored text. */
   --selection-bg: color-mix(var(--accent) 30%, transparent);
@@ -1179,7 +1184,14 @@ code:not(pre code) {
      which keep-all does not suppress — `--arg` could still split after
      the dashes. Inline code is short, so nowrap is safe here. */
   white-space: nowrap;
-  color: color-mix(currentColor 70%, var(--muted));
+}
+
+/* In body paragraphs the text color is a known constant (--text), so
+   code can take a fixed tint (--code-inline) instead of an unreliable
+   mix off the inherited color. A paragraph never wraps pre, so no guard
+   is needed here. */
+p code {
+  color: var(--code-inline);
 }
 
 code:not(pre code):first-child {
