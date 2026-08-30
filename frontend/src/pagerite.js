@@ -268,6 +268,41 @@ import "overlayscrollbars/overlayscrollbars.css";
     }
   }
 
+  // --- Figure lightbox (click to enlarge) --------------------------------
+  // Clicking an article figure's image opens it in a full-viewport box:
+  // the image as large as fits with its caption below; click or Esc
+  // closes. The zoomed <img> reuses the source URL — /_f/ is immutable
+  // and content-negotiated, so the large view comes from the browser
+  // cache at no extra cost.
+  let lightbox = null;
+  function closeLightbox() {
+    lightbox?.remove();
+    lightbox = null;
+  }
+  function openLightbox(figure) {
+    const img = figure.querySelector("img");
+    if (!img) return;
+    closeLightbox();
+    lightbox = document.createElement("div");
+    lightbox.id = "lightbox";
+    const big = document.createElement("img");
+    big.src = img.currentSrc || img.src;
+    big.alt = img.alt;
+    lightbox.append(big);
+    const cap = figure.querySelector("figcaption");
+    if (cap) {
+      const c = document.createElement("div");
+      c.className = "caption";
+      c.textContent = cap.textContent;
+      lightbox.append(c);
+    }
+    lightbox.addEventListener("click", closeLightbox);
+    document.body.append(lightbox);
+  }
+  // Any key dismisses the lightbox — Esc included, and the rest would
+  // only scroll the page behind it anyway.
+  addEventListener("keydown", () => closeLightbox());
+
   // Tuck the article edit pen at the end of the first h1 (which may come
   // from the markdown itself). Re-runs when the editor replaces the
   // previewed article, since that wipes elements inside it.
@@ -820,6 +855,13 @@ import "overlayscrollbars/overlayscrollbars.css";
       editorModule
         .then((m) => m.openEditor(path, { mode }))
         .catch((e) => console.error("editor load failed:", e));
+      return;
+    }
+    // Article figure images enlarge into the lightbox.
+    const fig = ev.target.closest("#main article figure");
+    if (fig && ev.target.closest("img")) {
+      ev.preventDefault();
+      openLightbox(fig);
       return;
     }
     const a = ev.target.closest("a[href]");

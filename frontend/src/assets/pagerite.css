@@ -1346,6 +1346,80 @@ figure:has(.margin) {
   margin: 0.3rem 1em 1rem 0;
 }
 
+/* Click-to-enlarge (pagerite.js): article figure images open in a
+   full-viewport lightbox — the image as large as fits with the caption
+   below; click or Esc closes. The backdrop keeps a hint of the page
+   behind it (blur + dark tint) rather than going solid black; themes
+   retune it via --lightbox-bg / --lightbox-text. */
+article figure img {
+  cursor: zoom-in;
+}
+
+#lightbox {
+  --lightbox-bg: rgb(0 0 0 / 0.68);
+  --lightbox-text: #e8e8e8;
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--lightbox-bg);
+  backdrop-filter: blur(1rem) saturate(0.85);
+  /* Wheel/touch scrolling stops at the overlay instead of chaining to
+     the page behind it. overscroll-behavior needs a scroll container,
+     hence overflow: auto — the content is clamped to fit, so it never
+     actually scrolls. */
+  overflow: auto;
+  overscroll-behavior: contain;
+  cursor: zoom-out;
+}
+
+#lightbox img {
+  max-width: 100vw;
+  /* Flex-shrink does the vertical fit: the image yields exactly the
+     space the caption needs, no fixed reservation. */
+  max-height: 100%;
+  flex: 0 1 auto;
+  min-height: 0;
+  object-fit: contain;
+  border-radius: 3px;
+  box-shadow: 0 1rem 4rem rgb(0 0 0 / 0.55);
+}
+
+#lightbox .caption {
+  max-width: 65ch;
+  padding: 0.8rem 1rem;
+  color: var(--lightbox-text);
+  font-size: 0.95rem;
+  text-align: center;
+  opacity: 0.85;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  #lightbox {
+    animation: lightbox-in 0.18s ease-out;
+  }
+
+  #lightbox img {
+    animation: lightbox-img 0.22s ease-out;
+  }
+
+  @keyframes lightbox-in {
+    from {
+      opacity: 0;
+    }
+  }
+
+  @keyframes lightbox-img {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+  }
+}
+
 /* Wide single-column pages: margin boxes lean into the vacant left
    gutter instead (below 104rem the gutter cannot hold the box, and while
    editing the docked panel reshapes the gutters — in both they stay
