@@ -25,12 +25,12 @@ pre code .cp { color: var(--code-comment); font-weight: bold; font-style: italic
 pre code .cpf { color: var(--code-comment); font-style: italic } /* Comment.PreprocFile */
 pre code .c1 { color: var(--code-comment); font-style: italic } /* Comment.Single */
 pre code .cs { color: var(--code-comment); font-weight: bold; font-style: italic } /* Comment.Special */
-pre code .gd { color: var(--code-error); background-color: color-mix(in oklab, var(--code-error) 25%, var(--code-bg)) } /* Generic.Deleted */
+pre code .gd { color: var(--code-error); background-color: color-mix(var(--code-error) 25%, var(--code-bg)) } /* Generic.Deleted */
 pre code .ge { color: var(--code-text); font-style: italic } /* Generic.Emph */
 pre code .ges { color: var(--code-text); font-weight: bold; font-style: italic } /* Generic.EmphStrong */
 pre code .gr { color: var(--code-error) } /* Generic.Error */
 pre code .gh { color: var(--code-builtin); font-weight: bold } /* Generic.Heading */
-pre code .gi { color: var(--code-added); background-color: color-mix(in oklab, var(--code-added) 25%, var(--code-bg)) } /* Generic.Inserted */
+pre code .gi { color: var(--code-added); background-color: color-mix(var(--code-added) 25%, var(--code-bg)) } /* Generic.Inserted */
 pre code .go { color: var(--code-muted) } /* Generic.Output */
 pre code .gp { color: var(--code-muted) } /* Generic.Prompt */
 pre code .gs { color: var(--code-text); font-weight: bold } /* Generic.Strong */

@@ -24,7 +24,7 @@
   --sun: #ffe071;
   --line: #4f913b29;
 
-  --link: color-mix(in oklab, var(--text) 38%, var(--accent));
+  --link: color-mix(var(--text) 38%, var(--accent));
 
   --font-body: var(--font-cause);
   --font-heading: var(--font-new-rocker);

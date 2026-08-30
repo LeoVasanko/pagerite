@@ -112,7 +112,7 @@ article h3 {
 
 blockquote {
   border-left-color: var(--accent);
-  background: color-mix(in oklab, var(--accent) 6%, transparent);
+  background: color-mix(var(--accent) 6%, transparent);
   padding: 0.4rem 0.9rem;
   /* Keep the quoted text on the paragraph edge: the tinted box extends
      past it by its own border/padding, like code blocks. */

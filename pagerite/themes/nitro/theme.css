@@ -187,7 +187,7 @@ article ul ul ul li::before {
 
 blockquote {
   border-left-color: var(--accent2);
-  background: color-mix(in oklab, var(--accent2) 6%, transparent);
+  background: color-mix(var(--accent2) 6%, transparent);
   padding: 0.25rem 0.75rem;
   /* Keep the quoted text on the paragraph edge: the tinted box extends
      past it by its own border/padding, like code blocks. */
