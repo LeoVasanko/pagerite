@@ -1174,7 +1174,11 @@ code {
    inherited value), shifting it 30% toward --muted. */
 code:not(pre code) {
   padding-inline: 0.2em;
-  word-break: keep-all;
+  /* Never break inside a code span. word-break: keep-all would not
+     suffice: a hard hyphen is an explicit break opportunity (UAX #14),
+     which keep-all does not suppress — `--arg` could still split after
+     the dashes. Inline code is short, so nowrap is safe here. */
+  white-space: nowrap;
   color: color-mix(currentColor 70%, var(--muted));
 }
 
