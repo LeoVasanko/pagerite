@@ -38,6 +38,7 @@ pagerite = "pagerite.__main__:main"
 
 [project.urls]
 Repository = "https://git.zi.fi/LeoVasanko/pagerite"
+Issues = "https://github.com/LeoVasanko/pagerite"
 
 [dependency-groups]
 dev = []
