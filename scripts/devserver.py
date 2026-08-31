@@ -8,6 +8,8 @@ import sys
 from contextlib import suppress
 from pathlib import Path
 
+import tracerite
+
 # Import util.py from scripts/fastapi-vue (not a package, so we adjust sys.path)
 sys.path.insert(0, str(Path(__file__).with_name("fastapi-vue")))
 from devutil import (
@@ -39,7 +41,7 @@ async def run_devserver(
     viteurl, npm_install, vite = setup_vite(listen, DEFAULT_VITE_PORT)
     backurl, pagerite = setup_cli("pagerite", backend, DEFAULT_DEV_PORT)
 
-    # Tell the everyone by environment (vite proxy and backend devmode use these)
+    # Tell everyone via environment (vite proxy and backend devmode use these)
     os.environ["PAGERITE_VITE_URL"] = viteurl
     os.environ["PAGERITE_BACKEND_URL"] = backurl
     os.environ["PAGERITE_DEV"] = "1"
@@ -54,6 +56,7 @@ async def run_devserver(
 
 def main() -> None:
     """Parse CLI arguments and run the devserver."""
+    tracerite.load()
     parser = argparse.ArgumentParser(
         description="Run Vite and FastAPI development servers",
         formatter_class=argparse.RawDescriptionHelpFormatter,

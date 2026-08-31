@@ -98,13 +98,12 @@ def main() -> None:
     os.environ["PAGERITE_HOSTNAME"] = args.hostname
     if args.dbip:
         _download_dbip()
-    dev = {"reload": True, "reload_dirs": ["pagerite"]} if DEVMODE else {}
     server.run(
         "pagerite.app:app",
         listen=args.listen,
         default_port=DEFAULT_PORT,
         server_header=False,
-        **dev,
+        reload=Path(__file__).parent if DEVMODE else False,
     )
 
 
