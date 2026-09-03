@@ -1,39 +1,47 @@
 """Server-side visit analytics (collection only; see docs/analytics.md).
 
-Events come from pagerite.js over the /_ws WebSocket (``Ping`` messages as
-JSON text frames): the first navigation message on page load starts a
-visit, later messages extend it, and messages with no known session start a
-fresh one (missing data, not dropped). Active reading time is reported as
-frequent ``read`` updates while the user is active; the times are
-cumulative per trail item, so a disconnect simply leaves the last logged
-time in place. The document
-GET handler stashes the entry referer (external https origin) and any
-utm_* query parameters in in-memory IP tables, consumed when the first
-message starts the visit; nothing is counted without a message (plain bots
-that only fetch documents end up in the crawler list).  JS-running crawlers
-(Googlebot, GoogleOther, Applebot, ...) do connect and send messages, but
-their UA gives them
-away (``_is_bot_ua``) and their messages are ignored, so they land in the
-crawler list too.  Bots whose UA does not match are caught by engagement:
-a visit whose total reported reading time is under ``_MIN_VISIT_READ``
-seconds is reclassified as crawler hits at display time (durations are
-client-provided and trusted — real-browser bots report 0–2 s), so it never
-counts in the visit aggregates either.  Idle-time link preloads from pagerite.js carry an
-``x-pagerite-preload`` header and are not tracked at all — the navigation
-message sent when the user actually navigates does the counting.
-Admin clients send ``hide``: the client record is flagged ``hide``,
-which covers everything that client ever did — visits and crawler hits
-from before the login included.  Aggregates (site visits, page views,
-transitions) are not stored; they are computed at display time from the
-visit records, excluding hidden clients, and hidden clients' visits,
-crawler hits, abuse hits and metadata are left out of the viewer payload
-entirely.  Scanner telltale 404s
-(dotpaths, *.php) classify the source IP as abuse; its hits — including
-earlier crawler hits — are moved to the abuse list, which the viewer
-groups by IP with full request paths.  Client metadata (IP, UA, language,
-country/city, host) is stored once per unique client hash and referenced
-from visits, crawler hits and abuse hits.  The session map is in-memory
-only.
+Raw recording, display-time classification.  Every document GET is appended
+to ``Analytics.gets`` as a raw access-log line (path with query string, true
+HTTP status, external referer origin, preload flag) and every pagerite.js
+activity message from the /_ws WebSocket is appended to ``Analytics.msgs``
+(navigations ``fr`` -> ``to`` and active reading-time updates).  Nothing is
+classified when it is recorded: whether a client turns out to be a reader,
+a crawler or a scanner is decided by ``Store.display()`` from the raw
+events, so the stored data survives any future change to the classification
+rules.
+
+At display time:
+
+- An IP with a 404 on a telltale scanner path (empty segment like
+  ``//foo``, dot segment, *.php) or ten plain 404s within an hour on paths
+  that don't resolve to a menu node is classified as abuse; every document
+  GET from that IP is shown in the abuse list, split by status into the 404
+  probes and the real articles read.  Its activity messages are ignored.
+  Hidden (admin) clients never trigger classification — editing means
+  visiting not-found pages.  RFC 8615 well-known URIs (``/.well-known/…``)
+  are mostly legitimate browser/service probes and never count as abuse
+  evidence.
+- A document GET never followed by an activity message (within
+  ``_CRAWLER_TIMEOUT``) is a crawler hit.  Messages whose UA claims a
+  crawler identity (``_is_bot_ua``) are ignored, so JS-running crawlers
+  (Googlebot, GoogleOther, Applebot, ...) land in the crawler list too.
+- The remaining messages are grouped into visits per client: a new visit
+  starts after ``_SESSION_GAP`` of inactivity.  A visit whose total
+  reported reading time is under ``_MIN_VISIT_READ`` seconds is a
+  real-browser bot and is reclassified as crawler hits (durations are
+  client-provided and trusted — such bots report 0–2 s).
+- Admin clients (``hide`` message field, set at collection time on the
+  client record) are excluded from every list and aggregate.
+
+Idle-time link preloads from pagerite.js (``x-pagerite-preload`` header)
+are recorded raw but flag ``pre``: they never count as views, crawler hits
+or abuse — they exist so a navigation served from the in-memory page cache
+can still be attributed the HTTP status of its preload GET.
+
+Aggregates (site visits, page views, transitions) are not stored; they are
+computed at display time from the derived visits.  Client metadata (IP, UA,
+language, country/city, host) is stored once per unique client hash and
+referenced from every event.
 
 Data is a msgspec Struct JSON-dumped to its own file (not the kanta db),
 rewritten atomically on every recorded event.
@@ -43,6 +51,7 @@ import ipaddress
 import os
 import re
 import tempfile
+from bisect import bisect_left, bisect_right
 from collections.abc import Callable
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
@@ -80,14 +89,14 @@ def _compact_user_agent(ua: str) -> str:
 
 
 class Ping(msgspec.Struct, omit_defaults=True):
-    """One client message on the /_ws activity WebSocket.
+    """One client message on the /_ws activity WebSocket (wire format).
 
     Sent as a JSON text frame (msgspec-encoded, decoded to str for the
     wire).  ``to`` set: a navigation — internal page path or external https
     exit URL.  ``read`` alone (with ``fr``): an active reading-time update
-    for the page ``fr``; these arrive frequently while the user is active
-    and accumulate on the trail item.  ``hide`` flags the client as an
-    admin: everything it ever did is excluded from the statistics.
+    for the page ``fr``; these arrive frequently while the user is active.
+    ``hide`` flags the client as an admin: everything it ever did is
+    excluded from the statistics.
     """
 
     #: Path of the page the activity happened on ("" for the initial load).
@@ -100,8 +109,51 @@ class Ping(msgspec.Struct, omit_defaults=True):
     hide: bool = False
 
 
+class Get(msgspec.Struct, omit_defaults=True):
+    """One document GET — the raw access-log line.
+
+    Recorded once per served document (200, or 404 for a category
+    placeholder or a missing page); never classified at this point.
+    Client metadata is held in ``Analytics.clients`` keyed by ``client``.
+    """
+
+    t: datetime
+    #: Full request path including the query string (e.g. "/.env?x=1").
+    path: str
+    #: 6-byte blake3 hash referencing ``Analytics.clients``.
+    client: bytes = b""
+    #: True HTTP status of the response.
+    status: int = 200
+    #: External https origin of the Referer, "" for direct/internal.
+    ref: str = ""
+    #: Idle-time cache warm-up by pagerite.js (x-pagerite-preload header):
+    #: never counted as a view/crawler/abuse hit; recorded only so a later
+    #: cache-served navigation can be attributed this GET's status.
+    pre: bool = False
+
+
+class Msg(msgspec.Struct, omit_defaults=True):
+    """One raw activity message from pagerite.js over /_ws.
+
+    ``to`` set: a navigation — validated internal page path or external
+    https exit URL.  ``read`` alone (with ``fr``): an active reading-time
+    update for the page ``fr`` (seconds since the previous report).
+    Client metadata is held in ``Analytics.clients`` keyed by ``client``.
+    """
+
+    t: datetime
+    #: 6-byte blake3 hash referencing ``Analytics.clients``.
+    client: bytes = b""
+    #: Path of the page the activity happened on ("" for the initial load).
+    fr: str = ""
+    #: Navigation target: internal path or external https exit URL.
+    to: str = ""
+    #: Active reading time (seconds) spent on ``fr`` since the last report.
+    read: int = 0
+
+
 class Client(msgspec.Struct, omit_defaults=True):
-    """Client metadata shared by visits, crawler hits and abuse hits.
+    """Client metadata shared by the raw events and every derived row.
 
     Identified by a 6-byte blake3 hash of the IPv4 address or IPv6 /64
     network, the full User-Agent string and the extracted language tag.
@@ -122,10 +174,15 @@ class Client(msgspec.Struct, omit_defaults=True):
     ua: str = ""
     #: Compact display form of ``ua`` (browser/OS/device) when parsable.
     ua_pretty: str = ""
-    #: True for admin clients (hide=1 ping): their visits, crawler hits and
-    #: abuse hits are recorded but excluded from all statistics and from
-    #: the viewer payload.
+    #: True for admin clients (hide=1 ping): everything this client ever did
+    #: is excluded from all statistics and from the viewer payload.
     hide: bool = False
+
+
+# --- Display DTOs -------------------------------------------------------
+# The structs below are never persisted; Store.display() builds them from
+# the raw events.  They define the viewer payload shape consumed by
+# frontend/src/analytics/*.
 
 
 class Nav(msgspec.Struct, omit_defaults=True):
@@ -156,7 +213,7 @@ class TrailItem(msgspec.Struct, omit_defaults=True):
 
 
 class Visit(msgspec.Struct, omit_defaults=True):
-    """One visit: the initial-load data plus everything seen afterwards.
+    """One visit: a client's activity since ``_SESSION_GAP`` of inactivity.
 
     ``trail`` holds the entry page and everything seen afterwards, keyed by
     the timestamp of first sight (insertion order = first-seen order);
@@ -173,7 +230,7 @@ class Visit(msgspec.Struct, omit_defaults=True):
     client: bytes = b""
     #: First-seen targets keyed by their timestamp (entry included).
     trail: dict[datetime, TrailItem] = {}
-    #: Every navigation ping (repeats included) keyed by its timestamp; the
+    #: Every navigation (repeats included) keyed by its timestamp; the
     #: aggregates are computed from this log at display time.
     navs: dict[datetime, Nav] = {}
     #: UTM query parameters from the landing URL, keyed by parameter name.
@@ -199,11 +256,11 @@ class CrawlerHit(msgspec.Struct, omit_defaults=True):
 
 
 class AbuseHit(msgspec.Struct, omit_defaults=True):
-    """A request from an IP classified as a scanner/abuser.
+    """A document GET from an IP classified as a scanner/abuser.
 
     Unlike crawler hits the full request path (query string included) is
     kept: the interesting part is exactly which paths were probed.
-    ``flag`` marks the path that triggered classification; ``is_404``
+    ``flag`` marks the paths that triggered classification; ``is_404``
     distinguishes 404 responses (probed paths and 404-fallback document
     GETs) from real 200 document GETs — the abuser actually reading
     articles.  Client metadata is held in ``Analytics.clients`` keyed by
@@ -237,28 +294,24 @@ class Favicon(msgspec.Struct, omit_defaults=True):
 
 
 class Analytics(msgspec.Struct, omit_defaults=True):
-    """Root of the analytics JSON file. Append-only by design: old data is
-    dropped by deleting list entries / bucket keys."""
+    """Root of the analytics JSON file: the raw event log, append-only by
+    design.  Old data is dropped by deleting list entries."""
 
-    visits: list[Visit] = []
+    #: Every document GET, in arrival order (see Get).
+    gets: list[Get] = []
+    #: Every activity message from pagerite.js, in arrival order (see Msg).
+    msgs: list[Msg] = []
     #: Favicon fetch records keyed by external https origin.
     favicons: dict[str, Favicon] = {}
-    #: Document GETs that never produced a ping, treated as crawler/bot hits.
-    crawlers: list[CrawlerHit] = []
-    #: Requests from abusive IPs (see AbuseHit), grouped by IP in the viewer.
-    abuse: list[AbuseHit] = []
     #: Client metadata keyed by 6-byte blake3 hash.
     clients: dict[bytes, Client] = {}
-    #: IPs classified as scanners/abusers (keys; values always True).
-    abuse_ips: dict[str, bool] = {}
 
 
 class Display(msgspec.Struct, omit_defaults=True):
-    """The viewer payload: visible data plus display-time aggregates.
+    """The viewer payload: visible derived data plus display-time aggregates.
 
-    Hidden clients are excluded everywhere: their visits, crawler hits,
-    abuse hits and metadata are dropped, and the aggregates are computed
-    from the visible visits only.
+    Hidden clients are excluded everywhere: their events are dropped, and
+    the aggregates are computed from the visible visits only.
     The aggregate shapes match what the viewer consumes: sparse 5-minute
     buckets keyed by their floored ISO timestamp.
     """
@@ -267,7 +320,7 @@ class Display(msgspec.Struct, omit_defaults=True):
     crawlers: list[CrawlerHit] = []
     abuse: list[AbuseHit] = []
     clients: dict[bytes, Client] = {}
-    #: origin -> URL path of the stored favicon ("/_favicons/<file>"),
+    #: origin -> URL path of the stored favicon ("/_f/<file>"),
     #: only for origins whose icon was fetched successfully.
     favicons: dict[str, str] = {}
     #: Page transitions per 5-minute bucket (sparse):
@@ -353,6 +406,9 @@ def _utm_tags(query: str) -> dict[str, str]:
 
 _CRAWLER_TIMEOUT = timedelta(seconds=10)
 
+#: Inactivity after which a client's next navigation starts a new visit.
+_SESSION_GAP = timedelta(minutes=30)
+
 #: Minimum total reported reading time (seconds, summed over the trail) for
 #: a session to count as a visit; shorter sessions are JS-running bots and
 #: are shown as crawler hits instead.
@@ -362,10 +418,11 @@ _MIN_VISIT_READ = 5
 _FAVICON_RETRY = timedelta(days=7)
 
 #: UAs of JS-running crawlers, which would register as visitors on their
-#: ping.  Anything calling itself a "bot" or "spider" matches; known crawlers
-#: without those tokens (GoogleOther) are listed as extra alternates.  No
-#: source verification: a spoofed bot UA just lands in the crawler list, and
-#: scanners that probe telltale paths are caught by the abuse rules anyway.
+#: activity messages.  Anything calling itself a "bot" or "spider" matches;
+#: known crawlers without those tokens (GoogleOther) are listed as extra
+#: alternates.  No source verification: a spoofed bot UA just lands in the
+#: crawler list, and scanners that probe telltale paths are caught by the
+#: abuse rules anyway.
 _BOT_UA = re.compile(r"bot|spider|googleother", re.IGNORECASE)
 
 
@@ -374,18 +431,34 @@ def _is_bot_ua(ua: str) -> bool:
     return bool(_BOT_UA.search(ua))
 
 
-#: Plain-404 count per IP that classifies it as abuse even without a
-#: telltale path hit.
+#: Plain-404 count per IP within ``_ABUSE_404_WINDOW`` that classifies it as
+#: abuse even without a telltale path hit.  Windowed so a long-time reader
+#: slowly accumulating misses (deleted articles over months) never crosses
+#: it — scanners spray their probes in bursts.
 _ABUSE_404_THRESHOLD = 10
 
-#: Paths that instantly classify an IP as abuse when they 404: any segment
-#: starting with a dot ("/.env", "/.git/config") or ending in ".php".
-_ABUSE_PATH = re.compile(r"(^|/)\.|\.php$", re.IGNORECASE)
+#: Sliding window the plain-404 threshold is counted over.
+_ABUSE_404_WINDOW = timedelta(hours=1)
+
+#: Paths that instantly classify an IP as abuse when they 404: an empty
+#: segment ("//foo" — no real client requests those), any segment starting
+#: with a dot ("/.env", "/.git/config") or ending in ".php".
+_ABUSE_PATH = re.compile(r"/{2,}|(^|/)\.|\.php$", re.IGNORECASE)
 
 
 def _is_abuse_path(path: str) -> bool:
-    """Telltale scanner path: dot segment or *.php."""
+    """Telltale scanner path: empty segment, dot segment or *.php."""
     return bool(_ABUSE_PATH.search(path.split("?")[0]))
+
+
+def _is_well_known(path: str) -> bool:
+    """RFC 8615 well-known URI ("/.well-known/...").
+
+    Mostly legitimate (browsers and services probe them, e.g. Chrome's
+    devtools fetch of appspecific/com.chrome.devtools.json): never telltale
+    and never counted toward the plain-404 threshold.
+    """
+    return path.split("?")[0].lower().startswith("/.well-known/")
 
 
 def _network_ip(ip: str) -> str:
@@ -415,36 +488,27 @@ def _client_hash(ip: str, ua: str, lang: str) -> bytes:
 
 
 class Store:
-    """In-memory analytics data plus the client-hash -> visit session map."""
+    """In-memory analytics data: the raw event log plus its JSON persistence."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
         self.data = Analytics()
         if path.exists():
             try:
-                self.data = msgspec.json.decode(path.read_bytes(), type=Analytics)
-            except msgspec.DecodeError, OSError:
-                pass  # legacy schema / corrupt or unreadable file: start fresh
-        #: client hash -> index of the current visit in data.visits
-        self.sessions: dict[bytes, int] = {}
-        #: ip -> external https origin of the latest document GET carrying
-        #: one, stashed for the visit the client's initial message starts.
-        #: Internal or absent referers never touch the table.
-        self.pending_referers: dict[str, str] = {}
-        #: ip -> utm_* query parameters from the latest document GET that
-        #: carried any, stashed for the visit the client's initial message starts.
-        #: Only non-empty sets are stored, so a later parameter-less page
-        #: does not overwrite an earlier tagged landing URL.
-        self.pending_utms: dict[str, dict[str, str]] = {}
-        #: Document GETs that have not yet been matched by a message.  Kept
-        #: in RAM only; expired entries are written to ``data.crawlers``.
-        self.pending_crawlers: list[CrawlerHit] = []
-        #: client hash -> {path: status} for recent document GETs, consumed
-        #: by the matching message to record the status of each visited path.
-        self.pending_statuses: dict[bytes, dict[str, int]] = {}
-        #: ip -> number of plain (non-telltale) 404s seen, in RAM only;
-        #: reaching ``_ABUSE_404_THRESHOLD`` classifies the IP as abuse.
-        self.not_found_counts: dict[str, int] = {}
+                raw = path.read_bytes()
+            except OSError:
+                raw = b""
+            # The pre-redesign schema (stored visits/crawlers/abuse lists) is
+            # not convertible: set it aside and start fresh.
+            legacy = b'"visits"' in raw
+            if raw and not legacy:
+                try:
+                    self.data = msgspec.json.decode(raw, type=Analytics)
+                except msgspec.DecodeError:
+                    legacy = True  # corrupt file: start fresh
+            if legacy:
+                with suppress(OSError):
+                    path.rename(path.with_name(path.name + ".bak-legacy"))
         #: Callables to notify when persisted data changes.  Registered by the
         #: analytics WebSocket broadcaster.
         self._on_change: list[Callable[[], None]] = []
@@ -477,118 +541,10 @@ class Store:
         else:
             self._notify()
 
-    def _flush_crawlers(self, now: datetime | None = None) -> list[bytes]:
-        """Move expired pending crawler hits into persistent ``data.crawlers``.
-
-        Hits from a hidden client (admin) are discarded instead of
-        persisted — admin browsing must not land in the crawler list.
-
-        Returns the client hashes of the newly flushed hits so callers can
-        schedule async enrichment.
-        """
-        if not self.pending_crawlers:
-            return []
-        now = now or datetime.now(UTC)
-        cutoff = now - _CRAWLER_TIMEOUT
-        expired: list[CrawlerHit] = []
-        remaining: list[CrawlerHit] = []
-        for hit in self.pending_crawlers:
-            if hit.start > cutoff:
-                remaining.append(hit)
-                continue
-            client = self.data.clients.get(hit.client)
-            if client is not None and client.hide:
-                continue  # hidden admin client: not a crawler
-            expired.append(hit)
-        if not expired:
-            self.pending_crawlers = remaining
-            return []
-        self.pending_crawlers = remaining
-        self.data.crawlers.extend(expired)
-        self._save()
-        return [hit.client for hit in expired]
-
     def _hidden(self, client_hash: bytes) -> bool:
         """True when the client record is flagged hidden (admin)."""
         client = self.data.clients.get(client_hash)
         return client is not None and client.hide
-
-    def display(self) -> Display:
-        """Build the viewer payload, excluding hidden clients.
-
-        Visits whose total reported reading time is under
-        ``_MIN_VISIT_READ`` seconds are JS-running bots, not readers: they
-        are converted to crawler hits (one per internal trail page) and left
-        out of the visit list and every aggregate.
-        The aggregates (site visits, page views, transitions) are computed
-        here from the visit records rather than stored, so a client that
-        becomes hidden after navigations were already logged disappears
-        from every statistic.  Internal-path navigations count as page
-        views; external https targets are transitions only.
-        """
-        visits: list[Visit] = []
-        crawlers = [h for h in self.data.crawlers if not self._hidden(h.client)]
-        for visit in self.data.visits:
-            if self._hidden(visit.client):
-                continue
-            if sum(item.read for item in visit.trail.values()) >= _MIN_VISIT_READ:
-                visits.append(visit)
-                continue
-            query = urlencode(visit.utm)
-            first = True
-            for t, item in visit.trail.items():
-                if not item.to.startswith("/"):
-                    continue
-                crawlers.append(
-                    CrawlerHit(
-                        start=t,
-                        entry=item.to,
-                        client=visit.client,
-                        referer=visit.referer if first else "",
-                        query=query if first else "",
-                        status=item.status,
-                    )
-                )
-                first = False
-        display = Display(
-            visits=visits,
-            crawlers=crawlers,
-            abuse=[h for h in self.data.abuse if not self._hidden(h.client)],
-            clients={h: c for h, c in self.data.clients.items() if not c.hide},
-            favicons={
-                origin: f"/_f/{f.file}"
-                for origin, f in self.data.favicons.items()
-                if f.file
-            },
-        )
-        for visit in visits:
-            bucket = _bucket(visit.start)
-            site = display.site_visits
-            site[bucket] = site.get(bucket, 0) + 1
-            entry_views = display.views.setdefault(visit.entry, {})
-            entry_views[bucket] = entry_views.get(bucket, 0) + 1
-            fr = visit.referer or "(direct)"
-            buckets = display.transitions.setdefault(fr, {}).setdefault(visit.entry, {})
-            buckets[bucket] = buckets.get(bucket, 0) + 1
-            for t, nav in visit.navs.items():
-                nb = _bucket(t)
-                if nav.to.startswith("/"):
-                    nav_views = display.views.setdefault(nav.to, {})
-                    nav_views[nb] = nav_views.get(nb, 0) + 1
-                nbuckets = display.transitions.setdefault(nav.fr, {}).setdefault(
-                    nav.to, {}
-                )
-                nbuckets[nb] = nbuckets.get(nb, 0) + 1
-        return display
-
-    def display_json(self) -> str:
-        """The ``display()`` payload as a JSON string for the WebSocket."""
-        return msgspec.json.encode(self.display()).decode()
-
-    def _client_ip(self, client_hash: bytes) -> str:
-        """Return the IP stored for ``client_hash``, or "" if missing."""
-        client = self.data.clients.get(client_hash)
-        return client.ip if client else ""
 
     def _ensure_client(
         self,
@@ -636,26 +592,109 @@ class Store:
         if changed:
             self._save()
 
-    def favicon_origins_needed(self) -> list[str]:
-        """External https origins seen in visits whose favicon needs fetching.
+    def record_get(
+        self,
+        ip: str,
+        ua: str,
+        path: str,
+        *,
+        status: int = 200,
+        referer: str = "",
+        accept_language: str = "",
+        pre: bool = False,
+    ) -> bytes | None:
+        """Append one document GET to the raw log.
 
-        Covers visit referers and external exit targets (trail and navs),
-        plus crawler-hit referers — spiders often advertise their own site
-        as the referer, so the icon identifies them in the crawler table.
-        Origins with a stored icon, or a miss younger than
-        ``_FAVICON_RETRY``, are skipped.
+        ``path`` is the full request path, query string included; ``status``
+        the true HTTP status of the response; ``referer`` the raw Referer
+        header (reduced here to an external https origin, "" when internal
+        or absent); ``pre`` marks idle-time preloads from pagerite.js.
+
+        Returns the client hash when the client record was just created (so
+        the caller can schedule async enrichment), else None.
+        """
+        lang, country = _parse_accept_language(accept_language)
+        client_hash = _client_hash(ip, ua, lang)
+        new = client_hash not in self.data.clients
+        if new:
+            self._ensure_client(ip, ua, lang, country=country)
+        self.data.gets.append(
+            Get(
+                t=datetime.now(UTC),
+                path=path,
+                client=client_hash,
+                status=status,
+                ref=_origin(referer) or "",
+                pre=pre,
+            )
+        )
+        self._save()
+        return client_hash if new else None
+
+    def record_msg(
+        self,
+        fr: str,
+        to: str | None,
+        ip: str,
+        ua: str,
+        accept_language: str = "",
+        hide: bool = False,
+        read: int = 0,
+    ) -> bytes | None:
+        """Append one client activity message (``Ping`` from pagerite.js) to
+        the raw log.
+
+        ``to`` is validated here — internal slug path or external https URL,
+        anything else is dropped; that is sanitation, not classification.
+        No abuse/bot filtering happens at record time: those messages are
+        stored raw and filtered at display time, so future rule changes lose
+        nothing.  ``hide`` flags the client record as an admin; the message
+        itself is recorded normally and hidden at display time like
+        everything else the client ever did.
+
+        Returns the client hash when the client record was just created (so
+        the caller can schedule async enrichment), else None.
+        """
+        lang, country = _parse_accept_language(accept_language)
+        client_hash = _client_hash(ip, ua, lang)
+        new = client_hash not in self.data.clients
+        if new:
+            self._ensure_client(ip, ua, lang, country=country)
+        if hide:
+            self.data.clients[client_hash].hide = True
+        fr = (_internal_path(fr) or "") if fr else ""
+        target = ""
+        if to:
+            if to.startswith("/") and not to.startswith("//"):
+                target = _internal_path(to) or ""
+            else:
+                target = _external_target(to) or ""
+        if target or read > 0:
+            self.data.msgs.append(
+                Msg(t=datetime.now(UTC), client=client_hash, fr=fr, to=target, read=read)
+            )
+        if target or read > 0 or hide:
+            self._save()
+        return client_hash if new else None
+
+    def favicon_origins_needed(self) -> list[str]:
+        """External https origins seen in the raw events whose favicon needs
+        fetching.
+
+        Covers referer origins of document GETs and external exit targets of
+        activity messages — spiders often advertise their own site as the
+        referer, so the icon identifies them in the crawler table.  Hidden
+        (admin) clients' events never trigger fetches.  Origins with a
+        stored icon, or a miss younger than ``_FAVICON_RETRY``, are skipped.
         """
         origins: set[str] = set()
-        for visit in self.data.visits:
-            if visit.referer:
-                origins.add(visit.referer)
-            for target in list(visit.trail.values()) + list(visit.navs.values()):
-                origin = _origin(target.to)
-                if origin is not None:
-                    origins.add(origin)
-        for hit in self.data.crawlers:
-            if hit.referer:
-                origins.add(hit.referer)
+        for g in self.data.gets:
+            if g.ref and not self._hidden(g.client):
+                origins.add(g.ref)
+        for m in self.data.msgs:
+            origin = _origin(m.to)
+            if origin is not None and not self._hidden(m.client):
+                origins.add(origin)
         now = datetime.now(UTC)
         return [
             origin
@@ -669,307 +708,265 @@ class Store:
         self.data.favicons[origin] = Favicon(file=file, fetched=datetime.now(UTC))
         self._save()
 
-    def _abuse_hit(
-        self,
-        client_hash: bytes,
-        path: str,
-        start: datetime | None = None,
-        *,
-        flag: bool = False,
-        is_404: bool = False,
-    ) -> None:
-        """Append one abuse hit referencing a client by hash."""
-        self.data.abuse.append(
-            AbuseHit(
-                start=start or datetime.now(UTC),
-                path=path,
-                client=client_hash,
-                flag=flag,
-                is_404=is_404,
-            )
-        )
+    def display(self, in_menu: Callable[[str], bool] | None = None) -> Display:
+        """Build the viewer payload from the raw events.
 
-    def classify_abuse(
-        self,
-        ip: str,
-        client_hash: bytes,
-        path: str,
-        *,
-        flag: bool = False,
-        is_404: bool = False,
-    ) -> None:
-        """Classify an IP as a scanner/abuser and record the triggering hit.
+        All classification happens here, so the stored data is independent
+        of the rules:
 
-        All earlier crawler hits from the same IP (persisted and pending)
-        are moved to the abuse list — a random-UA scanner must not pollute
-        the crawler stats of the legitimate bots it impersonates.
+        - abuse IPs: a 404 on a telltale path (empty segment ``//foo``, dot
+          segment or ``*.php`` — but never ``/.well-known/…``, which is
+          mostly legitimate browser probing and counts neither as telltale
+          nor toward the threshold), or ``_ABUSE_404_THRESHOLD`` plain 404s
+          within ``_ABUSE_404_WINDOW`` on paths that don't resolve to a
+          menu node (``in_menu``; category placeholders return 404 but are
+          real nodes and never count).  Hidden clients never classify.
+          Every non-preload GET from such an IP becomes an abuse row; its
+          messages are ignored.
+        - crawler hits: non-preload GETs no activity message matched within
+          ``_CRAWLER_TIMEOUT``, plus visits reclassified as real-browser
+          bots (under ``_MIN_VISIT_READ`` seconds of total reading time).
+          Messages from bot-UAs are ignored, so their GETs never match.
+        - visits: the remaining messages, grouped per client with a new
+          visit after ``_SESSION_GAP`` of inactivity.  Trail statuses come
+          from the client's GETs (preloads included — a cache-served
+          navigation's only GET is its preload); the entry referer and UTM
+          tags from the GET that loaded the entry page.
+
+        Hidden (admin) clients are excluded from every list and aggregate.
         """
-        if ip not in self.data.abuse_ips:
-            self.data.abuse_ips[ip] = True
-            moved = [h for h in self.data.crawlers if self._client_ip(h.client) == ip]
-            if moved:
-                self.data.crawlers = [
-                    h for h in self.data.crawlers if self._client_ip(h.client) != ip
-                ]
-                for h in moved:
-                    self._abuse_hit(
-                        h.client,
-                        h.entry + (f"?{h.query}" if h.query else ""),
-                        start=h.start,
-                        is_404=h.status != 200,
-                    )
-            pending = [
-                h for h in self.pending_crawlers if self._client_ip(h.client) == ip
-            ]
-            if pending:
-                self.pending_crawlers = [
-                    h for h in self.pending_crawlers if self._client_ip(h.client) != ip
-                ]
-                for h in pending:
-                    self._abuse_hit(
-                        h.client,
-                        h.entry + (f"?{h.query}" if h.query else ""),
-                        start=h.start,
-                        is_404=h.status != 200,
-                    )
-        self._abuse_hit(client_hash, path, flag=flag, is_404=is_404)
-        self._save()
+        in_menu = in_menu or (lambda path: False)
+        data = self.data
+        ip_of = {h: c.ip for h, c in data.clients.items()}
 
-    def track_404(
-        self,
-        ip: str,
-        ua: str,
-        path: str,
-        accept_language: str = "",
-    ) -> bytes:
-        """Record a 404 response for ``path`` (full path, query included).
+        # --- abuse classification: each IP's document GETs, chronologically.
+        # Hidden (admin) clients never classify: editing means visiting
+        # not-found pages (that is where the create pen lives).
+        gets_by_ip: dict[str, list[Get]] = {}
+        for g in data.gets:
+            if not g.pre and not self._hidden(g.client):
+                gets_by_ip.setdefault(ip_of.get(g.client, ""), []).append(g)
+        menu_cache: dict[str, bool] = {}
 
-        A telltale path (dot segment or *.php) classifies the IP as abuse
-        immediately; enough plain 404s from one IP do too.  Hits from
-        already-classified IPs go straight to the abuse list.
+        def real_node(path: str) -> bool:
+            if path not in menu_cache:
+                menu_cache[path] = in_menu(path)
+            return menu_cache[path]
 
-        Returns the client hash so callers can schedule async enrichment.
-        """
-        lang, country = _parse_accept_language(accept_language)
-        client_hash = self._ensure_client(ip, ua, lang, country=country)
-        if ip in self.data.abuse_ips:
-            self._abuse_hit(client_hash, path, flag=_is_abuse_path(path), is_404=True)
-            self._save()
-            return client_hash
-        if _is_abuse_path(path):
-            self.classify_abuse(ip, client_hash, path, flag=True, is_404=True)
-            return client_hash
-        self.not_found_counts[ip] = self.not_found_counts.get(ip, 0) + 1
-        if self.not_found_counts[ip] >= _ABUSE_404_THRESHOLD:
-            self.classify_abuse(ip, client_hash, path, flag=True, is_404=True)
-            return client_hash
-        return client_hash
+        abuse_ips: set[str] = set()
+        flag_ids: set[int] = set()
+        for ip, gets in gets_by_ip.items():
+            gets.sort(key=lambda g: g.t)
+            telltale = False
+            recent: list[Get] = []  # plain 404s inside the sliding window
+            for g in gets:
+                if g.status != 404:
+                    continue
+                path = g.path.split("?")[0]
+                if _is_well_known(path):
+                    continue  # legitimate probes, never abuse evidence
+                if _is_abuse_path(path):
+                    telltale = True
+                    flag_ids.add(id(g))
+                elif not real_node(path):
+                    recent.append(g)
+                    while g.t - recent[0].t > _ABUSE_404_WINDOW:
+                        recent.pop(0)
+                    if len(recent) == _ABUSE_404_THRESHOLD:
+                        flag_ids.add(id(g))
+            if telltale or len(recent) >= _ABUSE_404_THRESHOLD:
+                abuse_ips.add(ip)
 
-    def _new_visit(
-        self,
-        entry: str,
-        referer: str,
-        client_hash: bytes,
-        utm: dict[str, str] | None = None,
-        status: int = 200,
-    ) -> Visit:
-        now = datetime.now(UTC)
-        visit = Visit(
-            start=now,
-            entry=entry,
-            referer=referer,
-            client=client_hash,
-            utm=utm or {},
-        )
-        visit.trail[now] = TrailItem(to=entry, status=status)
-        self.data.visits.append(visit)
-        self.sessions[client_hash] = len(self.data.visits) - 1
-        return visit
+        # --- per-client event lists, chronological
+        msgs_by_client: dict[bytes, list[Msg]] = {}
+        for m in data.msgs:
+            msgs_by_client.setdefault(m.client, []).append(m)
+        for msgs in msgs_by_client.values():
+            msgs.sort(key=lambda m: m.t)
+        gets_by_client: dict[bytes, list[Get]] = {}
+        for g in data.gets:
+            gets_by_client.setdefault(g.client, []).append(g)
+        for gets in gets_by_client.values():
+            gets.sort(key=lambda g: g.t)
 
-    def track_entry(
-        self,
-        referer: str,
-        own_origin: str,
-        ip: str,
-        ua: str,
-        full_path: str,
-        accept_language: str = "",
-        *,
-        status: int = 200,
-    ) -> list[bytes]:
-        """Stash the entry referer/UTM tags and queue a pending crawler hit.
+        def status_at(client_hash: bytes, path: str, t: datetime) -> int:
+            """Latest status served to the client for ``path`` at or before ``t``."""
+            gets = gets_by_client.get(client_hash)
+            if not gets:
+                return 200
+            i = bisect_right(gets, t, key=lambda g: g.t)
+            for g in reversed(gets[:i]):
+                if g.path.split("?")[0] == path:
+                    return g.status
+            return 200
 
-        Nothing is counted here — the client's first /_ws message starts the
-        visit (only non-admin clients report). Only a cross-origin https
-        referer updates the table; an internal or absent referer leaves any
-        stashed origin untouched.  UTM parameters are kept only when the
-        landing URL actually carries them, so a subsequent parameter-less page
-        does not erase an earlier tagged landing.
-
-        Every document GET is also queued as a pending crawler hit.  If a
-        message from the same client arrives within ``_CRAWLER_TIMEOUT``, the
-        hit is discarded; otherwise it is flushed to ``data.crawlers``.  The
-        Accept-Language header is stored on the client record immediately;
-        host/geoip are filled in later by async enrichment.
-
-        GETs from IPs already classified as abuse are recorded as abuse hits
-        with the full request path (query string included).
-
-        Returns the client hashes of any hits flushed to persistent storage,
-        so callers can schedule async enrichment.
-        """
-        entry = full_path.split("?")[0]
-        query = full_path.split("?", 1)[1] if "?" in full_path else ""
-        lang, country = _parse_accept_language(accept_language)
-        client_hash = self._ensure_client(ip, ua, lang, country=country)
-        if ip in self.data.abuse_ips:
-            flushed = self._flush_crawlers()
-            self._abuse_hit(client_hash, full_path, is_404=status != 200, flag=False)
-            self._save()
-            return flushed
-        now = datetime.now(UTC)
-        flushed = self._flush_crawlers(now)
-        if referer:
-            origin = _origin(referer)
-            if origin is not None and origin != own_origin:
-                self.pending_referers[ip] = origin
-        utms = _utm_tags(query)
-        if utms:
-            self.pending_utms[ip] = utms
-        self.pending_crawlers.append(
-            CrawlerHit(
-                start=now,
-                entry=entry,
-                client=client_hash,
-                referer=self.pending_referers.get(ip, ""),
-                query=query,
-                status=status,
-            )
-        )
-        self.pending_statuses.setdefault(client_hash, {})[entry] = status
-        return flushed
-
-    def _add_read(self, client_hash: bytes, path: str, seconds: int) -> None:
-        """Add ``seconds`` of reading time for ``path`` to the current visit."""
-        if seconds <= 0:
-            return
-        index = self.sessions.get(client_hash)
-        if index is None or index >= len(self.data.visits):
-            return
-        visit = self.data.visits[index]
-        for item in visit.trail.values():
-            if item.to == path:
-                item.read += seconds
-                return
-
-    def ping(
-        self,
-        from_: str,
-        to: str | None,
-        ip: str,
-        ua: str,
-        accept_language: str = "",
-        hide: bool = False,
-        read: int = 0,
-    ) -> tuple[int | None, list[bytes]]:
-        """Record a client activity message (``Ping`` from pagerite.js over /_ws).
-
-        ``to`` is an internal path ("/...") or an https URL for exit links; a
-        missing/empty ``to`` means a pure reading-time update and only the
-        ``read`` time should be recorded. The transition is always counted when
-        ``to`` is present; the trail only grows on first sight of a page within
-        the visit. ``read`` is the active time (seconds) spent on ``from_``
-        since the previous report.
-
-        A message with no known session starts a fresh visit, consuming the
-        referer and UTM tags stashed by the document GET if there are any.
-
-        ``hide`` is set by admin clients: the client record is flagged
-        ``hide`` — which covers everything it ever did, including visits and
-        crawler hits from before the login — and the navigation is recorded
-        normally.  Hidden clients are excluded from every statistic and list
-        at display time, and their pending crawler hits are discarded.
-
-        Messages from IPs classified as abuse, and messages whose User-Agent
-        claims a JS-running crawler identity (``_is_bot_ua``), are ignored
-        entirely — the crawler's pending hits stay queued and flush to
-        ``data.crawlers`` normally.
-
-        Returns the index of the new visit when one is created (or None) and
-        the client hashes of any crawler hits flushed by this call, so callers
-        can schedule async enrichment (host, geoip country/city).
-        """
-        flushed = self._flush_crawlers()
-        lang, country = _parse_accept_language(accept_language)
-        if hide:
-            # Admin ping: flag the client hidden and never a crawler hit.
-            # The flag lives on the client record, so it covers visits and
-            # crawler hits from before the login too; display-time
-            # aggregation excludes hidden clients from every statistic.
-            client_hash = self._ensure_client(ip, ua, lang, country=country)
-            self.data.clients[client_hash].hide = True
-            self.pending_crawlers = [
-                hit for hit in self.pending_crawlers if hit.client != client_hash
-            ]
-        else:
-            client_hash = _client_hash(ip, ua, lang)
-            if ip in self.data.abuse_ips:
-                return None, flushed
-            if _is_bot_ua(ua):
-                # A JS-running crawler (Googlebot, GoogleOther, Applebot
-                # execute JS and ping): never a visit.  Its pending crawler
-                # hits are kept and flush to ``data.crawlers`` normally.
-                return None, flushed
-            # A real visitor ping cancels any pending crawler hits from
-            # this client.
-            self.pending_crawlers = [
-                hit for hit in self.pending_crawlers if hit.client != client_hash
-            ]
-        fr_path = _internal_path(from_) if from_ else ""
-        if fr_path and read > 0:
-            self._add_read(client_hash, fr_path, read)
-        if not to:
-            if read > 0 or hide:
-                self._save()
-            return None, flushed
-        if to.startswith("/") and not to.startswith("//"):
-            target = _internal_path(to) or ""
-        else:
-            target = _external_target(to) or ""
-        if not target:
-            return None, flushed
-        index = self.sessions.get(client_hash)
-        fr = fr_path or "(direct)"
-        statuses = self.pending_statuses.setdefault(client_hash, {})
-        target_status = statuses.pop(target, None) or 200
-        if not statuses:
-            self.pending_statuses.pop(client_hash, None)
-        if index is None or index >= len(self.data.visits):
-            # No known session: the initial ping of a fresh page load (or
-            # missing data after a server restart) — start a visit.
-            index = len(self.data.visits)
-            self._ensure_client(ip, ua, lang, country=country)
-            self._new_visit(
-                target,
-                self.pending_referers.pop(ip, ""),
-                client_hash,
-                utm=self.pending_utms.pop(ip, {}),
-                status=target_status,
-            )
-        else:
-            visit = self.data.visits[index]
-            now = datetime.now(UTC)
-            visit.navs[now] = Nav(fr=fr, to=target)
-            # First-seen only: repeat pages and repeated exits update the
-            # existing trail item (most recent status) instead of appending.
-            for item in visit.trail.values():
-                if item.to == target:
-                    item.status = target_status
+        def entry_get(client_hash: bytes, path: str, t: datetime) -> Get | None:
+            """The GET that loaded ``path`` just before the message at ``t``."""
+            gets = gets_by_client.get(client_hash)
+            if not gets:
+                return None
+            i = bisect_right(gets, t, key=lambda g: g.t)
+            for g in reversed(gets[:i]):
+                if g.t < t - _CRAWLER_TIMEOUT:
                     break
-            else:
-                visit.trail[now] = TrailItem(to=target, status=target_status)
-        self._save()
-        visit_index = (
-            index if index is not None and index < len(self.data.visits) else None
+                if not g.pre and g.path.split("?")[0] == path:
+                    return g
+            return None
+
+        # --- visits: group each visible, non-abuse, non-bot client's messages
+        visits: list[Visit] = []
+        for h, msgs in msgs_by_client.items():
+            if self._hidden(h) or ip_of.get(h, "") in abuse_ips:
+                continue
+            client = data.clients.get(h)
+            if client is not None and _is_bot_ua(client.ua):
+                continue
+            visit: Visit | None = None
+            last_t: datetime | None = None
+            for m in msgs:
+                if m.to:
+                    if visit is None or (
+                        last_t is not None and m.t - last_t > _SESSION_GAP
+                    ):
+                        # First navigation ever, or after a long silence:
+                        # start a visit.  The entry referer/UTM tags come
+                        # from the GET that loaded the entry page.  Only an
+                        # internal page load can open a visit — an external
+                        # exit without an open visit is dropped.
+                        if not m.to.startswith("/"):
+                            last_t = m.t
+                            continue
+                        visit = Visit(start=m.t, entry=m.to, client=h)
+                        g = entry_get(h, m.to, m.t)
+                        if g is not None:
+                            visit.referer = g.ref
+                            visit.utm = _utm_tags(
+                                g.path.split("?", 1)[1] if "?" in g.path else ""
+                            )
+                        visit.trail[m.t] = TrailItem(
+                            to=m.to, status=status_at(h, m.to, m.t)
+                        )
+                        visits.append(visit)
+                    else:
+                        fr = m.fr or "(direct)"
+                        visit.navs[m.t] = Nav(fr=fr, to=m.to)
+                        status = status_at(h, m.to, m.t)
+                        # First-seen only: repeat pages and repeated exits
+                        # update the existing trail item instead of appending.
+                        for item in visit.trail.values():
+                            if item.to == m.to:
+                                item.status = status
+                                break
+                        else:
+                            visit.trail[m.t] = TrailItem(to=m.to, status=status)
+                if m.read > 0 and m.fr and visit is not None:
+                    for item in visit.trail.values():
+                        if item.to == m.fr:
+                            item.read += m.read
+                            break
+                last_t = m.t
+
+        # --- crawler hits: document GETs no message matched
+        crawlers: list[CrawlerHit] = []
+        msg_times = {h: [m.t for m in msgs] for h, msgs in msgs_by_client.items()}
+        for g in data.gets:
+            if g.pre or self._hidden(g.client):
+                continue
+            if ip_of.get(g.client, "") in abuse_ips:
+                continue
+            client = data.clients.get(g.client)
+            if client is None or not _is_bot_ua(client.ua):
+                msgs = msgs_by_client.get(g.client, [])
+                times = msg_times.get(g.client, [])
+                stripped = g.path.split("?")[0]
+                matched = False
+                for m in msgs[bisect_left(times, g.t) :]:
+                    if m.t - g.t > _CRAWLER_TIMEOUT:
+                        break
+                    if m.to == stripped:
+                        matched = True
+                        break
+                if matched:
+                    continue
+            entry, _, query = g.path.partition("?")
+            crawlers.append(
+                CrawlerHit(
+                    start=g.t,
+                    entry=entry,
+                    client=g.client,
+                    referer=g.ref,
+                    query=query,
+                    status=g.status,
+                )
+            )
+
+        # --- real-browser bots: visits with too little reading time become
+        # crawler hits (one per internal trail page) and count nowhere
+        kept: list[Visit] = []
+        for visit in visits:
+            if sum(item.read for item in visit.trail.values()) >= _MIN_VISIT_READ:
+                kept.append(visit)
+                continue
+            query = urlencode(visit.utm)
+            first = True
+            for t, item in visit.trail.items():
+                if not item.to.startswith("/"):
+                    continue
+                crawlers.append(
+                    CrawlerHit(
+                        start=t,
+                        entry=item.to,
+                        client=visit.client,
+                        referer=visit.referer if first else "",
+                        query=query if first else "",
+                        status=item.status,
+                    )
+                )
+                first = False
+
+        display = Display(
+            visits=kept,
+            crawlers=crawlers,
+            abuse=[
+                AbuseHit(
+                    start=g.t,
+                    path=g.path,
+                    client=g.client,
+                    flag=id(g) in flag_ids,
+                    is_404=g.status != 200,
+                )
+                for g in data.gets
+                if not g.pre
+                and not self._hidden(g.client)
+                and ip_of.get(g.client, "") in abuse_ips
+            ],
+            clients={h: c for h, c in data.clients.items() if not c.hide},
+            favicons={
+                origin: f"/_f/{f.file}"
+                for origin, f in data.favicons.items()
+                if f.file
+            },
         )
-        return visit_index, flushed
+        for visit in kept:
+            bucket = _bucket(visit.start)
+            site = display.site_visits
+            site[bucket] = site.get(bucket, 0) + 1
+            entry_views = display.views.setdefault(visit.entry, {})
+            entry_views[bucket] = entry_views.get(bucket, 0) + 1
+            fr = visit.referer or "(direct)"
+            buckets = display.transitions.setdefault(fr, {}).setdefault(visit.entry, {})
+            buckets[bucket] = buckets.get(bucket, 0) + 1
+            for t, nav in visit.navs.items():
+                nb = _bucket(t)
+                if nav.to.startswith("/"):
+                    nav_views = display.views.setdefault(nav.to, {})
+                    nav_views[nb] = nav_views.get(nb, 0) + 1
+                nbuckets = display.transitions.setdefault(nav.fr, {}).setdefault(
+                    nav.to, {}
+                )
+                nbuckets[nb] = nbuckets.get(nb, 0) + 1
+        return display
+
+    def display_json(self, in_menu: Callable[[str], bool] | None = None) -> str:
+        """The ``display()`` payload as a JSON string for the WebSocket."""
+        return msgspec.json.encode(self.display(in_menu)).decode()

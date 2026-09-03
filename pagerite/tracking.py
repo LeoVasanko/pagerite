@@ -27,8 +27,9 @@ from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 
 from pagerite import analytics
+from pagerite.data import resolve
 from pagerite.files import _hash_name, file_store
-from pagerite.state import SITE_URL, _html_response, analytics_store
+from pagerite.state import SITE_URL, _html_response, analytics_store, data
 
 logger = logging.getLogger(__name__)
 
@@ -331,7 +332,7 @@ async def _broadcast_analytics() -> None:
     """Send the current analytics snapshot to every connected WS client."""
     if not _analytics_ws_clients:
         return
-    payload = analytics_store.display_json()
+    payload = analytics_store.display_json(_in_menu)
     closed = set()
     for ws in _analytics_ws_clients:
         try:
@@ -358,47 +359,51 @@ def _schedule_analytics_broadcast() -> None:
     )
 
 
-def _track_entry(path: str, request: Request, *, status: int = 200) -> list[bytes]:
-    """Stash the referer/UTM tags and queue a pending crawler hit for the GET.
+def _in_menu(path: str) -> bool:
+    """True when ``path`` ("/a/b" or "/") resolves to a real menu node.
 
-    Nothing is counted on the GET itself — the client's first /_ws message
-    starts the visit, so bots never register as visits (JS-running crawlers
-    connect too, but the WebSocket handler ignores known bot UAs).  (Admin
-    clients report too, but with hide, which flags their visit hidden: it is
-    recorded but excluded from all statistics and from the crawler list.)
+    Category placeholders return 404 but are real nodes: their GETs must not
+    count as misses in the display-time abuse classification.
+    """
+    return resolve(data.menu, path.strip("/")) is not None
+
+
+def _record_get(request: Request, *, status: int = 200) -> None:
+    """Record the document GET as one raw access-log line in analytics.
+
+    Nothing is classified here — the true HTTP status, the full request path
+    (query included), an external referer origin and the preload flag are
+    stored, and visitor/crawler/abuse classification happens at display time
+    (see analytics.Store.display).  Idle-time preloads from pagerite.js
+    (``x-pagerite-preload`` header) are recorded with ``pre=True``: never
+    counted, but a navigation later served from the in-memory page cache is
+    attributed this GET's status.
 
     The devserver's health probe (``GET /?from=devserver.py`` from
-    ``127.0.0.1``) is ignored: it is not real traffic and would otherwise be
-    logged as a crawler hit.  The root-path and localhost checks prevent
-    remote visitors from hiding traffic with the same query string.
-
-    Returns the client hashes of any pending crawler hits flushed to persistent
-    storage, so callers can schedule async geoip and reverse-DNS enrichment.
+    ``127.0.0.1``) is ignored: it is not real traffic.  The root-path and
+    localhost checks prevent remote visitors from forging the same query.
     """
-    if request.headers.get("x-pagerite-preload"):
-        # Idle-time page-cache warm-up by pagerite.js, not a page view: the
-        # activity message sent when the user actually navigates does the
-        # counting.
-        # (Forging the header only hides a GET from the crawler stats; the
-        # path-based abuse classification is unaffected.)
-        return []
     if (
-        path == ""
+        request.url.path == "/"
         and str(request.url.query) == "from=devserver.py"
         and _client_ip(request) == "127.0.0.1"
     ):
-        return []
+        return
     own_origin = SITE_URL or f"https://{urlparse(str(request.base_url)).netloc}"
-    full_path = f"{request.url.path}{_query_suffix(request)}"
-    return analytics_store.track_entry(
-        request.headers.get("referer", ""),
-        own_origin,
+    referer = request.headers.get("referer", "")
+    if analytics._origin(referer) in (None, own_origin):
+        referer = ""
+    client_hash = analytics_store.record_get(
         _client_ip(request),
         request.headers.get("user-agent", ""),
-        full_path,
-        request.headers.get("accept-language", ""),
+        f"{request.url.path}{_query_suffix(request)}",
         status=status,
+        referer=referer,
+        accept_language=request.headers.get("accept-language", ""),
+        pre=bool(request.headers.get("x-pagerite-preload")),
     )
+    if client_hash is not None:
+        _schedule_client_enrichment([client_hash])
 
 
 @router.get("/_a", response_model=None)
@@ -425,9 +430,10 @@ async def activity_ws(ws: WebSocket) -> None:
     Public, like the pages themselves (only /_api is gated); one connection
     follows a browsing session.  Messages are ``analytics.Ping`` structs as
     JSON text frames; ``to`` set is a navigation, ``read`` alone a
-    reading-time update.  The reverse-DNS and DB-IP geoip lookups happen in
-    background tasks so message handling is never delayed by slow DNS or
-    the first MMDB decompress.
+    reading-time update.  Everything is recorded raw — known bot UAs and
+    abusive IPs are filtered at display time, not here.  The reverse-DNS and
+    DB-IP geoip lookups happen in background tasks so message handling is
+    never delayed by slow DNS or the first MMDB decompress.
     """
     await ws.accept()
     ip = _client_ip(ws)
@@ -440,7 +446,7 @@ async def activity_ws(ws: WebSocket) -> None:
                 msg = msgspec.json.decode(text.encode(), type=analytics.Ping)
             except msgspec.DecodeError:
                 continue
-            visit_index, flushed_clients = analytics_store.ping(
+            new_client = analytics_store.record_msg(
                 msg.fr,
                 msg.to or None,
                 ip,
@@ -449,10 +455,8 @@ async def activity_ws(ws: WebSocket) -> None:
                 hide=msg.hide,
                 read=msg.read,
             )
-            if visit_index is not None:
-                visit = analytics_store.data.visits[visit_index]
-                asyncio.create_task(_enrich_client(visit.client))
-            _schedule_client_enrichment(flushed_clients)
+            if new_client is not None:
+                _schedule_client_enrichment([new_client])
             _schedule_favicon_fetch()
     except WebSocketDisconnect:
         pass
@@ -466,7 +470,7 @@ async def analytics_websocket(ws: WebSocket) -> None:
     endpoint. Powers the analytics viewer rendered at /_a.
     """
     await ws.accept()
-    await ws.send_text(analytics_store.display_json())
+    await ws.send_text(analytics_store.display_json(_in_menu))
     _analytics_ws_clients.add(ws)
     try:
         while True:

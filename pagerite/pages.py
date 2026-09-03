@@ -3,11 +3,11 @@
 ``GET /{path:path}`` resolves a slug path against the menu tree and renders
 the page (or a category placeholder, or 404); it must be registered AFTER
 the fastapi-vue asset routes so built frontend files win over content slugs
-(see app.py). Requests are recorded in analytics (crawler hits and 404s
-here, visits via the /_ws socket in tracking.py).
+(see app.py). Every served document is recorded raw in analytics (one
+access-log line with its true HTTP status; classification happens at
+display time — see pagerite/analytics.py).
 """
 
-import asyncio
 import logging
 from datetime import UTC, datetime
 from email.utils import format_datetime
@@ -22,16 +22,9 @@ from pagerite.state import (
     SITE_URL,
     _html_response,
     _is_reserved,
-    analytics_store,
     data,
 )
-from pagerite.tracking import (
-    _client_ip,
-    _enrich_client,
-    _query_suffix,
-    _schedule_client_enrichment,
-    _track_entry,
-)
+from pagerite.tracking import _record_get
 
 logger = logging.getLogger(__name__)
 
@@ -146,20 +139,13 @@ async def show_page(request: Request, path: str) -> Response:
     placeholder page (nav links point straight at its first child).
     """
     path = path.strip("/")
-    ua = request.headers.get("user-agent", "")
     accept_language = request.headers.get("accept-language", "")
     if path and _is_reserved(path):
         # Invalid slug shape: not a content URL, let FastAPI return its
         # built-in 404 instead of rendering an editable article page.
-        # Scanner telltales (dotpaths like /.env, *.php) classify the IP
-        # as abuse in analytics.
-        client_hash = analytics_store.track_404(
-            _client_ip(request),
-            ua,
-            f"/{path}{_query_suffix(request)}",
-            accept_language,
-        )
-        asyncio.create_task(_enrich_client(client_hash))
+        # Recorded like any other GET: telltale scanner paths (dotpaths
+        # like /.env, *.php) classify the IP as abuse at display time.
+        _record_get(request, status=404)
         raise HTTPException(404)
     chain = resolve(data.menu, path)
     node = chain[-1] if chain else None
@@ -189,8 +175,7 @@ async def show_page(request: Request, path: str) -> Response:
         if request.headers.get("if-none-match") == etag:
             return Response(status_code=304)
         if _is_trackable_path(path):
-            flushed = _track_entry(path, request)
-            _schedule_client_enrichment(flushed)
+            _record_get(request)
         return _html_response(
             request,
             "page",
@@ -220,8 +205,7 @@ async def show_page(request: Request, path: str) -> Response:
         )
         link_lang = i18n.base_tag(query_lang or "")
         if _is_trackable_path(path):
-            flushed = _track_entry(path, request, status=404)
-            _schedule_client_enrichment(flushed)
+            _record_get(request, status=404)
         return _html_response(
             request,
             "category",
@@ -241,13 +225,5 @@ async def show_page(request: Request, path: str) -> Response:
             if item.published:
                 return RedirectResponse(f"/{slug}")
     if _is_trackable_path(path):
-        client_hash = analytics_store.track_404(
-            _client_ip(request),
-            ua,
-            f"/{path}{_query_suffix(request)}",
-            accept_language,
-        )
-        asyncio.create_task(_enrich_client(client_hash))
-        flushed = _track_entry(path, request, status=404)
-        _schedule_client_enrichment(flushed)
+        _record_get(request, status=404)
     return _html_response(request, "not-found", path, 404)

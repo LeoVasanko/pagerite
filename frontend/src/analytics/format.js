@@ -434,7 +434,9 @@ export function formatCrawlerRows(crawlers, clients, pageTree, now = Date.now())
 
 /**
  * Group abuse hits by IP and format each group as a row with the full paths
- * probed.  Identical paths are collapsed into one entry with their hit count.
+ * probed.  Identical requests (same path and status class) are collapsed
+ * into one entry with their hit count; a path's 404 probes and its real
+ * (200) reads never merge.
  * The paths split into two lists: ``paths`` holds the 404 probes (flagged
  * paths — the ones that triggered abuse classification — first, then other
  * 404s) shown verbatim, query string included, and ``articles`` holds the
@@ -465,7 +467,11 @@ export function formatAbuseRows(abuse, clients, pageTree, now = Date.now()) {
       g.lastClient = a.client
     }
     const path = a.path || ''
-    const existing = g.pathCounts.get(path) || {
+    // Collapse identical requests, but never merge a path's 404 probes with
+    // its real (200) reads — a page probed while missing and later created
+    // must show up in both columns, not flip to "articles read".
+    const key = `${a.is_404 ? '4' : '2'}${path}`
+    const existing = g.pathCounts.get(key) || {
       path,
       count: 0,
       firstStart: start,
@@ -475,8 +481,7 @@ export function formatAbuseRows(abuse, clients, pageTree, now = Date.now()) {
     existing.count += 1
     if (start < existing.firstStart) existing.firstStart = start
     if (a.flag) existing.flag = true
-    if (!a.is_404) existing.is_404 = false
-    g.pathCounts.set(path, existing)
+    g.pathCounts.set(key, existing)
     g.clientHashes.add(a.client)
     groups.set(ip, g)
   }
