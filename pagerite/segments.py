@@ -21,7 +21,10 @@ each segment's source span was located at dispatch (``split``), and
 never left the server. A returned segment must still be pure prose itself
 (the model could inject markup INTO a segment); anything else — count
 mismatch, empty segment, markup tokens — rejects the whole result and the
-fragment stays pending.
+fragment stays pending. Punctuation that is prose on the wire but syntax
+in the splice context (quotes in a title attribute, brackets in an alt
+text, "|" in a table row) is not worth a rejection either: it is swapped
+for Unicode look-alikes (``_NEUTRAL``) before splicing.
 
 A block of plain text, prose links and paired text formatting
 (strong/em/s) crosses as ONE segment — link texts and formatted text
@@ -42,9 +45,11 @@ snippets that don't fit together. Blocks with any other inline markup
 
 Locating is best effort: a run that is not a verbatim source substring
 (entity-decoded text, backslash escapes) is skipped — it simply stays in
-the original language. So is any piece containing "<": "<" is the
-prose/markup boundary on the wire — translators cut their output there,
-so such pieces could not survive the round trip.
+the original language. A literal "<" in prose ("<1MB") is text, not
+markup, but cannot cross as-is — "<" is the prose/markup boundary on the
+wire, translators cut their output there — so it crosses encoded as the
+fullwidth "＜" (``_encode``) and ``join`` decodes it back before
+validating and splicing.
 """
 
 import bisect
@@ -68,6 +73,38 @@ _ALERT = re.compile(r"^\[![A-Za-z]+\][ \t]*")
 #: Any {...} span: {placeholders} and attrs that ended up inside prose
 #: (inline attrs are consumed by the parser; a lone {dates} is not).
 _BRACES = re.compile(r"\{[^{}\n]*\}")
+
+
+def _encode(text: str) -> str:
+    """Wire form of a segment or context: a literal "<" as fullwidth "＜".
+
+    A "<" in prose is text, not markup ("<1MB" — a tag needs a letter or
+    /!?), but "<" is the prose/markup boundary on the wire (translators
+    cut output at the first "<", scripts/translator.py), so it cannot
+    cross as-is. join decodes it back before the pure_prose check and
+    splicing — anything tag-like the model may have formed around it is
+    still rejected there.
+    """
+    return text.replace("<", "＜")
+
+#: ASCII punctuation that is plain prose to the inline parser (so
+#: pure_prose cannot catch it) but Markdown SYNTAX in a splice context:
+#: quotes close a quoted image/link title, brackets the [...] of alt and
+#: re-inserted link texts, "|" splits a table row, and "\" escapes the
+#: character after it (a trailing one eats a title's closing quote).
+#: Neutralized to Unicode look-alikes (join), which Markdown treats as
+#: plain text everywhere — the quotes are curled the way typographer=True
+#: renders them anyway.
+_NEUTRAL = str.maketrans(
+    {
+        '"': "”",
+        "'": "’",
+        "[": "［",
+        "]": "］",
+        "\\": "＼",
+        "|": "│",
+    }
+)
 
 #: A link's tail after its text: "](dest)", "](dest \"title\")", "][ref]",
 #: "[]" or a bare "]" (shortcut reference); the destination may nest one
@@ -273,7 +310,7 @@ def _linked_block(
     raw = "".join(text for text, _ in pieces)
     lead = len(raw) - len(raw.lstrip())
     wire = raw.strip()
-    if not _LETTER.search(wire) or "<" in wire or _BRACES.search(wire):
+    if not _LETTER.search(wire) or _BRACES.search(wire):
         return None
     # Locate each piece verbatim, in order; the source slices between the
     # located pieces are then the link syntax, exact by construction.
@@ -338,7 +375,7 @@ def _linked_block(
             rec.append(text_)
     if source[span_start:span_end] != "".join(rec):
         return None
-    return Span(span_start, span_end, _weight(wire), marks), wire
+    return Span(span_start, span_end, _weight(wire), marks), _encode(wire)
 
 
 def split(text: str) -> tuple[list[Span], list[str], list[str]]:
@@ -367,10 +404,8 @@ def split(text: str) -> tuple[list[Span], list[str], list[str]]:
     def emit(run: str, at: int, ctx: str) -> None:
         """Carve {...} spans out of the located run; emit the prose pieces,
         stripped — padding whitespace stays in the template, off the wire.
-        Pieces containing "<" are never emitted: translators cut output at
-        the first "<" (the prose/markup boundary, scripts/translator.py),
-        so such a piece could not survive the round trip — it stays in the
-        original language instead."""
+        A literal "<" crosses encoded (``_encode``): it is text, not
+        markup, but the wire keeps "<" as the prose/markup boundary."""
         pieces = []
         pos = 0
         for m in _BRACES.finditer(run):
@@ -380,10 +415,10 @@ def split(text: str) -> tuple[list[Span], list[str], list[str]]:
         for p0, p1 in pieces:
             raw = run[p0:p1]
             piece = raw.strip()
-            if _LETTER.search(piece) and "<" not in piece:
+            if _LETTER.search(piece):
                 start = at + p0 + (len(raw) - len(raw.lstrip()))
                 spans.append(Span(start, start + len(piece), 0, []))
-                segments.append(piece)
+                segments.append(_encode(piece))
                 contexts.append(ctx)
 
     tokens = _MD.parse(text)
@@ -409,7 +444,7 @@ def split(text: str) -> tuple[list[Span], list[str], list[str]]:
                 cursor = span.end
                 continue
             runs = _runs(kids)
-            block = _block_text(kids).strip()
+            block = _encode(_block_text(kids).strip())
             if alert and runs:
                 run = _ALERT.sub("", runs[0], count=1)
                 if _LETTER.search(run):
@@ -417,7 +452,7 @@ def split(text: str) -> tuple[list[Span], list[str], list[str]]:
                 else:
                     runs.pop(0)
             for run in runs:
-                ctx = block if block and run.strip() != block else ""
+                ctx = block if block and _encode(run.strip()) != block else ""
                 pos = _locate(text, run, cursor)
                 if pos != -1:
                     emit(run, pos, ctx)
@@ -600,14 +635,25 @@ def join(original: str, spans: list[Span], texts: list[str]) -> str | None:
     any validation failure (count mismatch, empty or non-prose segment) —
     the caller drops the result and the fragment stays pending. Segments
     with marks (a block that crossed as one piece) get their links
-    re-inserted at weight-mapped positions after the prose check."""
+    re-inserted at weight-mapped positions after the prose check.
+
+    Markdown-significant ASCII punctuation that pure_prose cannot see
+    (plain text inline, syntax in the splice context — quoted titles, alt
+    and link texts, table rows) is neutralized to Unicode look-alikes
+    (``_NEUTRAL``) before splicing and mark placement (the swap is
+    char-for-char, so unit alignment is unaffected)."""
     if len(texts) != len(spans):
         return None
     out: list[str] = []
     cursor = 0
     for span, translation in zip(spans, texts):
+        # Decode the wire form ("＜" back to "<") first: pure_prose then
+        # validates exactly what gets spliced — a "＜" the model formed
+        # into anything tag-like is markup and rejects the result.
+        translation = translation.replace("＜", "<")
         if not translation.strip() or not pure_prose(translation):
             return None
+        translation = translation.translate(_NEUTRAL)
         if span.marks:
             translation = _place_marks(translation, span.weight, span.marks)
             if translation is None:

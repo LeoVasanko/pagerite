@@ -451,13 +451,24 @@ stripped before the result goes back.
 
 The same client-side enforcement covers markup bleed as a CLASS, not per
 artifact: `<` is the prose/markup boundary on the wire and never appears in
-a segment in either direction. Source pieces containing `<` are never
-dispatched (they stay in the original language — segments.py), and the
+a segment in either direction. A literal `<` in the source text (`<1MB` is
+text, not markup — a tag needs a letter or `/!?`) crosses encoded as the
+fullwidth `＜` and is decoded on return, before the result is validated and
+spliced (segments.py) — the wire itself still never carries `<`, and the
 reference client cuts the model's output at the first `<`
 (scripts/translator.py) — echoed language tags, stray `<br>`s and any
 future variant are one handled case. (The cut is post-decode, not a
 generation stop string: Seed-X opens every generation with its `<s>`
 framing token, which would trip a `<` stop immediately.)
+
+Server-side, a second layer covers what the inline parser cannot: ASCII
+punctuation that is plain prose on the wire but Markdown syntax in the
+splice context — quotes (a translated `"` would close the quoted image
+title it lands in), brackets (alt texts, re-inserted link texts), `|` in
+table rows, `\` escapes. Rather than rejecting such results, `join` swaps
+them for Unicode look-alikes before splicing (`_NEUTRAL` in
+segments.py — curly quotes, fullwidth brackets; the renderer's
+typographer curls straight quotes anyway).
 
 Short fragments get more than a bare prompt: each segment may carry its
 surround in `Job.contexts` — a title carries the article's opening prose
