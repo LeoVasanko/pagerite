@@ -13,8 +13,8 @@
 """Pagerite translator service: translate site content with Seed-X-PPO-7B.
 
 Connects to a Pagerite server's translator WebSocket — the full URL
-including the access key (printed at server startup; the admin also finds
-the key in the site settings, GET /_api/settings -> ``translate_keys``) —
+including the access key (the admin finds the key in the site settings,
+GET /_api/settings -> ``translate_keys``) —
 and announces the languages the
 model CAN translate (capabilities). The server dispatches one single-item
 job at a time per connection, offered only in its configured target

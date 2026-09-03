@@ -30,16 +30,15 @@ walking the tree (``resolve``), moves are slot detach/attach
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
 
-from pagerite import api, files, pages, tracking, translate
+from pagerite import api, files, pages, tracking
 from pagerite.__main__ import DEVMODE
 from pagerite.files import file_store
-from pagerite.state import HOSTNAME, analytics_store, data, frontend, kanta
+from pagerite.state import analytics_store, frontend, kanta
 from collections.abc import AsyncGenerator
 logger = logging.getLogger(__name__)
 
@@ -48,7 +47,6 @@ logger = logging.getLogger(__name__)
 async def lifespan(_app: FastAPI) -> AsyncGenerator:
     """Open the database (migrations run inside kanta.open), load assets, load GeoIP."""
     async with kanta:
-        translate.log_service_urls(data.translate_keys, HOSTNAME)
         await asyncio.to_thread(file_store.load)
         await frontend.load()
         # Decompress/open the DB-IP MMDB once at startup.  Lookups are then

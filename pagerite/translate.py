@@ -7,8 +7,7 @@ as base64 — no manual encoding anywhere). This module holds everything
 else: the message structs, the connected-client dispatcher (``Dispatcher``
 — one job at a time per connection, wanted ∩ capable language matching,
 requeue on disconnect), which fragments are pending for a language
-(``pending_items``), storing a result (``store_results``) and the startup
-URL listing (``log_service_urls``).
+(``pending_items``) and storing a result (``store_results``).
 
 Fragments cross the wire as **prose segments**: the model only ever
 receives plain text runs (Job.texts) plus per-segment context surrounds
@@ -19,14 +18,12 @@ markup never leaves the server — reassembly is offset splicing
 
 import asyncio
 import logging
-import os
 
 import msgspec
 from fastapi import WebSocket, WebSocketDisconnect
 from kanta import Kanta
 
 from pagerite import i18n
-from pagerite.__main__ import DEFAULT_PORT
 from pagerite.chunks import chunk_key, needs_translation
 from pagerite.data import Data, Node, sorted_nodes
 from pagerite.segments import Span, join, split
@@ -192,19 +189,6 @@ def store_results(data: Data, lang: str, items: list[TransResult]) -> list[str]:
 
     walk(data.menu, "", i18n.ORIGINAL_LANGUAGE)
     return pages
-
-
-def log_service_urls(keys: dict[str, str], hostname: str) -> None:
-    """Log the translator WebSocket URL(s) for the admin at startup, one
-    line: "…/_translate/<key> (<name>)", comma-joined — ws:// with the port
-    on localhost, wss:// without a port on a public hostname (the port comes
-    from the CLI via the PAGERITE_PORT env). No-op without keys."""
-    if not keys:
-        return
-    port = os.getenv("PAGERITE_PORT", DEFAULT_PORT)
-    base = f"ws://localhost:{port}" if hostname == "localhost" else f"wss://{hostname}"
-    urls = ", ".join(f"{base}/_translate/{key} ({name})" for key, name in keys.items())
-    logger.info("Translator %s", urls)
 
 
 class _Connection:
