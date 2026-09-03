@@ -278,7 +278,11 @@ class Dispatcher:
             spans: list[Span] = []
             original = ""
             for lang in sorted(langs):
-                for item in pending_items(self.data, lang):
+                # Titles first: a page's name in the menu is its most
+                # visible string (stable: menu order kept within each kind).
+                for item in sorted(
+                    pending_items(self.data, lang), key=lambda it: it.kind != "title"
+                ):
                     if (lang, item.key) in inflight or (
                         lang,
                         item.key,
