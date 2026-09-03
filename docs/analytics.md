@@ -47,6 +47,9 @@ WebSocket reports actual navigations and active time spent on a page.
   (anything calling
   itself a "bot", plus known exceptions such as GoogleOther) are ignored
   server-side, and their document GETs land in the crawler list instead.
+  Real-browser bots whose UA does not match still register a visit, but
+  their reported reading time stays under 5 seconds, so they are
+  reclassified as crawler hits at display time (see **Crawler hits** below).
   No source-IP verification is done: a spoofed bot UA merely lands in the
   crawler stats, and scanners that probe telltale paths are caught by the
   abuse rules regardless. Reloads are not
@@ -90,7 +93,7 @@ WebSocket reports actual navigations and active time spent on a page.
   ("/" or `[a-z0-9_-]` segments), external ones are re-derived to the
   https origin and accepted only when the client sent exactly that.
 - **External-site favicons**: for every external https origin seen as a visit
-  referer or an exit link, the server fetches `{origin}/favicon.ico` in a
+  referer, a crawler-hit referer or an exit link, the server fetches `{origin}/favicon.ico` in a
   background task (httpx, 8 s timeout, ≤ 64 KB, image content-types only —
   SVG is sniffed from the body when served without an image type) and stores
   the icon content-hashed on disk in the FileStore (served at `/_f/{name}`,
@@ -134,11 +137,19 @@ WebSocket reports actual navigations and active time spent on a page.
   from the same client arrives within 10 seconds the hit is discarded;
   otherwise it is written to `crawlers` — unless the client is hidden
   (admin), in which case the hit is discarded on expiry too.  Crawlers do not count as
-  visits or views.  The `Accept-Language` header is stored on the shared
+  visits or views.  Bots running real browsers can still slip past the UA
+  check: a visit whose total reported reading time stays under 5 seconds
+  (`_MIN_VISIT_READ`; durations are client-provided and trusted — such bots
+  report 0–2 s) is reclassified as crawler hits at display time, one hit
+  per internal trail page, and counts in no visit aggregate.  The
+  `Accept-Language` header is stored on the shared
   `Client` immediately; reverse-DNS host names and DB-IP geoip
   country/city are filled in asynchronously, just like for real visits.  In
   the analytics viewer, crawler hits are grouped by client hash and shown as
-  a trail of internal pages that crawler visited; the crawler table lists
+  a trail of internal pages that crawler visited, preceded by its referer
+  when there is one — spiders often advertise their own site as the
+  referer, and it is rendered with its favicon like visit referers (crawler
+  referers are included in the favicon fetch origins).  The crawler table lists
   the most recent crawler first, with the most active as a tie-breaker.
 - **Abuse (scanner) hits**: a 404 for a telltale path — any URL segment
   starting with a dot (`/.env`, `/.git/config`) or ending in `.php` —
@@ -152,9 +163,12 @@ WebSocket reports actual navigations and active time spent on a page.
   is persisted in the JSON file; the plain-404 counters are RAM-only.  In the
   viewer, abuse hits are grouped by IP (never by client/UA — scanners
   randomize theirs) in a separate "Abuse" table.  Identical paths are
-  collapsed into one entry with their hit count; flagged paths that
-  triggered classification are lifted to the top, followed by other 404s and
-  then document GETs from the abuser.  Raw User-Agent strings are shown one
+  collapsed into one entry with their hit count.  The 404 probes ("paths
+  abused": flagged paths that triggered classification first, then other
+  404s) are kept in a separate column from the real articles the abuser
+  actually read ("articles read": document GETs that returned 200, not the
+  404 fallback rendering — rendered as trail links like the visitor and
+  crawler tables, with the query string stripped).  Raw User-Agent strings are shown one
   per line with their occurrence counts, and the full lists are click-to-copy.
 
 ## Visits and sessions
@@ -219,14 +233,16 @@ Each `AbuseHit` record:
 - `client` — 6-byte blake3 hash referencing `Analytics.clients`,
 - `flag` — true for the path that triggered abuse classification (telltale
   path or the 404 that crossed the threshold),
-- `is_404` — true for 404 responses, false for document GETs from the
-  abuser.
+- `is_404` — true for 404 responses (probed paths and 404-fallback document
+  GETs), false for real (200) document GETs — articles the abuser read.
 
 Crawler hits are grouped by client hash in the analytics viewer; abuse hits
 are grouped by IP alone (resolved from the referenced `Client`).  In the
-Abuse table identical paths are collapsed with their counts; flagged paths
-that triggered classification are lifted to the top, followed by other 404s
-and then document GETs from the abuser.  Within each category paths are
+Abuse table identical paths are collapsed with their counts, split into the
+404 probes (flagged paths that triggered classification first, then other
+404s, shown verbatim) and the 200 document GETs shown as trail links in the
+separate articles column.
+Within each list paths are
 sorted by count descending, then by their earliest hit.
 
 In the visitor and crawler tables, internal paths that returned a 404 status
@@ -237,7 +253,9 @@ to tell misses from real pages at a glance.
 
 Aggregates are **not stored**; they are computed at display time by
 `Store.display()` from the visit records (entry + `navs` log), skipping
-hidden clients' visits. This is what allows a client to become hidden after
+hidden clients' visits and short visits reclassified as crawler hits
+(under `_MIN_VISIT_READ` seconds of total reported reading time). This is
+what allows a client to become hidden after
 navigations were already logged: no counts need reversing. The computed
 shapes, part of the WebSocket payload (`Display` struct alongside `visits`,
 `crawlers`, `abuse` and `clients`):

@@ -163,7 +163,7 @@ const favicons = computed(() => data.value?.favicons || {})
 const visitRows = computed(() => formatVisitRows(visits.value, clients.value, pageTree.value, now.value))
 const crawlers = computed(() => rangeData.value?.crawlers || [])
 const crawlerRows = computed(() => formatCrawlerRows(crawlers.value, clients.value, pageTree.value, now.value))
-const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], clients.value, now.value))
+const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], clients.value, pageTree.value, now.value))
 
 </script>
 
@@ -244,6 +244,7 @@ const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], c
               <tbody>
                 <tr v-for="(c, i) in crawlerRows" :key="i">
                   <td class="trail">
+                    <TrailLink v-if="c.refererStep" :step="c.refererStep" :favicons="favicons" @close="$emit('close')" />
                     <TrailLink v-for="(s, si) in c.pages" :key="si" :step="s" :count="s.count" @close="$emit('close')" />
                   </td>
                   <VisitorCell
@@ -270,6 +271,7 @@ const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], c
               <thead>
                 <tr>
                   <th>paths abused</th>
+                  <th>articles read</th>
                   <th>visitor</th>
                   <th class="last-seen">last seen</th>
                 </tr>
@@ -285,6 +287,11 @@ const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], c
                       </span>
                       <small v-if="a.paths.length > ABUSE_MAX_LINES" class="muted">+{{ a.paths.length - ABUSE_MAX_LINES }} more</small>
                     </div>
+                  </td>
+                  <td class="trail clickable-list"
+                      @click="copyList(a.allArticles, $event)">
+                    <TrailLink v-for="(s, si) in a.articles" :key="si" :step="s" :count="s.count" @close="$emit('close')" />
+                    <small v-if="!a.articles.length" class="muted">—</small>
                   </td>
                   <VisitorCell
                     :ip="a.ip"

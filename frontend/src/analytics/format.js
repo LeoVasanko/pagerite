@@ -370,7 +370,9 @@ export function mainDomain(host, limit = 24) {
 /**
  * Group raw crawler hits by client hash and format each group as a row showing
  * every internal page that crawler visited.  Rows are sorted by most recent hit
- * first, with total hits as a tie-breaker.
+ * first, with total hits as a tie-breaker.  The group's ``refererStep`` is the
+ * latest external referer seen for the crawler — spiders often advertise
+ * their own site there — rendered with its favicon like visit referers.
  * ``clients`` maps client hashes to client records.
  */
 export function formatCrawlerRows(crawlers, clients, pageTree, now = Date.now()) {
@@ -382,10 +384,12 @@ export function formatCrawlerRows(crawlers, clients, pageTree, now = Date.now())
       clientHash: c.client,
       client,
       lastStart: 0,
+      referer: '',
       pages: new Map(),
     }
     const start = new Date(c.start).getTime()
     if (start > g.lastStart) g.lastStart = start
+    if (c.referer) g.referer = c.referer
     if (c.entry?.startsWith('/')) {
       const existing = g.pages.get(c.entry) || { count: 0, status: c.status || 200 }
       existing.count += 1
@@ -410,6 +414,7 @@ export function formatCrawlerRows(crawlers, clients, pageTree, now = Date.now())
         lastSeen: formatWhen(g.lastStart, now),
         lastSeenIso: formatWhenIso(g.lastStart),
         lastSeenLocal: formatWhenLocal(g.lastStart),
+        refererStep: stepOf(g.referer, titles),
         pages: [...g.pages.entries()]
           .sort((a, b) => b[1].count - a[1].count)
           .map(([path, info]) => ({ ...stepOf(path, titles), count: info.count, status: info.status })),
@@ -430,16 +435,19 @@ export function formatCrawlerRows(crawlers, clients, pageTree, now = Date.now())
 /**
  * Group abuse hits by IP and format each group as a row with the full paths
  * probed.  Identical paths are collapsed into one entry with their hit count.
- * Flagged paths (the ones that triggered abuse classification) are lifted to
- * the top, followed by other 404s, then document GETs from the abuser.  Within
- * each category paths are sorted by count descending, then earliest first.
+ * The paths split into two lists: ``paths`` holds the 404 probes (flagged
+ * paths — the ones that triggered abuse classification — first, then other
+ * 404s) shown verbatim, query string included, and ``articles`` holds the
+ * real (200) document GETs as trail steps resolved against the page tree
+ * (query string stripped), rendered like the visitor/crawler trails.  Within
+ * each list paths are sorted by count descending, then earliest first.
  * Rows are sorted by most recent hit first.  Visitor metadata comes from the
  * latest client hash seen for the IP; ``clientCount`` tells the visitor cell
- * how many distinct client variations the IP produced.  Paths are shown
- * verbatim (query string included), not resolved against the page tree.
+ * how many distinct client variations the IP produced.
  * ``clients`` maps client hashes to client records.
  */
-export function formatAbuseRows(abuse, clients, now = Date.now()) {
+export function formatAbuseRows(abuse, clients, pageTree, now = Date.now()) {
+  const titles = buildTitleMap(pageTree)
   const groups = new Map()
   for (const a of abuse || []) {
     const client = (clients || {})[a.client] || {}
@@ -481,13 +489,14 @@ export function formatAbuseRows(abuse, clients, now = Date.now()) {
     .sort((a, b) => b.lastStart - a.lastStart)
     .slice(0, 10)
     .map((g) => {
-      const pathCategory = (p) => (p.flag ? 0 : p.is_404 ? 1 : 2)
-      const paths = [...g.pathCounts.values()].sort(
-        (a, b) =>
-          pathCategory(a) - pathCategory(b) ||
-          b.count - a.count ||
-          a.firstStart - b.firstStart,
-      )
+      const all = [...g.pathCounts.values()]
+      const byCount = (a, b) => b.count - a.count || a.firstStart - b.firstStart
+      const paths = all
+        .filter((p) => p.flag || p.is_404)
+        .sort((a, b) => (a.flag ? 0 : 1) - (b.flag ? 0 : 1) || byCount(a, b))
+      const articles = all.filter((p) => !p.flag && !p.is_404).sort(byCount)
+      const pathList = (list) =>
+        list.map((p) => (p.count > 1 ? `${p.count}× ${p.path}` : p.path)).join('\n')
       const client = (clients || {})[g.lastClient] || {}
       const host = client.host || ''
       const isHost = !!host
@@ -501,9 +510,14 @@ export function formatAbuseRows(abuse, clients, now = Date.now()) {
           flag: p.flag,
           is_404: p.is_404,
         })),
-        allPaths: paths
-          .map((p) => (p.count > 1 ? `${p.count}× ${p.path}` : p.path))
-          .join('\n'),
+        allPaths: pathList(paths),
+        articles: articles
+          .map((p) => {
+            const step = stepOf(p.path.split('?')[0], titles)
+            return step ? { ...step, count: p.count } : null
+          })
+          .filter(Boolean),
+        allArticles: pathList(articles),
         clientCount: g.clientHashes.size,
         ip: client.ip || g.ip,
         ipDisplay: isHost ? mainDomain(host) : hostIP(client.ip || g.ip) || client.ip || g.ip || '—',

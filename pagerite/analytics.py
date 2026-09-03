@@ -14,7 +14,11 @@ that only fetch documents end up in the crawler list).  JS-running crawlers
 (Googlebot, GoogleOther, Applebot, ...) do connect and send messages, but
 their UA gives them
 away (``_is_bot_ua``) and their messages are ignored, so they land in the
-crawler list too.  Idle-time link preloads from pagerite.js carry an
+crawler list too.  Bots whose UA does not match are caught by engagement:
+a visit whose total reported reading time is under ``_MIN_VISIT_READ``
+seconds is reclassified as crawler hits at display time (durations are
+client-provided and trusted — real-browser bots report 0–2 s), so it never
+counts in the visit aggregates either.  Idle-time link preloads from pagerite.js carry an
 ``x-pagerite-preload`` header and are not tracked at all — the navigation
 message sent when the user actually navigates does the counting.
 Admin clients send ``hide``: the client record is flagged ``hide``,
@@ -43,7 +47,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import blake3
 import msgspec
@@ -200,8 +204,10 @@ class AbuseHit(msgspec.Struct, omit_defaults=True):
     Unlike crawler hits the full request path (query string included) is
     kept: the interesting part is exactly which paths were probed.
     ``flag`` marks the path that triggered classification; ``is_404``
-    distinguishes 404 responses from document GETs made by the abuser.
-    Client metadata is held in ``Analytics.clients`` keyed by ``client``.
+    distinguishes 404 responses (probed paths and 404-fallback document
+    GETs) from real 200 document GETs — the abuser actually reading
+    articles.  Client metadata is held in ``Analytics.clients`` keyed by
+    ``client``.
     """
 
     start: datetime
@@ -212,7 +218,7 @@ class AbuseHit(msgspec.Struct, omit_defaults=True):
     #: True when this path triggered abuse classification (telltale path
     #: or the 404 that crossed the threshold).
     flag: bool = False
-    #: True for 404 responses; false for document GETs from the abuser.
+    #: True for 404 responses; false for real (200) document GETs.
     is_404: bool = False
 
 
@@ -346,6 +352,11 @@ def _utm_tags(query: str) -> dict[str, str]:
 
 
 _CRAWLER_TIMEOUT = timedelta(seconds=10)
+
+#: Minimum total reported reading time (seconds, summed over the trail) for
+#: a session to count as a visit; shorter sessions are JS-running bots and
+#: are shown as crawler hits instead.
+_MIN_VISIT_READ = 5
 
 #: How long a failed favicon fetch suppresses retries for the same origin.
 _FAVICON_RETRY = timedelta(days=7)
@@ -505,16 +516,43 @@ class Store:
     def display(self) -> Display:
         """Build the viewer payload, excluding hidden clients.
 
+        Visits whose total reported reading time is under
+        ``_MIN_VISIT_READ`` seconds are JS-running bots, not readers: they
+        are converted to crawler hits (one per internal trail page) and left
+        out of the visit list and every aggregate.
         The aggregates (site visits, page views, transitions) are computed
         here from the visit records rather than stored, so a client that
         becomes hidden after navigations were already logged disappears
         from every statistic.  Internal-path navigations count as page
         views; external https targets are transitions only.
         """
-        visits = [v for v in self.data.visits if not self._hidden(v.client)]
+        visits: list[Visit] = []
+        crawlers = [h for h in self.data.crawlers if not self._hidden(h.client)]
+        for visit in self.data.visits:
+            if self._hidden(visit.client):
+                continue
+            if sum(item.read for item in visit.trail.values()) >= _MIN_VISIT_READ:
+                visits.append(visit)
+                continue
+            query = urlencode(visit.utm)
+            first = True
+            for t, item in visit.trail.items():
+                if not item.to.startswith("/"):
+                    continue
+                crawlers.append(
+                    CrawlerHit(
+                        start=t,
+                        entry=item.to,
+                        client=visit.client,
+                        referer=visit.referer if first else "",
+                        query=query if first else "",
+                        status=item.status,
+                    )
+                )
+                first = False
         display = Display(
             visits=visits,
-            crawlers=[h for h in self.data.crawlers if not self._hidden(h.client)],
+            crawlers=crawlers,
             abuse=[h for h in self.data.abuse if not self._hidden(h.client)],
             clients={h: c for h, c in self.data.clients.items() if not c.hide},
             favicons={
@@ -601,7 +639,9 @@ class Store:
     def favicon_origins_needed(self) -> list[str]:
         """External https origins seen in visits whose favicon needs fetching.
 
-        Covers visit referers and external exit targets (trail and navs).
+        Covers visit referers and external exit targets (trail and navs),
+        plus crawler-hit referers — spiders often advertise their own site
+        as the referer, so the icon identifies them in the crawler table.
         Origins with a stored icon, or a miss younger than
         ``_FAVICON_RETRY``, are skipped.
         """
@@ -613,6 +653,9 @@ class Store:
                 origin = _origin(target.to)
                 if origin is not None:
                     origins.add(origin)
+        for hit in self.data.crawlers:
+            if hit.referer:
+                origins.add(hit.referer)
         now = datetime.now(UTC)
         return [
             origin
@@ -673,6 +716,7 @@ class Store:
                         h.client,
                         h.entry + (f"?{h.query}" if h.query else ""),
                         start=h.start,
+                        is_404=h.status != 200,
                     )
             pending = [
                 h for h in self.pending_crawlers if self._client_ip(h.client) == ip
@@ -686,6 +730,7 @@ class Store:
                         h.client,
                         h.entry + (f"?{h.query}" if h.query else ""),
                         start=h.start,
+                        is_404=h.status != 200,
                     )
         self._abuse_hit(client_hash, path, flag=flag, is_404=is_404)
         self._save()
@@ -779,7 +824,7 @@ class Store:
         client_hash = self._ensure_client(ip, ua, lang, country=country)
         if ip in self.data.abuse_ips:
             flushed = self._flush_crawlers()
-            self._abuse_hit(client_hash, full_path, is_404=False, flag=False)
+            self._abuse_hit(client_hash, full_path, is_404=status != 200, flag=False)
             self._save()
             return flushed
         now = datetime.now(UTC)
