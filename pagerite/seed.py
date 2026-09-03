@@ -114,7 +114,7 @@ Headings from `##` down organize the article. On pages with at least three of th
 > and a blank `>` line starts a new paragraph.
 
 > [!NOTE]
-> GitHub-style alerts — NOTE, TIP, IMPORTANT, WARNING, CAUTION —
+> GitHub-style alerts — `NOTE`, `TIP`, `IMPORTANT`, `WARNING`, `CAUTION` —
 > render as callout boxes.
 ```
 
@@ -122,7 +122,7 @@ Headings from `##` down organize the article. On pages with at least three of th
 > and a blank `>` line starts a new paragraph.
 
 > [!NOTE]
-> GitHub-style alerts — NOTE, TIP, IMPORTANT, WARNING, CAUTION —
+> GitHub-style alerts — `NOTE`, `TIP`, `IMPORTANT`, `WARNING`, `CAUTION` —
 > render as callout boxes.
 
 ## Code

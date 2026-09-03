@@ -11,15 +11,32 @@
 // and refreshes the page regions in place — never a reload — so the editor
 // state (unsaved text included) also survives closing the shell. The editor
 // always follows the URL: navigating away retargets it to the new page,
-// stashing unsaved text per path (unsavedStash) so returning to the page
-// restores the working draft; stashes clear on save and on real reload.
-import { onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
+// stashing unsaved text per path and language (stashes) so returning to the
+// page restores the working draft; stashes clear on save and on real reload.
+//
+// Languages: the editor always starts in the primary language; the
+// toolbar's LangSelect (shared with the structure tab via ./editorLang)
+// switches between the primary language and its translations. A translation is
+// edited as its effective (hybrid) Markdown; the hybrid the session
+// started from is kept as a shadow copy (shadowBase) and sent along at
+// save time, so the server diffs the user's changes only and stores them
+// as a patch — edits to a translation never touch the original, while
+// edits to the primary language re-chunk the original (and thereby
+// invalidate the affected translation fragments). The live preview always
+// renders the version being edited, whichever language the page itself
+// was loaded in.
+import { computed, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { EditorView, basicSetup } from 'codemirror'
-import { EditorState } from '@codemirror/state'
+import { Compartment, EditorState } from '@codemirror/state'
 import { keymap } from '@codemirror/view'
 import { indentWithTab } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
 import { cmHighlight, cmTheme } from './cmtheme'
+import { flagFor, langName } from './langs'
+import { editorLang, pagePrimary } from './editorLang'
+import LangSelect from './LangSelect.vue'
+import ConnNote from './ConnNote.vue'
+import { reconnectPolicy, socketSlot, watchConnecting } from './reconnect'
 import { dropPageCache, loadPlain } from './swapdoc'
 
 const props = defineProps({
@@ -34,14 +51,49 @@ const saveError = ref('')
 const editorEl = ref(null)
 const fileInput = ref(null)
 
+// The language being edited: "" = the primary language, where the editor
+// always starts (a served translation does not follow it into the editor;
+// the picker switches). The server normalizes the primary to "" anyway.
+// Shared with the other tabs (./editorLang) — one selection for the whole
+// shell, and for the page preview while the shell is open.
+const lang = editorLang
+const primaryLang = ref('en')
+const pageLangs = ref([]) // translations this page has
+const siteLangs = ref([]) // site-wide configured target languages
+// The shadow copy: the Markdown this editing session started from, sent as
+// "base" on translated saves so the server diffs the user's changes only.
+let shadowBase = ''
+let titleTouched = false
+// The (path, lang) the editor's current content came from: set when a doc
+// is accepted, and the test for whether a reconnected socket must re-open
+// (a dropped open would otherwise leave the editor empty/stale forever).
+let sessionDoc = null
+
+// Connection state drives the note above the editor (ConnNote), and locks
+// input until the page's document has arrived: typing before the accept
+// would be clobbered by it. While merely DISconnected the editor stays
+// editable — text stashes and pending saves flush on reconnect.
+const conn = ref('connecting') // connecting | open | waiting
+const retryIn = ref(0)
+const docReady = ref(false)
+const editable = new Compartment()
+const connNote = computed(() =>
+  conn.value === 'connecting' ? 'connecting to the server…'
+    : conn.value === 'waiting' ? `connection lost — reconnecting in ~${retryIn.value} s…`
+    : docReady.value ? '' : 'loading the page…',
+)
+
 let ws = null
 let view = null
 let savedResolve = null
 let pendingSave = null
 let reconnectTimer = null
-let reconnectDelay = 2000
-const MAX_RECONNECT_DELAY = 16000
-let everConnected = false
+let connectWatchdog = null
+// Reconnection pacing lives in ./reconnect (shared with the other sockets):
+// doubling backoff with jitter, reset only by a healthy connection — rapid
+// retries trip the browser's WebSocket throttling (sockets stuck "pending"
+// for minutes), which is what kept hollowing out the editor.
+const reconnects = reconnectPolicy()
 const dirty = ref(false)  // unsaved text exists (drives the 💾 button)
 let syncingScroll = false
 
@@ -62,6 +114,39 @@ function ensureConnected() {
 function normPath(p) {
   return p.trim().replace(/^\/+|\/+$/g, '')
 }
+
+// --- Language picker -------------------------------------------------------
+// Flag icons and display names come from ./langs (shared with the
+// localization settings tab).
+
+// The picker's options: the primary language first, then the union of the
+// page's translations and the site-wide configured targets, sorted.
+const langOptions = computed(() => {
+  const others = [...new Set([...siteLangs.value, ...pageLangs.value])]
+    .filter((l) => l && l !== primaryLang.value)
+    .sort()
+  return [primaryLang.value, ...others].map((code) => ({
+    tag: code === primaryLang.value ? '' : code,
+    code,
+    name: langName(code),
+    flag: flagFor(code),
+    primary: code === primaryLang.value,
+  }))
+})
+
+const currentLang = computed(
+  () => langOptions.value.find((o) => o.tag === lang.value)
+    ?? { tag: '', code: lang.value || primaryLang.value, name: langName(lang.value || primaryLang.value), flag: flagFor(lang.value || primaryLang.value), primary: !lang.value },
+)
+
+// The picker's selection is the shell-wide shared language (./editorLang):
+// a change stashes the working text under the PREVIOUS language (the view
+// still holds that doc) and opens the current page in the new one.
+watch(lang, (tag, prev) => {
+  if (!view) return
+  stashAs(prev || '')
+  openPath(path.value)
+})
 
 function pageLabel() {
   return title.value.trim() || ('/' + (path.value || ''))
@@ -96,11 +181,17 @@ function save() {
   // never moves the page.
   const markdown = view.state.doc.toString()
   if (markdown.trim() === '') {
+    if (lang.value) {
+      // Emptying a translation would render it as a blank page; deleting
+      // pages is a primary-language action.
+      saveError.value = '⚠️ a translation cannot be emptied'
+      return Promise.resolve()
+    }
     // Empty text means delete — an explicit choice made here, in the page
     // editor; the save APIs (REST PUT / WS save) never delete on empty.
     return fetch(`/_api/pages/${path.value}`, { method: 'DELETE' }).then((res) => {
       saveError.value = res.ok ? '' : '⚠️ changes could not be saved'
-      if (res.ok) unsavedStash.delete(path.value)
+      if (res.ok) stashes.delete(stashKey(path.value, lang.value))
     })
   }
   const msg = {
@@ -109,6 +200,15 @@ function save() {
     title: title.value,
     markdown,
     published: published.value,
+  }
+  if (lang.value) {
+    msg.lang = lang.value
+    // The shadow copy this session started from: the server diffs base →
+    // markdown and stores only the user's changes as a patch.
+    msg.base = shadowBase
+    // An untouched title field is not sent: it holds the served
+    // translation, which a save must not freeze into an override fragment.
+    if (!titleTouched) delete msg.title
   }
   pendingSave = msg
   send(msg)
@@ -120,9 +220,12 @@ async function saveAndRefresh() {
   dirty.value = false
   // Refresh the page regions from the server so nav/sidebar changes apply
   // (never a reload: the editor keeps its state). Drop the prefetch cache
-  // first: heading/title changes affect navigation on every page.
+  // first: heading/title changes affect navigation on every page. A
+  // translation save keeps the preview as-is — it already shows the saved
+  // text, and loadPlain would swap the article to the header-selected
+  // language's render.
   dropPageCache()
-  loadPlain(path.value)
+  if (!lang.value) loadPlain(path.value)
 }
 
 function close() {
@@ -572,18 +675,34 @@ function insertTable(cols, rows) {
   view.focus()
 }
 
-// Unsaved edits survive navigation within the session: leaving a page
-// stashes its working text here, returning restores it (the server doc
-// still arrives, for title/published and as the base underneath).
-// Entries clear on save and on real reload (the shell is in-memory only).
-const unsavedStash = new Map()
+// Unsaved edits survive navigation within the session: leaving a page (or
+// switching the language) stashes its working text and shadow base here,
+// returning restores them (the server doc still arrives, for
+// title/published and language metadata). Entries clear on save and on
+// real reload (the shell is in-memory only).
+const stashes = new Map()
+const stashKey = (p, l) => `${p}|${l}`
+
+function stashAs(l) {
+  if (dirty.value && path.value) {
+    stashes.set(stashKey(path.value, l), {
+      text: view.state.doc.toString(),
+      base: shadowBase,
+    })
+  }
+}
+
+function stashCurrent() {
+  stashAs(lang.value)
+}
 
 function openPath(p) {
-  if (dirty.value && path.value && p !== path.value) {
-    unsavedStash.set(path.value, view.state.doc.toString())
-  }
+  if (p !== path.value) stashCurrent()
   path.value = p
-  send({ type: 'open', path: p })
+  // Lock input until the doc arrives (typing would be clobbered by it).
+  docReady.value = false
+  view?.dispatch({ effects: editable.reconfigure(EditorView.editable.of(false)) })
+  send({ type: 'open', path: p, lang: lang.value })
 }
 
 function setDocument(text, preserveSelection = false) {
@@ -624,26 +743,57 @@ function previewIntoArticle(html, multicol) {
 
 function onMessage(ev) {
   const msg = JSON.parse(ev.data)
-  if (msg.type === 'doc' && msg.path === path.value) {
+  // The doc must answer the current path and language; before the first
+  // doc the language is not yet server-normalized (the primary arrives as
+  // "" while the picker may have started from an explicit code), so the
+  // first doc is accepted on path alone and adopts the echoed language.
+  if (msg.type === 'doc' && msg.path === path.value
+      && (!sessionDoc || (msg.lang || '') === lang.value)) {
     title.value = msg.title
     published.value = msg.published
+    primaryLang.value = msg.primary_lang || 'en'
+    pagePrimary.value = primaryLang.value // the page's own — the shell pins the preview by it
+    pageLangs.value = msg.langs || []
+    siteLangs.value = msg.translate_langs || []
+    lang.value = msg.lang || ''
+    sessionDoc = { path: msg.path, lang: lang.value }
+    docReady.value = true
+    view.dispatch({ effects: editable.reconfigure(EditorView.editable.of(true)) })
+    titleTouched = false
     // Restore stashed unsaved edits over the server doc when returning
     // to a page left dirty.
-    const stashed = unsavedStash.get(msg.path)
-    setDocument(stashed ?? msg.markdown)
+    const stashed = stashes.get(stashKey(msg.path, lang.value))
+    setDocument(stashed ? stashed.text : msg.markdown)
+    shadowBase = stashed ? stashed.base : msg.markdown
     dirty.value = stashed != null
     requestRender()
     // A section pen's target line survives the open/path-switch here.
     consumePendingLine()
+  } else if (msg.type === 'doc') {
+    // A doc that answered neither path nor language of the current session
+    // (a late reply to a pre-switch open) — visible because it leaves the
+    // editor empty when it's the only doc that ever arrives.
+    console.warn(
+      '[pagerite] doc dropped:', msg.path, msg.lang || '(primary)',
+      '— editor is on', path.value, lang.value || '(primary)',
+    )
   } else if (msg.type === 'html' && msg.path === path.value) {
     previewIntoArticle(msg.html, msg.multicol)
   } else if (msg.type === 'saved') {
-    saveError.value = ''
-    pendingSave = null
-    dirty.value = false
-    unsavedStash.delete(path.value)
-    savedResolve?.()
-    savedResolve = null
+    // A late "saved" for a save sent before a path/language switch must not
+    // clear the current session's state.
+    if (pendingSave && pendingSave.path === path.value
+        && (pendingSave.lang || '') === lang.value) {
+      saveError.value = ''
+      // The saved text becomes the shadow base for further saves.
+      shadowBase = pendingSave.markdown
+      pendingSave = null
+      dirty.value = false
+      titleTouched = false
+      stashes.delete(stashKey(path.value, lang.value))
+      savedResolve?.()
+      savedResolve = null
+    }
   } else if (msg.type === 'error') {
     saveError.value = '⚠️ changes could not be saved'
   }
@@ -831,33 +981,54 @@ function consumePendingLine() {
 }
 
 function connect() {
+  clearTimeout(reconnectTimer)
+  conn.value = 'connecting'
+  if (ws) {
+    // Replacing a stale socket: detach its handlers so its close is silent.
+    ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null
+    if (ws.readyState !== WebSocket.CLOSED) ws.close()
+  }
   ws = new WebSocket(
     `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/_api/ws/editor`,
   )
   ws.onmessage = onMessage
+  ws.onerror = (ev) => {
+    console.error('[pagerite] editor socket error', ev)
+  }
+  clearTimeout(connectWatchdog)
+  connectWatchdog = watchConnecting(ws, 'editor')
   ws.onopen = () => {
-    reconnectDelay = 2000
-    if (everConnected) {
+    conn.value = 'open'
+    reconnects.opened()
+    if (sessionDoc && sessionDoc.path === path.value && sessionDoc.lang === lang.value) {
       // Reconnected: local text is authoritative — don't re-open (that
       // would clobber the editor), just resync preview and pending saves.
       requestRender()
       if (pendingSave) send(pendingSave)
     } else {
+      // No doc behind the current page+language (first connect, or its
+      // open went down with a previous socket): open fresh, or the editor
+      // would stay empty forever.
       openPath(normPath(props.pagePath))
     }
-    everConnected = true
   }
-  ws.onclose = () => {
-    clearTimeout(reconnectTimer)
-    reconnectTimer = setTimeout(() => {
-      connect()
-      reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY)
-    }, reconnectDelay)
+  ws.onclose = (ev) => {
+    // 1006 = abnormal (e.g. the dev proxy refused/dropped the upgrade, or
+    // the connecting watchdog fired); worth seeing since a dead socket
+    // before the first doc bricks the editor until a retry lands one.
+    // The wait is the policy's: doubling backoff with jitter (./reconnect).
+    console.warn('[pagerite] editor socket closed:', ev.code, ev.reason || '')
+    const wait = reconnects.closed()
+    retryIn.value = Math.max(1, Math.round(wait / 1000))
+    conn.value = 'waiting'
+    reconnectTimer = setTimeout(connect, wait)
   }
 }
 
 onMounted(() => {
-  connect()
+  // The first connection takes a staggered slot (see ./reconnect): page
+  // load opens several sockets at once, and the burst trips throttling.
+  reconnectTimer = setTimeout(connect, socketSlot())
   updateWindowTitle()
 
   view = new EditorView({
@@ -871,6 +1042,8 @@ onMounted(() => {
         cmTheme,
         cmHighlight,
         EditorView.lineWrapping, // Markdown lines are long: soft-wrap them
+        // Locked until the page's document arrives (docReady/ConnNote).
+        editable.of(EditorView.editable.of(false)),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) requestRender()
           // Cursor moves (typing included) drive the page scroll sync.
@@ -912,6 +1085,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   clearTimeout(reconnectTimer)
+  clearTimeout(connectWatchdog)
   if (ws) {
     ws.onclose = null // intentional close, no reconnect
     ws.close()
@@ -929,11 +1103,12 @@ onUnmounted(() => {
 <template>
   <div class="page-editor">
     <header class="toolbar">
+      <LangSelect v-model="lang" :options="langOptions" />
       <label class="title-field">
         <span class="field-label">title</span>
-        <input v-model="title" class="title" @input="requestRender" />
+        <input v-model="title" class="title" @input="requestRender(); titleTouched = true" />
       </label>
-      <label><input v-model="published" type="checkbox" /> published</label>
+      <label :title="lang ? 'translations follow the original page’s published state' : ''"><input v-model="published" type="checkbox" :disabled="!!lang" /> published</label>
       <input
         ref="fileInput"
         type="file"
@@ -949,6 +1124,15 @@ onUnmounted(() => {
         @click="saveAndRefresh"
       >💾</button>
     </header>
+    <ConnNote :text="connNote" />
+    <div v-if="langOptions.length > 1" class="lang-note">
+      <template v-if="lang">
+        {{ currentLang.name }} translation — edits affect only this language.
+      </template>
+      <template v-else>
+        {{ currentLang.name }} is the primary language — edits here affect all translations.
+      </template>
+    </div>
     <div class="format-bar">
       <button type="button" class="code-btn" title="code — inline wrap, or a fenced block for line-spanning selections; click again to unwrap" @click="insertCode"><code>&lt;/&gt;</code></button>
       <button type="button" title="link (toggle: click inside a link to unwrap it)" @click="insertLink">🔗︎</button>
@@ -1087,6 +1271,19 @@ onUnmounted(() => {
   color: var(--text);
   filter: saturate(0);
   cursor: default;
+}
+
+/* The language selector (toolbar, left) is LangSelect.vue — its styles
+   live there. */
+
+/* Why a language is highlighted: primary edits fan out to translations,
+   translation edits stay local to that language. */
+.lang-note {
+  padding: 0.2rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.8rem;
 }
 
 /* Markdown helpers: plain icon buttons under the toolbar. */

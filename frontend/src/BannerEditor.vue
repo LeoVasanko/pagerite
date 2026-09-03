@@ -3,11 +3,13 @@
 // the real #page-banner region. Close and tab switching live in EditorShell.
 import { computed, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { EditorView, basicSetup } from 'codemirror'
-import { EditorState } from '@codemirror/state'
+import { Compartment, EditorState } from '@codemirror/state'
 import { keymap } from '@codemirror/view'
 import { indentWithTab } from '@codemirror/commands'
 import { html } from '@codemirror/lang-html'
 import { cmHighlight, cmTheme } from './cmtheme'
+import ConnNote from './ConnNote.vue'
+import { reconnectPolicy, socketSlot, watchConnecting } from './reconnect'
 import { dropPageCache, loadPlain, runScripts } from './swapdoc'
 
 const props = defineProps({
@@ -25,9 +27,22 @@ const bannerEl = ref(null)
 let ws = null
 let pendingSave = null
 let reconnectTimer = null
-let reconnectDelay = 2000
-const MAX_RECONNECT_DELAY = 16000
+let connectWatchdog = null
+// Reconnection pacing lives in ./reconnect (shared with the other sockets).
+const reconnects = reconnectPolicy()
 let everConnected = false
+// Connection state drives the note at the top (ConnNote), and locks input
+// until the banner's document has arrived (typing before it would be
+// clobbered by the doc accept).
+const conn = ref('connecting') // connecting | open | waiting
+const retryIn = ref(0)
+const docReady = ref(false)
+const editable = new Compartment()
+const connNote = computed(() =>
+  conn.value === 'connecting' ? 'connecting to the server…'
+    : conn.value === 'waiting' ? `connection lost — reconnecting in ~${retryIn.value} s…`
+    : docReady.value ? '' : 'loading the banner…',
+)
 let view = null      // CodeMirror for the banner HTML
 let syncing = false  // set while replacing the document programmatically
 
@@ -90,6 +105,9 @@ function save() {
 
 function openPath(p) {
   path.value = p
+  // Lock input until the doc arrives (typing would be clobbered by it).
+  docReady.value = false
+  view?.dispatch({ effects: editable.reconfigure(EditorView.editable.of(false)) })
   send({ type: 'open', path: p })
 }
 watch(() => props.pagePath, (p) => { openPath(normPath(p)) })
@@ -209,6 +227,8 @@ function onMessage(ev) {
   const msg = JSON.parse(ev.data)
   if (msg.type === 'doc' && msg.path === path.value) {
     setDocument(msg.banner ?? '')
+    docReady.value = true
+    view.dispatch({ effects: editable.reconfigure(EditorView.editable.of(true)) })
     bannerDesign.value = msg.banner_design ?? null
     bannerDesignFrom.value = msg.banner_design_from ?? null
     bannerDesignInherited.value = msg.banner_design_inherited ?? ''
@@ -234,12 +254,22 @@ function onKeydown(ev) {
 }
 
 function connect() {
+  clearTimeout(reconnectTimer)
+  conn.value = 'connecting'
+  if (ws) {
+    // Replacing a stale socket: detach its handlers so its close is silent.
+    ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null
+    if (ws.readyState !== WebSocket.CLOSED) ws.close()
+  }
   ws = new WebSocket(
     `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/_api/ws/editor`,
   )
   ws.onmessage = onMessage
+  clearTimeout(connectWatchdog)
+  connectWatchdog = watchConnecting(ws, 'banner')
   ws.onopen = () => {
-    reconnectDelay = 2000
+    conn.value = 'open'
+    reconnects.opened()
     if (everConnected) {
       if (pendingSave) send(pendingSave)
     } else {
@@ -248,16 +278,19 @@ function connect() {
     everConnected = true
   }
   ws.onclose = () => {
-    clearTimeout(reconnectTimer)
-    reconnectTimer = setTimeout(() => {
-      connect()
-      reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY)
-    }, reconnectDelay)
+    // The wait is the policy's: doubling backoff with jitter (./reconnect),
+    // reset only by a healthy connection — rapid retries trip the browser's
+    // WebSocket throttling (sockets stuck "pending" for minutes).
+    const wait = reconnects.closed()
+    retryIn.value = Math.max(1, Math.round(wait / 1000))
+    conn.value = 'waiting'
+    reconnectTimer = setTimeout(connect, wait)
   }
 }
 
 onMounted(async () => {
-  connect()
+  // The first connection takes a staggered slot (see ./reconnect).
+  reconnectTimer = setTimeout(connect, socketSlot())
   view = new EditorView({
     state: EditorState.create({
       doc: '',
@@ -269,6 +302,8 @@ onMounted(async () => {
         cmTheme,
         cmHighlight,
         EditorView.lineWrapping,
+        // Locked until the banner's document arrives (docReady/ConnNote).
+        editable.of(EditorView.editable.of(false)),
         EditorView.updateListener.of((u) => {
           if (u.docChanged && !syncing) {
             banner.value = view.state.doc.toString()
@@ -286,6 +321,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   clearTimeout(reconnectTimer)
+  clearTimeout(connectWatchdog)
   for (const t of Object.values(timers)) clearTimeout(t)
   if (ws) {
     ws.onclose = null // intentional close, no reconnect
@@ -300,6 +336,7 @@ onUnmounted(() => {
 <template>
   <div class="banner-editor">
     <div v-if="saveError">{{ saveError }}</div>
+    <ConnNote :text="connNote" />
 
     <section class="block" @paste="onBannerPaste">
       <div class="block-head">

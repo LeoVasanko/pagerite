@@ -15,6 +15,7 @@ import base64
 import re
 from pathlib import Path
 
+from pagerite.chunks import chunk_key, chunk_markdown
 from pagerite.data import prettify
 
 
@@ -131,3 +132,40 @@ def migrate_v2(d: dict) -> None:
     walk(d.get("menu") or {})
     d.pop("version", None)
     _backfill_derivatives()
+
+
+def migrate_v3(d: dict) -> None:
+    """Content-addressed chunk storage (docs/migrate.md): split every
+    node's string ``content`` into block chunks stored once per content
+    hash in the new ``chunks`` store; the node keeps the ordered hash
+    list as ``chunks`` (an absent content stays absent, i.e. None = a
+    pure category label; "" chunks to an empty list = an empty page).
+
+    Chunk keys are 9-byte blake3 digests; at this raw JSON level they are
+    base64 strings (decoding into the structs restores ``bytes`` keys).
+    ``trans``/``patches`` start empty; the translator job fills them and
+    maintains the ``langs`` index as translations land. ``language``,
+    ``no_trans`` and ``langs`` need nothing — struct defaults cover them.
+    """
+    store = d.setdefault("chunks", {})
+    d.setdefault("trans", {})
+    patches = d.setdefault("patches", {})
+
+    def walk(nodes: dict) -> None:
+        for node in nodes.values():
+            content = node.pop("content", None)
+            if isinstance(content, str):
+                hashes = []
+                for chunk in chunk_markdown(content):
+                    key = base64.b64encode(chunk_key(chunk)).decode()
+                    store.setdefault(key, chunk)
+                    hashes.append(key)
+                node["chunks"] = hashes
+            walk(node.get("children") or {})
+
+    walk(d.get("menu") or {})
+    # Article paths never carry a leading slash in keys (docs/migrate.md).
+    # The only path-keyed store starts empty here, so this is defensive
+    # for databases that went through a downgrade/upgrade cycle.
+    for key in [k for k in patches if k.startswith("/")]:
+        patches[key.lstrip("/")] = patches.pop(key)

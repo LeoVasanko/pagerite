@@ -24,7 +24,9 @@ import re
 from html5tagger import HTML, Document, E, Template
 from platformdirs import site_data_dir, user_data_path
 
-from pagerite.data import Node, prettify, resolve, sorted_nodes
+from pagerite import i18n
+from pagerite.data import Data, Node, node_markdown, prettify, resolve, sorted_nodes
+from pagerite.i18n import Translation
 from pagerite.markdown import render
 
 SITE_NAME = "Pagerite"
@@ -309,6 +311,9 @@ def _layout(
     transition: str = "cube",
     favicon: str = "",
     social: dict[str, str] | None = None,
+    lang: str = i18n.ORIGINAL_LANGUAGE,
+    canonical: str = "",
+    alternates: list[tuple[str, str]] = (),
 ) -> Template:
     """Page layout template with standard assets and ES-module scripts.
 
@@ -333,17 +338,26 @@ def _layout(
 
     ``social`` maps meta keys to contents: ``og:*``/``article:*`` go out as
     property attributes, everything else (description, twitter:*) as name.
+
+    ``lang`` is the served language for <html lang>; an RTL language (ar,
+    fa, ...) also puts dir="rtl" on <html> (the editor panel carries its own
+    lang="en" dir="ltr", so it is unaffected). ``canonical`` and
+    ``alternates`` ((hreflang, href) pairs) are the page's language URLs
+    (see docs/localization.md), emitted right after the viewport and before
+    the social tags: canonical first, then the hreflang alternates.
     """
-    doc = Document(E.Title, lang="en")
+    doc = Document(E.Title, lang=lang, dir="rtl" if lang in i18n.RTL_LANGUAGES else "ltr")
     # Responsive layout (see the 48rem breakpoint in pagerite.css) needs
     # the real device width, not the default 980px layout viewport.
     doc.meta(name="viewport", content="width=device-width, initial-scale=1")
+    if canonical:
+        doc.link(rel="canonical", href=canonical)
+    for hreflang, href in alternates:
+        doc.link(rel="alternate", hreflang=hreflang, href=href)
     for key, value in (social or {}).items():
         if value:
             if key.startswith(("og:", "article:")):
                 doc.meta(property=key, content=value)
-            elif key == "canonical":
-                doc.link(rel="canonical", href=value)
             else:
                 doc.meta(name=key, content=value)
     # A custom favicon (from the site editor) is linked explicitly; without
@@ -443,26 +457,41 @@ def _layout(
     return Template(body)
 
 
-def _brand_link(brand: str, brand_html: str = "") -> HTML:
+def _brand_link(brand: str, brand_html: str = "", link_lang: str = "") -> HTML:
     """Header brand: custom HTML (in a #brand wrapper, rendered instead of
     the link) when configured, else the plain brand link; omitted entirely
     when neither is set."""
     if brand_html.strip():
         return HTML(str(E.div(HTML(brand_html), id="brand")))
-    return HTML(str(E.a(brand, href="/", id="brand"))) if brand else HTML("")
+    return HTML(str(E.a(brand, href=_href("", link_lang), id="brand"))) if brand else HTML("")
 
 
-def _title(slug: str, node: Node) -> str:
-    """Menu label: the configured title, prettified slug, "Home" fallback."""
+def _title(slug: str, node: Node, translation: Translation | None = None, path: str = "") -> str:
+    """Menu label: the configured title, prettified slug, "Home" fallback.
+
+    With a translation, its title map (keyed by node path) wins, falling
+    back per node to the original English title.
+    """
+    if translation and (t := translation.titles.get(path)):
+        return t
     return node.title or prettify(slug) or "Home"
+
+
+def _href(path: str, link_lang: str = "") -> str:
+    """Site-chrome link to a page: when the page was requested with a
+    ?lang= override the query is replicated onto the navigation links it
+    renders, so clicks and prefetches (which take the href as-is) stay in
+    the chosen language — even without JS (docs/localization.md)."""
+    return f"/{path}?lang={link_lang}" if link_lang else f"/{path}"
 
 
 def _nav_link(
     doc, menu: dict[str, Node], node: Node, path: str, current: str,
-    ancestors_current: bool = True,
+    ancestors_current: bool = True, translation: Translation | None = None,
+    link_lang: str = "",
 ) -> None:
     """Render one <li> linking the node. Category labels (no content of
-    their own — None, or empty markdown as left by the site editor's
+    their own — chunks None, or an empty page as left by the site editor's
     page creation) link straight to their first child page, so normal
     navigation bypasses the placeholder/empty page at their own URL."""
     # The navbar highlights a top-level item also when viewing any of its
@@ -470,17 +499,17 @@ def _nav_link(
     is_current = current == path or (
         ancestors_current and path and current.startswith(f"{path}/")
     )
-    href = f"/{path}"
-    if not node.content and (leaf := first_leaf(menu, path)) is not None:
-        href = f"/{leaf}"
+    href = _href(path, link_lang)
+    if not node.chunks and (leaf := first_leaf(menu, path)) is not None:
+        href = _href(leaf, link_lang)
     doc.li.a(
-        _title(path.rpartition("/")[2], node),
+        _title(path.rpartition("/")[2], node, translation, path),
         href=href,
         **{"class": "current"} if is_current else {},
     )
 
 
-def nav_html(menu: dict[str, Node], current: str) -> HTML:
+def nav_html(menu: dict[str, Node], current: str, translation: Translation | None = None, link_lang: str = "") -> HTML:
     """Render the contents of the #nav element for the current path.
 
     Top-level items in menu order; the front page (slug "", href "/")
@@ -491,11 +520,11 @@ def nav_html(menu: dict[str, Node], current: str) -> HTML:
     with nav:
         for slug, node in sorted_nodes(menu):
             if node.published:
-                _nav_link(nav, menu, node, slug, current)
+                _nav_link(nav, menu, node, slug, current, translation=translation, link_lang=link_lang)
     return HTML(str(nav))
 
 
-def sidebar_html(menu: dict[str, Node], current: str) -> HTML:
+def sidebar_html(menu: dict[str, Node], current: str, translation: Translation | None = None, link_lang: str = "") -> HTML:
     """Render the #sidebar element for the current path (empty when none).
 
     The sidebar is the current main level section's sub-navigation: the
@@ -529,24 +558,24 @@ def sidebar_html(menu: dict[str, Node], current: str) -> HTML:
     nav = E.ul
     with nav:
         for slug, child in items:
-            _sidebar_item(nav, menu, child, f"{section}/{slug}", current)
+            _sidebar_item(nav, menu, child, f"{section}/{slug}", current, translation, link_lang)
     return HTML(str(E.aside(nav, id="sidebar")))
 
 
-def _sidebar_item(doc, menu: dict[str, Node], node: Node, path: str, current: str) -> None:
+def _sidebar_item(doc, menu: dict[str, Node], node: Node, path: str, current: str, translation: Translation | None = None, link_lang: str = "") -> None:
     """One sidebar <li>: the node link, with its published children as a
     nested list (third level and deeper, recursively)."""
-    _nav_link(doc, menu, node, path, current, ancestors_current=False)
+    _nav_link(doc, menu, node, path, current, ancestors_current=False, translation=translation, link_lang=link_lang)
     sub = [(s, c) for s, c in sorted_nodes(node.children) if c.published]
     if sub:
         # doc.li.a(...) above left the <li> open for nesting.
         with doc.ul:
             for slug, child in sub:
-                _sidebar_item(doc, menu, child, f"{path}/{slug}", current)
+                _sidebar_item(doc, menu, child, f"{path}/{slug}", current, translation, link_lang)
 
 
 def first_leaf(menu: dict[str, Node], path: str) -> str | None:
-    """First published descendant page (content set) in menu order.
+    """First published descendant page (chunks set) in menu order.
 
     This is the nav-link target for content-less category labels.
     """
@@ -561,7 +590,7 @@ def _first_leaf(node: Node, path: str) -> str | None:
         if not child.published:
             continue
         cpath = f"{path}/{slug}" if path else slug
-        if child.content:
+        if child.chunks:
             return cpath
         if (leaf := _first_leaf(child, cpath)) is not None:
             return leaf
@@ -674,16 +703,25 @@ def banner_source(menu: dict[str, Node], path: str) -> str | None:
     return None
 
 
-def page_content(menu: dict[str, Node], path: str) -> HTML:
+def page_content(menu: dict[str, Node], data: Data, path: str, translation: Translation | None = None, link_lang: str = "", lang: str = "") -> HTML:
     """Render the contents of the #main element for a page.
 
     A page with published children (a category page) lists them as cards
-    after the markdown content.
+    after the markdown content. With a translation, its Markdown goes
+    through the same render pipeline; missing pieces (markdown=None, absent
+    title entries) fall back to the original. ``lang`` feeds the cards'
+    per-target localization.
     """
     node = resolve(menu, path)[-1]
+    content = node_markdown(data, node) or ""
+    title = node.title
+    if translation:
+        if translation.markdown is not None:
+            content = translation.markdown
+        title = _title(path.rpartition("/")[2], node, translation, path) if node.title else title
     # The title is injected into the markdown (as # title when it has no
     # h1 of its own), so title and content render as one article.
-    rendered = render(node.content or "", path, node.created, node.modified, title=node.title)
+    rendered = render(content, path, node.created, node.modified, title=title)
     # Long articles get .multicol: the article column cap lifts (see the
     # #content grid in pagerite.css) and the .cols segments lay out in at
     # most two columns. The html is already segmented by render() — the
@@ -691,11 +729,11 @@ def page_content(menu: dict[str, Node], path: str) -> HTML:
     doc = E.article(class_="multicol") if rendered.multicol else E.article
     with doc:
         doc(HTML(rendered.html))
-        _cards(doc, menu, node, path)
+        _cards(doc, menu, data, node, path, translation, link_lang, lang)
     return HTML(str(doc))
 
 
-def _cards(doc, menu: dict[str, Node], node: Node, path: str) -> None:
+def _cards(doc, menu: dict[str, Node], data: Data, node: Node, path: str, translation: Translation | None = None, link_lang: str = "", lang: str = "") -> None:
     """Card stacks of the node's published children (nothing when childless).
 
     One column per direct child, all in a single full-width row (the .wide
@@ -721,35 +759,44 @@ def _cards(doc, menu: dict[str, Node], node: Node, path: str) -> None:
                 continue
             with doc.div(class_="stack"):
                 for epath, enode in entries:
-                    _card(doc, enode, epath)
+                    _card(doc, data, enode, epath, translation, link_lang, lang)
 
 
 def _walk(node: Node, path: str):
     """Published content pages of a subtree, pre-order in menu order: the
     node itself first when it has content (the stack's landing card), then
     its descendants (content-less nodes contribute only their subtree)."""
-    if node.content:
+    if node.chunks:
         yield path, node
     for slug, child in sorted_nodes(node.children):
         if child.published:
             yield from _walk(child, f"{path}/{slug}")
 
 
-def _card(doc, node: Node, path: str) -> None:
+def _card(doc, data: Data, node: Node, path: str, translation: Translation | None = None, link_lang: str = "", lang: str = "") -> None:
     """One card in a stack: cover + title, plus the description when the
-    page has no image (its card shows a gradient cover instead)."""
+    page has no image (its card shows a gradient cover instead).
+
+    The card text localizes per target article where that page is
+    available in the language: the title comes from the translation's
+    title map and the cover/description heuristics run on the target's
+    hybrid Markdown — with per-card fallback to the original otherwise.
+    """
     image = description = ""
-    if node.content:
-        html = render(node.content, path, node.created, node.modified).html
+    if node.chunks:
+        md = node_markdown(data, node) or ""
+        if lang and lang in node.langs:
+            md = i18n.hybrid_markdown(data, node, path, lang)
+        html = render(md, path, node.created, node.modified).html
         image, _ = _media(html)
         if not image:
             description = _description(html, 150)
-    with doc.a(href=f"/{path}", class_="card"):
+    with doc.a(href=_href(path, link_lang), class_="card"):
         if image:
             doc.span(class_="cover", style=f'background-image: url("{image}")')
         else:
             doc.span(class_="cover")
-        doc.span(_title(path.rpartition("/")[2], node), class_="title")
+        doc.span(_title(path.rpartition("/")[2], node, translation, path), class_="title")
         if description:
             doc.span(description, class_="desc")
 
@@ -854,7 +901,6 @@ def _social_meta(
     )
     return {
         "description": text,
-        "canonical": url,
         "og:type": "article",
         "og:title": title,
         "og:description": text,
@@ -871,6 +917,7 @@ def _social_meta(
 
 def render_page(
     menu: dict[str, Node],
+    data: Data,
     path: str,
     brand: str = SITE_NAME,
     custom_css: str = "",
@@ -879,21 +926,51 @@ def render_page(
     brand_html: str = "",
     base_url: str = "",
     transition: str = "cube",
+    lang: str = i18n.ORIGINAL_LANGUAGE,
+    translation: Translation | None = None,
+    link_lang: str = "",
 ) -> str:
-    """Render a full HTML page for the slug path."""
+    """Render a full HTML page for the slug path.
+
+    ``lang``/``translation`` serve a translated version (see
+    docs/localization.md): None translation = the English original.
+    ``link_lang`` is the ?lang= override the page was requested with,
+    replicated onto the navigation links so the language sticks.
+    """
     node = resolve(menu, path)[-1]
-    title = _title(path.rpartition("/")[2], node)
-    main = page_content(menu, path)
+    original = i18n.primary_lang(menu, path)
+    if translation is None:
+        lang = original
+    title = _title(path.rpartition("/")[2], node, translation, path)
+    main = page_content(menu, data, path, translation, link_lang, lang)
     social = _social_meta(node, path, title, str(main), brand, base_url)
+    # Canonical/hreflang URLs (docs/localization.md): the canonical names
+    # the actually served language — the plain URL for the original (for
+    # SEO the non-query URL means the article's language), ?lang= for a
+    # translation — regardless of how the language was arrived at (query
+    # or header). The alternates are site-wide, the same set on every
+    # page: the configured translate_langs (the translator works to fill
+    # them all in), x-default first (the plain, autodetecting URL), then
+    # every language explicitly, the page's own primary included.
+    canonical = ""
+    alternates = []
+    if base_url:
+        url = f"{base_url}/{path}"
+        canonical = url if lang == original else f"{url}?lang={lang}"
+        if data.translate_langs:
+            alternates = [("x-default", url)] + [
+                (tag, f"{url}?lang={tag}")
+                for tag in sorted({original, *data.translate_langs})
+            ]
     return str(
         _layout(
             *_page_assets(), custom_css, theme, banner_design(menu, path, theme),
-            transition, favicon, social,
+            transition, favicon, social, lang, canonical, alternates,
         )(
             Title=f"{title} – {brand}" if brand else title,
-            Brand=_brand_link(brand, brand_html),
-            Nav=nav_html(menu, path),
-            Sidebar=sidebar_html(menu, path),
+            Brand=_brand_link(brand, brand_html, link_lang),
+            Nav=nav_html(menu, path, translation, link_lang),
+            Sidebar=sidebar_html(menu, path, translation, link_lang),
             Banner=banner_html(menu, path, theme),
             Main=main,
         ),
@@ -902,6 +979,7 @@ def render_page(
 
 def render_category(
     menu: dict[str, Node],
+    data: Data,
     path: str,
     brand: str = SITE_NAME,
     custom_css: str = "",
@@ -909,6 +987,9 @@ def render_category(
     favicon: str = "",
     brand_html: str = "",
     transition: str = "cube",
+    lang: str = i18n.ORIGINAL_LANGUAGE,
+    translation: Translation | None = None,
+    link_lang: str = "",
 ) -> str:
     """Render the listing for a content-less category label (404).
 
@@ -916,22 +997,29 @@ def render_category(
     children are listed as cards, like on a category page with content.
     Nav links point straight at the first child, so this is mainly seen
     in the site editor, where the pen creates the landing page.
+
+    With a translation (titles only — the category has no Markdown) the
+    heading, navigation and card text localize per target article
+    (docs/localization.md); ``link_lang`` replicates the ?lang= override
+    onto the navigation links as on content pages.
     """
     node = resolve(menu, path)[-1]
-    title = _title(path.rpartition("/")[2], node)
+    if translation is None:
+        lang = i18n.primary_lang(menu, path)
+    title = _title(path.rpartition("/")[2], node, translation, path)
     doc = E.article
     with doc:
         doc.h1(title)
         if any(c.published for c in node.children.values()):
-            _cards(doc, menu, node, path)
+            _cards(doc, menu, data, node, path, translation, link_lang, lang)
         else:
             doc.p("This section has no page of its own yet.")
     return str(
-        _layout(*_page_assets(), custom_css, theme, banner_design(menu, path, theme), transition, favicon)(
+        _layout(*_page_assets(), custom_css, theme, banner_design(menu, path, theme), transition, favicon, lang=lang)(
             Title=f"{title} – {brand}" if brand else title,
-            Brand=_brand_link(brand, brand_html),
-            Nav=nav_html(menu, path),
-            Sidebar=sidebar_html(menu, path),
+            Brand=_brand_link(brand, brand_html, link_lang),
+            Nav=nav_html(menu, path, translation, link_lang),
+            Sidebar=sidebar_html(menu, path, translation, link_lang),
             Banner=banner_html(menu, path, theme),
             Main=HTML(str(doc)),
         ),

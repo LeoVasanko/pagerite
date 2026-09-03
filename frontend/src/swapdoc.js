@@ -11,6 +11,19 @@ export function dropPageCache() {
   dispatchEvent(new CustomEvent('pagerite:drop-page-cache'))
 }
 
+// The editor's language override (set by EditorShell): while the panel is
+// open, its language selection wins over the normal preferences (?lang= /
+// Accept-Language) — every in-place re-render asks for that language
+// explicitly, and pagerite.js applies it to its own fetches and prefetches
+// (pagerite:session-lang). The primary selection pins by its code:
+// ?lang=<primary> selects the original explicitly (i18n.select_language).
+let overrideLang = null // the ?lang= value in force, null = normal prefs
+
+export function setLangOverride(queryLang) {
+  overrideLang = queryLang || null
+  dispatchEvent(new CustomEvent('pagerite:session-lang', { detail: { lang: overrideLang } }))
+}
+
 export function runScripts(root) {
   // Scripts injected via innerHTML do not execute; re-create them.
   if (!root) return
@@ -101,6 +114,11 @@ function swapRegions(doc) {
     }
     anchor = imported
   }
+  // The served language rides on <html> (lang + dir, rtl for e.g. Arabic):
+  // follow the swapped page. The editor panel carries its own lang="en"
+  // dir="ltr", so it is unaffected.
+  document.documentElement.lang = doc.documentElement.lang
+  document.documentElement.dir = doc.documentElement.dir
   // The editor keeps its own title while open; only inherit the server title
   // when navigating outside the editor (e.g. fetch-navigation swaps).
   if (!document.body.classList.contains('editing')) {
@@ -111,13 +129,14 @@ function swapRegions(doc) {
 // Fetch /p, swap its regions into the live page and replaceState to it.
 // Returns the final URL (after redirects), or null when the fetch did not
 // yield a page. Category and missing URLs render a placeholder 404 page —
-// fine to swap in (new pages are created by editing them).
+// fine to swap in (new pages are created by editing them). While the
+// editor's language override is set the fetch pins that language.
 export async function loadPlain(p) {
   let doc
   let finalUrl = `/${p}`
   let html
   try {
-    const res = await fetch(finalUrl)
+    const res = await fetch(overrideLang ? `${finalUrl}?lang=${overrideLang}` : finalUrl)
     const type = res.headers.get('content-type') || ''
     if (!type.includes('text/html')) return null
     if (res.redirected) finalUrl = res.url
@@ -126,10 +145,16 @@ export async function loadPlain(p) {
   } catch { return null }
   if (!doc.getElementById('main')) return null
   swapRegions(doc)
-  history.replaceState(history.state, '', finalUrl)
+  // The address bar keeps the pretty URL: a language query is a fetch
+  // detail, never shown (pagerite.js's initial ?lang= works the same).
+  const pretty = new URL(finalUrl, location.href)
+  pretty.searchParams.delete('lang')
+  history.replaceState(history.state, '', pretty)
   runScripts(document.getElementById('page-banner'))
   runScripts(document.getElementById('main'))
   // Keep pagerite.js's in-memory page cache in sync with the fresh copy.
+  // The URL is announced as fetched: a language-pinned copy caches under
+  // its own ?lang= key, where navigation with the same pin finds it.
   dispatchEvent(new CustomEvent('pagerite:page-fetched', { detail: { url: finalUrl, html } }))
   dispatchEvent(new CustomEvent('pagerite:preview')) // re-inject + re-tuck the edit pens
   return finalUrl

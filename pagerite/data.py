@@ -2,14 +2,25 @@
 
 The site structure is a tree of Nodes. Every node is a menu label with a
 configurable title and slug (its key in the parent's ``children``); the
-URL path is the chain of slugs from the top level. ``content`` is the
-node's Markdown page, or None for a pure category label, whose URL renders
+URL path is the chain of slugs from the top level. ``chunks`` is the
+node's Markdown page as ordered content-hash keys into ``Data.chunks``
+(docs/migrate.md), or None for a pure category label, whose URL renders
 a placeholder page while nav links point at its first child.
 """
 
 from datetime import UTC, datetime
 
 import msgspec
+
+from pagerite.chunks import join_chunks
+
+
+class Patch(msgspec.Struct, omit_defaults=True):
+    """One editing session's overrides on a translated view, applied
+    independently per hunk (docs/localization.md)."""
+
+    #: (search, replace) pairs on the served hybrid Markdown.
+    hunks: list[tuple[str, str]] = []
 
 
 class Node(msgspec.Struct, omit_defaults=True):
@@ -28,9 +39,21 @@ class Node(msgspec.Struct, omit_defaults=True):
 
     title: str = ""
     order: float = 0
-    #: Markdown source of the node's page; None = pure category label
-    #: (its URL renders a placeholder page).
-    content: str | None = None
+    #: Ordered chunk hashes (9-byte keys into ``Data.chunks``); None =
+    #: pure category label (its URL renders a placeholder page), a list
+    #: (possibly empty) = a page.
+    chunks: list[bytes] | None = None
+    #: Primary language of the article (BCP-47 base tag). "" = inherit
+    #: (nearest ancestor, front page last, site default "en" final).
+    language: str = ""
+    #: Chunk hashes the editor marked "do not translate" (always served
+    #: from the original). Presence-keys, value always True.
+    no_trans: dict[bytes, bool] = {}
+    #: Languages this article is available in (besides its primary
+    #: language). Presence-keys, value always True — the availability
+    #: index for rendering and language selection; maintained by whoever
+    #: writes translation data (docs/migrate.md).
+    langs: dict[str, bool] = {}
     #: Raw HTML for the header banner (img, styled div, canvas+script...),
     #: rendered after the banner design's artwork so author code always
     #: wins over the design's own styles.
@@ -78,6 +101,43 @@ class Data(msgspec.Struct):
     #: linked as <link rel="icon"> on every page. Empty = the build's
     #: /favicon.ico.
     favicon: str = ""
+    #: API keys gating the translator service WebSocket (/_translate/{key};
+    #: the external forward-auth does not cover that route): key -> display
+    #: name. Keys are 12 lowercase alphanumeric characters; the first is
+    #: generated at database bootstrap (see app.py), multiple keys are a
+    #: future reservation (e.g. managed via a web interface).
+    translate_keys: dict[str, str] = {}
+    #: Wanted target languages for the translator service (presence-keys,
+    #: value always True). The dispatcher offers jobs only in the
+    #: intersection of these and a connection's announced capabilities.
+    #: Bootstrapped to es+zh; edited in the editor shell's localization
+    #: tab (or via /_api/settings).
+    translate_langs: dict[str, bool] = {}
+    #: All original-language page text, content-addressed:
+    #: chunk_key (9 bytes; base64 at the JSON level) -> Markdown chunk.
+    #: Shared by every article.
+    chunks: dict[bytes, str] = {}
+    #: Machine translations: chunk hash -> lang -> translated Markdown
+    #: (a nested dict rather than tuple keys, which msgspec's JSON
+    #: serializer does not support). Also used for node titles (hash of
+    #: the title text).
+    trans: dict[bytes, dict[str, str]] = {}
+    #: User override patches per article and language:
+    #: f"{path}:{lang}" -> ordered patches (paths without leading slash).
+    patches: dict[str, list[Patch]] = {}
+
+
+def node_markdown(data: Data, node: Node) -> str | None:
+    """The node's original Markdown assembled from the chunk store.
+
+    None for category labels (chunks is None); an empty page gives "".
+    Hashes missing from the store (shouldn't happen) are skipped.
+    """
+    if node.chunks is None:
+        return None
+    return join_chunks(
+        [t for h in node.chunks if (t := data.chunks.get(h)) is not None]
+    )
 
 
 def prettify(slug: str) -> str:

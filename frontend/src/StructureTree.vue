@@ -1,7 +1,13 @@
 <script setup>
 // Recursive site-structure tree with drag-and-drop ordering (vue-draggable).
 // Nodes come from the server (GET /_api/pages via StructureEditor.vue) as
-// {slug, path, title, order, published, has_content, children}.
+// {slug, path, title, translated, order, published, has_content, language,
+// primary, children}. The row's flag (LangSelect) sets the node's primary
+// language (language; '' = inherit — dimmed, showing the resolved flag);
+// the setting covers the whole subtree.
+// With a `lang` prop (StructureEditor's language strip) the titles shown
+// are that language's; `translated` marks rows with an actual translation
+// (untranslated rows show the original title, dimmed).
 // Every node is real: a label whose title and slug are always editable
 // inline — the title saves while typing (and focusing it opens the page),
 // the slug commits on blur/Enter since it renames the path, moving the
@@ -24,12 +30,17 @@
 import { inject } from 'vue'
 import draggable from 'vuedraggable'
 import { slugify } from './slugify'
+import LangSelect from './LangSelect.vue'
 
 defineOptions({ name: 'StructureTree' })
 const props = defineProps({
   nodes: { type: Array, required: true },
   parentPath: { type: String, default: '' },
   depth: { type: Number, default: 0 },
+  // StructureEditor's selected language ('' = original). Only used for the
+  // untranslated-title styling here; the fetch and title edits live in the
+  // parent (handlers.titleInput posts the lang with the op).
+  lang: { type: String, default: '' },
 })
 
 const handlers = inject('structureHandlers')
@@ -126,8 +137,11 @@ function onEnd() {
           <template v-else>
             <input
               class="edit title-edit"
+              :class="{ untranslated: lang && !element.translated }"
               :value="element.title"
-              title="Label in the navigation — saves while typing; click opens the page"
+              :title="lang && !element.translated
+                ? 'No translation yet — showing the original; typing creates the translated title'
+                : 'Label in the navigation — saves while typing; click opens the page'"
               @input="handlers.titleInput(element, $event)"
               @focus="handlers.open(element.path)"
             />
@@ -140,6 +154,17 @@ function onEnd() {
               @change="handlers.commitSlug(element, $event)"
             />
             <span class="acts">
+              <span
+                class="row-lang"
+                :class="{ inherited: !element.language }"
+              ><LangSelect
+                :model-value="element.language"
+                :options="handlers.langOptions(element)"
+                :title="element.language
+                  ? `primary language: set on this page (subtree inherits)`
+                  : `primary language: inherited — set it here (subtree inherits)`"
+                @update:model-value="handlers.setLanguage(element, $event)"
+              /></span>
               <span v-if="!element.published" class="draft">draft</span>
               <button
                 v-if="element.has_content || !element.children.length"
@@ -158,6 +183,7 @@ function onEnd() {
           :nodes="element.children"
           :parent-path="element.path"
           :depth="depth + 1"
+          :lang="lang"
         />
       </div>
     </template>
@@ -223,7 +249,7 @@ body.tree-dragging .treelist {
    level, not across levels). */
 .row {
   display: grid;
-  grid-template-columns: 1.2em minmax(3rem, 1fr) 7rem 5rem;
+  grid-template-columns: 1.2em minmax(3rem, 1fr) 7rem auto;
   align-items: baseline;
   gap: 0.35rem;
   /* Vertical spacing widens the drop zones: the exposed top strip is the
@@ -274,6 +300,13 @@ body.tree-dragging .treelist {
   cursor: text;
 }
 
+/* With a language selected (StructureEditor's strip), rows without an
+   actual translation show the original title dimmed and italic. */
+.title-edit.untranslated {
+  color: var(--muted);
+  font-style: italic;
+}
+
 .slug-edit {
   font-family: var(--font-code);
 }
@@ -283,6 +316,20 @@ body.tree-dragging .treelist {
   align-items: baseline;
   gap: 0.25rem;
   justify-content: end;
+}
+
+/* Row language selector (LangSelect): the effective primary language's
+   flag; dimmed while the setting is inherited rather than set on the row. */
+.row-lang {
+  display: inline-flex;
+}
+
+.row-lang.inherited :deep(.lang-current) {
+  opacity: 0.45;
+}
+
+.row-lang.inherited:hover :deep(.lang-current) {
+  opacity: 0.85;
 }
 
 .draft {

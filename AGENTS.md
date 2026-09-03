@@ -12,6 +12,10 @@ Pagerite is a CMS. See `docs` for the full design and implementation details. Ke
 - `pagerite/` — Python backend package (hatchling build target).
   - `app.py` — FastAPI app and route registration.
   - `data.py` — msgspec Structs for the kanta database.
+  - `chunks.py` — block-level Markdown chunking and content-hash keys for the chunk stores (docs/migrate.md).
+  - `i18n.py` — language selection, translation assembly (chunks + patches) and translated-edit recording (user patches, per-language title overrides, refresh).
+  - `translate.py` — translator service protocol (msgspec structs), the connected-client `Dispatcher` (job pipeline, result validation) and pending/store core for the `/_translate/{key}` WebSocket (docs/localization.md); app.py only registers the route.
+  - `segments.py` — the translation round trip: fragments split into pure-prose wire segments (via markdown.make_md's verbatim parser; link- and formatting-carrying blocks stay whole, link/formatted texts inline, Markdown stripped) and translations spliced back by source offset, link/formatting markdown re-inserted at weight-mapped positions (docs/localization.md).
   - `migrations.py` — kanta migrations (`migrate_vN`); ALL schema/storage upgrades live here (raw state dict before struct decoding), never in the app lifespan: v1 moves legacy in-db file blobs to the on-disk store and rebuilds the legacy flat `pages` as the menu tree, v2 rewrites `/_f/{hash}.ext` image links to the extension-less form, backfills AVIF/WebP/JPEG derivatives on disk and drops the obsolete `version` field.
   - `markdown.py` — markdown-it-py renderer.
   - `views.py` — shared page layout and rendering; theme/user-font resolution across `THEME_DIRS` / `FONT_DIRS` (cwd, site, platform data roots, then built-in `pagerite/themes/`, see `docs/themes-and-assets.md`).
@@ -21,8 +25,11 @@ Pagerite is a CMS. See `docs` for the full design and implementation details. Ke
   - `main.js` — Vue editor app entry.
   - `analytics-main.js` — analytics page entry (mounts `AnalyticsView` at `/_a`).
   - `pagerite.js` — public page entry.
+  - `editorLang.js` + `LangSelect.vue` — the editor shell's shared language selection and its selector component (page + structure tabs; drives the page preview while the panel is open, via `swapdoc.setLangOverride`).
+  - `reconnect.js` — shared WebSocket pacing for all sockets (staggered connect slots, stuck-CONNECTING watchdog, exponential backoff): bursts and rapid retries trip the browser's WebSocket throttling.
   - `assets/` — base CSS, Pygments styles, fonts.
 - `scripts/devserver.py` — dev server with auto reload (the user mostly uses this; avoid running the server yourself, ask the user to test).
+- `scripts/translator.py` — Seed-X translator service client for the `/_translate/{key}` socket (reference client, runs in its own uv env via PEP 723); stays connected full time, unloads the model after 60 s idle and reloads on the next job.
 
 Server run by CLI entry point `uv run pagerite` (no auto reloads, build needed). Dev mode is `scripts/devserver.py` (auto reloads, no build needed).
 
@@ -53,5 +60,5 @@ Server run by CLI entry point `uv run pagerite` (no auto reloads, build needed).
 
 - Keep dependencies minimal; add via `uv add` and mention it.
 - The public URL space belongs to content (pretty slugs at root). Reserve only `/_` for the machinery (`/_api/`, `/_f/`, `/_assets/`), plus `/favicon.ico` from the build. Slugs are lowercase ASCII letters, digits, hyphens and underscores `[a-z0-9_-]` (the site editor filters input live via `slugify.js`, built on the `transliteration` npm package — unicode folds to ASCII, spaces become hyphens; an empty slug on a new page is derived from its title), may not begin with `_` or `.`, and such URLs are never looked up as content.
-- No auth in core code; the SSO/reverse proxy gates all of `/_api` (forward-auth) and owns `/auth/` (login/logout, session validation). Pages render identically for everyone; pagerite.js adds the editing UI only after the auth server validates the session.
+- No auth in core code; the SSO/reverse proxy gates all of `/_api` (forward-auth) and owns `/auth/` (login/logout, session validation). Pages render identically for everyone; pagerite.js adds the editing UI only after the auth server validates the session. The one keyed exception is `/_translate/{key}` (translator service; `Data.translate_keys`, see docs/localization.md).
 - Update the relevant MarkDown files when architecture, tooling, or conventions change.

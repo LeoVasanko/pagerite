@@ -1,5 +1,5 @@
 <script setup>
-// Tabbed shell for the four admin editors. The individual pens are shorthands
+// Tabbed shell for the five admin editors. The individual pens are shorthands
 // that open the shell on a given tab; once open, tabs switch instantly without
 // closing the panel. Tabs are kept alive so switching preserves state.
 import { onMounted, onUnmounted, provide, ref, watch } from 'vue'
@@ -7,6 +7,9 @@ import PageEditor from './PageEditor.vue'
 import BannerEditor from './BannerEditor.vue'
 import SiteEditor from './SiteEditor.vue'
 import StructureEditor from './StructureEditor.vue'
+import LocalizationEditor from './LocalizationEditor.vue'
+import { editorLang, pagePrimary } from './editorLang'
+import { loadPlain, setLangOverride } from './swapdoc'
 
 const props = defineProps({
   pagePath: { type: String, default: '' },
@@ -17,11 +20,37 @@ const emit = defineEmits(['close'])
 const currentPath = ref(props.pagePath)
 const activeMode = ref(props.initialMode)
 
-// Tab order: site-wide settings first (site, structure), then — after a
-// visual break — the per-page editors (article, banner).
+// The shared language selection (./editorLang, v-modeled by the tabs'
+// LangSelects) also drives the page preview: while the shell is open it
+// overrides the normal language preferences (?lang= / Accept-Language),
+// so the page renders in the language being edited; closing restores.
+// The primary selection pins by the CURRENT PAGE's own primary language
+// (pages may differ — Node.language is inherited down the tree).
+let pinned = false
+function pinPreviewLang() {
+  pinned = true
+  // '' pagePrimary = not yet learned: pin 'en', the server's final fallback
+  // (i18n.ORIGINAL_LANGUAGE).
+  setLangOverride(editorLang.value || pagePrimary.value || 'en')
+  loadPlain(currentPath.value)
+}
+function unpinPreviewLang() {
+  if (!pinned) return
+  pinned = false
+  setLangOverride(null)
+  loadPlain(currentPath.value)
+}
+watch(editorLang, () => { if (pinned) pinPreviewLang() })
+// The page's primary may be (re)learned while pinned on it (doc accept,
+// tree refresh, a language change on the row) — re-pin with the new code.
+watch(pagePrimary, () => { if (pinned && !editorLang.value) pinPreviewLang() })
+
+// Tab order: site-wide settings first (site, structure, localization), then
+// — after a visual break — the per-page editors (article, banner).
 const MODES = [
   { key: 'site', label: 'site', component: SiteEditor },
   { key: 'structure', label: 'structure', component: StructureEditor },
+  { key: 'localization', label: 'lang', component: LocalizationEditor },
   { key: 'page', label: 'article', component: PageEditor, breakBefore: true },
   { key: 'banner', label: 'banner', component: BannerEditor },
 ]
@@ -60,15 +89,27 @@ function onSwitchEvent(ev) {
 onMounted(() => {
   document.body.dataset.editorMode = activeMode.value
   addEventListener('pagerite:switch-editor', onSwitchEvent)
+  addEventListener('pagerite:editor-shown', pinPreviewLang)
+  addEventListener('pagerite:editor-hidden', unpinPreviewLang)
+  // The shell mounts visible (openEditor), so pin immediately. The site
+  // default primary language comes from the settings — it only fills the
+  // unknown; the page/structure tabs refine pagePrimary per page as they
+  // learn it (their knowledge is strictly better).
+  pinPreviewLang()
+  fetch('/_api/settings').then((r) => r.json()).then((s) => {
+    if (!pagePrimary.value) pagePrimary.value = s.primary_lang || 'en'
+  }).catch(() => { /* keep the fallback */ })
 })
 
 onUnmounted(() => {
   removeEventListener('pagerite:switch-editor', onSwitchEvent)
+  removeEventListener('pagerite:editor-shown', pinPreviewLang)
+  removeEventListener('pagerite:editor-hidden', unpinPreviewLang)
 })
 </script>
 
 <template>
-  <div class="editor-root overlay">
+  <div class="editor-root overlay" lang="en" dir="ltr">
     <header class="editor-tabs">
       <template v-for="m in MODES" :key="m.key">
         <span v-if="m.breakBefore" class="tab-break" />

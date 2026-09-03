@@ -7,9 +7,20 @@
 // real — a label with a title and slug, with content (landing page) or
 // without (category whose URL renders a placeholder page). The front page
 // is a top-level row with an empty slug, not the parent of the others.
-import { inject, onActivated, onMounted, onUnmounted, provide, ref, watch } from 'vue'
+//
+// Languages: the LangSelect switches which language the TITLES are shown
+// and edited in (rows without a translation show the original, dimmed) —
+// the selection is shared shell-wide (./editorLang) with the page editor
+// and the page preview. Translated title edits write a per-language
+// fragment (POST /_api/structure with lang); the structure itself —
+// slugs, order, hierarchy — is language-independent and always edits the
+// same tree.
+import { computed, inject, onActivated, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import StructureTree from './StructureTree.vue'
+import LangSelect from './LangSelect.vue'
 import { slugify } from './slugify'
+import { flagFor, langName } from './langs'
+import { editorLang, pagePrimary } from './editorLang'
 import { dropPageCache, loadPlain } from './swapdoc'
 
 const props = defineProps({
@@ -22,6 +33,50 @@ const shell = inject('editorShell', null)
 const path = ref('')
 const saveError = ref('')
 const tree = ref([])
+
+// The language the tree's titles are shown and edited in: "" = primary.
+const lang = editorLang
+const primaryLang = ref('en')
+const siteLangs = ref([])
+
+// The strip's options: the primary language first, then the configured
+// translation targets (the lang tab manages that set).
+const langOptions = computed(() =>
+  [primaryLang.value, ...siteLangs.value.filter((l) => l !== primaryLang.value)]
+    .map((code) => ({
+      tag: code === primaryLang.value ? '' : code,
+      code,
+      name: langName(code),
+      flag: flagFor(code),
+      primary: code === primaryLang.value,
+    })),
+)
+const currentLang = computed(
+  () => langOptions.value.find((o) => o.tag === lang.value) ?? langOptions.value[0],
+)
+
+// The selection is shared (./editorLang): a change re-fetches the tree's
+// titles in it (and EditorShell swaps the page preview into it).
+watch(lang, () => refreshPages())
+
+// Per-row primary language (Node.language, '' = inherit): the row's
+// dropdown lists "inherit" first (naming what it resolves to), then every
+// site language. Setting it on a section covers its whole subtree.
+const rowLangChoices = computed(() =>
+  [primaryLang.value, ...siteLangs.value.filter((l) => l !== primaryLang.value)]
+    .map((code) => ({ tag: code, code, name: langName(code), flag: flagFor(code), primary: false })),
+)
+function rowLangOptions(el) {
+  const resolved = el.primary || primaryLang.value
+  return [
+    { tag: '', code: '_inherit', name: `inherit (${langName(resolved)})`, flag: flagFor(resolved), primary: false },
+    ...rowLangChoices.value,
+  ]
+}
+
+async function setLanguage(node, tag) {
+  await postStructure({ path: node.path, language: tag })
+}
 
 function normPath(p) {
   return p.trim().replace(/^\/+|\/+$/g, '')
@@ -152,9 +207,22 @@ async function commitPending() {
 }
 
 // --- Site structure tree (drag-and-drop ordering/moving) ----------------
+function findNode(nodes, p) {
+  for (const n of nodes) {
+    if (n.path === p) return n
+    const found = findNode(n.children, p)
+    if (found) return found
+  }
+  return null
+}
+
 async function refreshPages() {
   try {
-    tree.value = await (await fetch('/_api/pages')).json()
+    const q = lang.value ? `?lang=${lang.value}` : ''
+    tree.value = await (await fetch(`/_api/pages${q}`)).json()
+    // The tree carries each node's resolved primary language: publish the
+    // current page's (the shell pins the preview by it on '' selection).
+    pagePrimary.value = findNode(tree.value, path.value)?.primary || 'en'
   } catch { /* list stays stale; not fatal */ }
 }
 
@@ -207,13 +275,15 @@ async function onReorder(parentPath, list, evt) {
 }
 
 // Inline title/slug editing: rows are always editable. Title saves while
-// typing (debounced); the slug commits on blur/Enter, since it renames
-// the path (moving the whole subtree with it).
+// typing (debounced) — in the selected language (a translation writes a
+// title fragment, the primary language the original); the slug commits on
+// blur/Enter, since it renames the path (moving the whole subtree with it).
+// Slugs are language-independent.
 function onTitleInput(node, ev) {
   const title = ev.target.value.trim()
   if (!title || title === node.title) return
   debounce(`title:${node.path}`, async () => {
-    await postStructure({ path: node.path, title })
+    await postStructure({ path: node.path, title, lang: lang.value })
   })
 }
 
@@ -266,12 +336,19 @@ provide('structureHandlers', {
   commitPending,
   discardPending,
   newPage,
+  langOptions: rowLangOptions,
+  setLanguage,
 })
 
 onMounted(() => {
   path.value = normPath(props.pagePath)
   refreshPages()
   addEventListener('pagerite:editor-shown', onEditorShown)
+  // The language strip: site primary + configured targets.
+  fetch('/_api/settings').then((r) => r.json()).then((s) => {
+    primaryLang.value = s.primary_lang || 'en'
+    siteLangs.value = s.translate_langs || []
+  }).catch(() => { /* no strip */ })
 })
 
 onUnmounted(() => {
@@ -283,8 +360,15 @@ onUnmounted(() => {
 <template>
   <div class="structure-editor">
     <div v-if="saveError">{{ saveError }}</div>
+    <div v-if="langOptions.length > 1" class="block lang-block">
+      <div><LangSelect v-model="lang" :options="langOptions" /></div>
+      <small v-if="lang" class="muted">
+        viewing {{ currentLang.name }} titles — dimmed rows are untranslated
+        (shown in the primary language); slugs never translate
+      </small>
+    </div>
     <section class="block structure">
-      <StructureTree :nodes="tree" />
+      <StructureTree :nodes="tree" :lang="lang" />
     </section>
   </div>
 </template>
@@ -308,5 +392,11 @@ onUnmounted(() => {
   flex: 1;
   overflow-y: auto;
   min-height: 0;
+}
+
+/* The language selector is LangSelect.vue — its styles live there. */
+
+.muted {
+  color: var(--muted);
 }
 </style>

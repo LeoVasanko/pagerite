@@ -9,6 +9,7 @@ from pathlib import Path
 
 import httpx
 from fastapi_vue import server
+from fastapi_vue.hostutil import parse_endpoints
 
 DEFAULT_PORT = 8100
 DEVMODE = os.getenv("PAGERITE_DEV") == "1"
@@ -96,6 +97,12 @@ def main() -> None:
     # Export the hostname before pagerite.app is imported: it derives the
     # data directory and public origin from it at import time.
     os.environ["PAGERITE_HOSTNAME"] = args.hostname
+    # And the listen port: the app prints the translator WS URL at startup,
+    # which for localhost includes the actual port.
+    for endpoint in parse_endpoints(args.listen, DEFAULT_PORT):
+        if "port" in endpoint:
+            os.environ["PAGERITE_PORT"] = str(endpoint["port"])
+            break
     if args.dbip:
         _download_dbip()
     server.run(

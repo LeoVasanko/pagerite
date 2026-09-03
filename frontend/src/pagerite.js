@@ -6,6 +6,7 @@
 // support from the article itself and are re-applied after each swap.
 import { OverlayScrollbars } from "overlayscrollbars";
 import "overlayscrollbars/overlayscrollbars.css";
+import { reconnectPolicy, socketSlot, watchConnecting } from "./reconnect";
 
 (() => {
   // Overlay scrollbars: the native kind reserves a strip of layout (or
@@ -33,6 +34,54 @@ import "overlayscrollbars/overlayscrollbars.css";
       }
     });
   }
+
+  // --- Language override (?lang=) ---------------------------------------
+  // /page?lang=fi serves a translated, indexable version (each language is
+  // its own canonical). The chosen language sticks for the session of
+  // clicks: the server replicates ?lang= onto the navigation links it
+  // renders (nav, sidebar, cards — in-article links are content and stay
+  // as authored), and pageUrl adds it to internal fetches that lack one.
+  // The address bar keeps the pretty URL: the query is stripped on load
+  // and never pushed into history. A full refresh or a shared link resets
+  // to automatic selection (the browser's own Accept-Language — every
+  // plain fetch carries it by default). See docs/localization.md.
+  const langParam = new URL(location.href).searchParams.get("lang");
+  if (langParam) {
+    const url = new URL(location.href);
+    url.searchParams.delete("lang");
+    history.replaceState(history.state, "", url);
+  }
+  // The session language. While the editor panel is open, its language
+  // selection overrides the normal preference (swapdoc.setLangOverride):
+  // internal fetches and prefetches follow it until the panel closes and
+  // the override clears (null restores the initial ?lang=, if any).
+  let sessionLang = langParam;
+  addEventListener("pagerite:session-lang", (ev) => {
+    sessionLang = ev.detail?.lang || langParam;
+  });
+  // An internal URL as fetched: carries the session's ?lang= unless the
+  // link already pins a language of its own. With no ?lang= on the initial
+  // load nothing is ever added.
+  const pageUrl = (url) => {
+    const u = new URL(url, location.href);
+    if (sessionLang && u.origin === location.origin && !u.searchParams.has("lang")) {
+      u.searchParams.set("lang", sessionLang);
+    }
+    return u;
+  };
+  // The in-memory page cache is keyed by path + query: the same pathname
+  // holds different HTML for each language version.
+  const rawKey = (url) => {
+    const u = new URL(url, location.href);
+    return u.pathname + u.search;
+  };
+  const cacheKey = (url) => rawKey(pageUrl(url));
+  // What goes into the address bar and history: the pretty URL, no ?lang=.
+  const prettyUrl = (url) => {
+    const u = pageUrl(url);
+    u.searchParams.delete("lang");
+    return u;
+  };
 
   // Regions every page has. #sidebar is NOT among them: it is omitted
   // entirely when the section has no sub-navigation, and handled below.
@@ -352,9 +401,12 @@ import "overlayscrollbars/overlayscrollbars.css";
   // received it as the document (re-fetching would be redundant, and
   // browser heuristics may send it without if-none-match, defeating the
   // conditional request); it enters the cache when navigated to.
-  const pageCache = new Map(); // pathname -> HTML text
+  const pageCache = new Map(); // rawKey/cacheKey(url) -> HTML text
   addEventListener("pagerite:page-fetched", (ev) => {
-    pageCache.set(new URL(ev.detail.url, location.href).pathname, ev.detail.html);
+    // Key by the URL as announced, exactly as the editor fetched it: a
+    // copy pinned to a language (?lang=) caches under its own key, where
+    // navigation with the same session language finds it.
+    pageCache.set(rawKey(ev.detail.url), ev.detail.html);
   });
 
   // Editors mutate site-wide state (theme, structure, headings, banners),
@@ -373,21 +425,22 @@ import "overlayscrollbars/overlayscrollbars.css";
   });
 
   function preload() {
-    const urls = new Set();
+    const urls = new Map(); // cache key -> URL, deduped (hashes collapse)
     for (const a of document.querySelectorAll(
       '#nav a[href^="/"], #sidebar a[href^="/"], #main a[href^="/"]',
     )) {
-      urls.add(a.pathname);
+      const u = pageUrl(a.href);
+      urls.set(rawKey(u), u);
     }
-    for (const url of urls) {
-      if (pageCache.has(url)) continue;
+    for (const [key, u] of urls) {
+      if (pageCache.has(key)) continue;
       // x-pagerite-preload: idle cache warm-up, not a page view — the
       // server excludes these GETs from analytics (the navigation message
       // sent on actual navigation does the counting).
-      fetch(url, { headers: { "x-pagerite-preload": "1" } })
+      fetch(u, { headers: { "x-pagerite-preload": "1" } })
         .then((r) => (r.ok && (r.headers.get("content-type") || "").includes("text/html")
           ? r.text() : ""))
-        .then((html) => { if (html) pageCache.set(url, html); })
+        .then((html) => { if (html) pageCache.set(key, html); })
         .catch(() => {});
     }
   }
@@ -506,8 +559,12 @@ import "overlayscrollbars/overlayscrollbars.css";
   // failing in the background.
   let ws = null;
   const wsQueue = [];
-  let wsReconnectMs = 1000;
-  let wsNotBefore = 0;
+  const wsPolicy = reconnectPolicy({ min: 1000 });
+  // The first attempt is staggered too: page load opens several sockets at
+  // once (Vite's HMR socket, the editors), and the burst trips the browser's
+  // WebSocket throttling (sockets then sit "pending" for minutes).
+  let wsNotBefore = Date.now() + socketSlot();
+  let wsWatchdog = null;
 
   function activityWs() {
     if (ws || Date.now() < wsNotBefore) return;
@@ -518,15 +575,16 @@ import "overlayscrollbars/overlayscrollbars.css";
     } catch {
       return;
     }
+    clearTimeout(wsWatchdog);
+    wsWatchdog = watchConnecting(ws, "activity");
     ws.onopen = () => {
-      wsReconnectMs = 1000;
+      wsPolicy.opened();
       for (const msg of wsQueue.splice(0)) ws.send(JSON.stringify(msg));
     };
     ws.onclose = () => {
       ws = null;
       // No timer here: the next user activity retries, after the backoff.
-      wsNotBefore = Date.now() + wsReconnectMs;
-      wsReconnectMs = Math.min(wsReconnectMs * 2, 30_000);
+      wsNotBefore = Date.now() + wsPolicy.closed();
     };
     ws.onerror = () => ws.close();
   }
@@ -697,12 +755,12 @@ import "overlayscrollbars/overlayscrollbars.css";
     teardownAnalytics();
     let doc;
     let finalUrl = url;
-    const cached = !editing && pageCache.get(new URL(url, location.href).pathname);
+    const cached = !editing && pageCache.get(cacheKey(url));
     if (cached) {
       doc = new DOMParser().parseFromString(cached, "text/html");
     } else {
       try {
-        const res = await fetch(url);
+        const res = await fetch(pageUrl(url));
         const type = res.headers.get("content-type") || "";
         if (!res.ok || !type.includes("text/html")) throw new Error("not a page");
         // Reflect any redirect the server issued.
@@ -710,15 +768,15 @@ import "overlayscrollbars/overlayscrollbars.css";
         const html = await res.text();
         // Populate the cache too, so returning here (back/forward, or a
         // self-link in the nav) is served from memory.
-        pageCache.set(new URL(finalUrl, location.href).pathname, html);
+        pageCache.set(cacheKey(finalUrl), html);
         doc = new DOMParser().parseFromString(html, "text/html");
       } catch {
-        location.href = url; // fall back to a normal navigation
+        location.href = pageUrl(url); // fall back to a normal navigation
         return false;
       }
     }
     if (REGIONS.some((id) => !doc.getElementById(id))) {
-      location.href = url;
+      location.href = pageUrl(url);
       return false;
     }
     const doit = () => {
@@ -774,6 +832,11 @@ import "overlayscrollbars/overlayscrollbars.css";
       // stylesheet after the server-rendered tag.
       const userStyle = document.getElementById("pagerite-user");
       if (userStyle) document.head.appendChild(userStyle);
+      // The served language rides on <html> (lang + dir, rtl for e.g.
+      // Arabic) — follow the swapped page (the editor panel carries its
+      // own lang="en" dir="ltr", so it is unaffected).
+      document.documentElement.lang = doc.documentElement.lang;
+      document.documentElement.dir = doc.documentElement.dir;
       document.title = doc.title;
       // Banners may contain scripts (canvas etc.), content pages may too.
       runScripts(document.getElementById("page-banner"));
@@ -798,7 +861,7 @@ import "overlayscrollbars/overlayscrollbars.css";
       doit();
     }
     currentPath = new URL(finalUrl, location.href).pathname;
-    if (push) history.pushState({ idx: ++historyIdx }, "", finalUrl);
+    if (push) history.pushState({ idx: ++historyIdx }, "", prettyUrl(finalUrl));
     // The open editor follows the URL: retarget the per-page tabs to the
     // navigated-to page (unsaved text of the previous page is discarded —
     // the article it previewed into is gone).

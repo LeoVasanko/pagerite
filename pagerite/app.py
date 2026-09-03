@@ -15,9 +15,11 @@ walking the tree (``resolve``), moves are slot detach/attach
 import asyncio
 import gzip
 import ipaddress
+import logging
 import mimetypes
 import os
 import re
+import secrets
 import shutil
 import socket
 import tempfile
@@ -47,18 +49,22 @@ from mediapreview import dispatch
 from pydantic import BaseModel
 from zstandard import ZstdCompressor
 
-from pagerite import analytics, seed, views
+from pagerite import analytics, i18n, seed, translate, views
 from pagerite.__main__ import DEVMODE
+from pagerite.chunks import store_chunks
 from pagerite.data import (
     Data,
     Node,
     append_order,
     find_slot,
+    node_markdown,
     prettify,
     resolve,
     sorted_nodes,
 )
 from pagerite.markdown import render, toggle_task
+
+logger = logging.getLogger(__name__)
 
 # Site identity: the hostname comes from the CLI (first positional argument,
 # exported as PAGERITE_HOSTNAME) and names the per-site data directory
@@ -255,7 +261,7 @@ def _remove_page_content(menu: dict[str, Node], path: str) -> None:
     if node is None:
         return
     if node.children:
-        node.content = None
+        node.chunks = None
         node.modified = datetime.now(UTC)
     else:
         del slot[0][slot[1]]
@@ -271,19 +277,38 @@ def _seed(data: Data) -> None:
         node = _ensure(data.menu, path)
         node.title = title
         # Empty markdown means a pure category label (e.g. "showcase",
-        # seeded only to carry a banner design): leave content as None so
+        # seeded only to carry a banner design): leave chunks as None so
         # the node renders the placeholder and nav points at its children.
         if markdown:
-            node.content = markdown
+            node.chunks = store_chunks(data.chunks, markdown)
         node.banner = banner
         node.banner_design = design
         node.order = order
+
+
+#: Translator key format: 12 lowercase alphanumeric characters — not
+#: brute-forceable over a WebSocket handshake, still human-manageable.
+_KEY_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+
+@kanta.bootstrap
+def _translator_defaults(data: Data) -> None:
+    """Translator defaults on database creation: the first service key and
+    the wanted target languages (Spanish and Chinese — English is the
+    original language, never a translation target).
+
+    Keys are a dict (key -> display name) with the future reservation that
+    multiple keys could be managed (e.g. via a web interface)."""
+    key = "".join(secrets.choice(_KEY_ALPHABET) for _ in range(12))
+    data.translate_keys[key] = "default"
+    data.translate_langs = {"es": True, "zh": True}
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Open the database (migrations run inside kanta.open), load assets, load GeoIP."""
     await kanta.open()
+    translate.log_service_urls(data.translate_keys, HOSTNAME)
     await asyncio.to_thread(file_store.load)
     await frontend.load()
     # Decompress/open the DB-IP MMDB once at startup.  Lookups are then
@@ -381,12 +406,24 @@ class FileStore:
 file_store = FileStore(FILES_DIR)
 
 
-def _render_html(kind: str, path: str, base_url: str) -> str:
+def _render_html(kind: str, path: str, base_url: str, lang: str = i18n.ORIGINAL_LANGUAGE, link_lang: str = "") -> str:
     """Render one of the generated pages (see _html_response)."""
     if kind == "page":
-        return views.render_page(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html, base_url, transition=data.transition)
+        # A selected language without an actual translation renders the
+        # original (translation is None; see docs/localization.md).
+        original = i18n.primary_lang(data.menu, path)
+        translation = i18n.get_translation(data, path, lang) if lang != original else None
+        return views.render_page(data.menu, data, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html, base_url, transition=data.transition, lang=lang, translation=translation, link_lang=link_lang)
     if kind == "category":
-        return views.render_category(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html, transition=data.transition)
+        # A category has no Markdown of its own; only the title map
+        # localizes (heading, navigation, card text).
+        original = i18n.primary_lang(data.menu, path)
+        translation = (
+            i18n.Translation(titles=i18n.title_map(data, lang))
+            if lang != original
+            else None
+        )
+        return views.render_category(data.menu, data, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html, transition=data.transition, lang=lang, translation=translation, link_lang=link_lang)
     if kind == "not-found":
         return views.render_not_found(data.menu, path, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html, transition=data.transition)
     return views.render_analytics(data.menu, data.brand, data.custom_css, data.theme, data.favicon, data.brand_html, transition=data.transition)
@@ -399,20 +436,26 @@ _render_gen = 0
 
 
 def _invalidate_pages() -> None:
-    """Drop cached page bodies and bump the render generation (ETags)."""
+    """Drop cached page bodies and bump the render generation (ETags);
+    any content change also re-runs translation dispatch."""
     global _render_gen
     _render_gen += 1
     _cached_body.cache_clear()
+    dispatcher.schedule()
 
 
 @lru_cache(maxsize=128)
-def _cached_body(kind: str, path: str, base_url: str, zstd: bool) -> bytes:
+def _cached_body(kind: str, path: str, base_url: str, zstd: bool, lang: str = i18n.ORIGINAL_LANGUAGE, link_lang: str = "") -> bytes:
     """Rendered page body; cleared by _invalidate_pages on any
-    content/settings change. base_url feeds the social meta URLs and zstd
+    content/settings change. base_url feeds the social meta URLs, zstd
     selects the stored encoding (both variants are cached rather than
-    re-compressed).
+    re-compressed) and lang the selected language (not the raw
+    Accept-Language header, which would blow up the cache key space).
+    link_lang is the ?lang= override replicated onto the navigation links:
+    a query render and a header-selected render of the same language differ
+    in their links, so they are cached separately.
     """
-    body = _render_html(kind, path, base_url).encode()
+    body = _render_html(kind, path, base_url, lang, link_lang).encode()
     return _zstd.compress(body) if zstd else body
 
 
@@ -423,6 +466,8 @@ def _html_response(
     status_code: int = 200,
     headers: dict | None = None,
     etag: bool = False,
+    lang: str = i18n.ORIGINAL_LANGUAGE,
+    link_lang: str = "",
 ) -> Response:
     """Response for a generated page, zstd-compressed when the client
     accepts it (no gzip fallback).
@@ -444,14 +489,15 @@ def _html_response(
     # localhost (varying ports) fall back to the request's own base URL.
     base_url = SITE_URL or str(request.base_url).rstrip("/")
     if DEVMODE:
-        identity = _render_html(kind, path, base_url).encode()
+        identity = _render_html(kind, path, base_url, lang, link_lang).encode()
         body = _zstd.compress(identity) if zstd else identity
     else:
-        identity = _cached_body(kind, path, base_url, False)
-        body = _cached_body(kind, path, base_url, True) if zstd else identity
+        identity = _cached_body(kind, path, base_url, False, lang, link_lang)
+        body = _cached_body(kind, path, base_url, True, lang, link_lang) if zstd else identity
     h = dict(headers or {})
-    if zstd:
-        h["vary"] = "accept-encoding"
+    # Content varies by language (Accept-Language selects a translation)
+    # and by encoding; keep caches from mixing either representation.
+    h["vary"] = "accept-language" + (", accept-encoding" if zstd else "")
     if etag:
         tag = f'"{blake3.blake3(identity).hexdigest()[:32]}"'
         h["etag"] = tag
@@ -472,32 +518,45 @@ class PageIn(BaseModel):
 
 
 @app.get("/_api/pages")
-async def list_pages() -> list[dict]:
+async def list_pages(lang: str | None = None) -> list[dict]:
     """The site tree for the structure editor (all nodes, drafts included).
 
-    Nested by slug; each node carries its full path, menu order and flags.
+    Nested by slug; each node carries its full path, menu order, flags and
+    language settings (``language`` is the node's own primary-language
+    setting, "" = inherit; ``primary`` is the resolved effective one).
+    With a ``?lang=`` translation, titles come out in that language where a
+    translation exists (``translated`` flags it — true trivially for rows
+    whose primary language IS the selected one; other rows fall back to
+    the original title, dimmed) — the structure itself (slugs, order,
+    hierarchy) is language-independent.
     """
+    tag = i18n.base_tag(lang or "")
+    titles = i18n.title_map(data, tag) if tag else {}
 
-    def dump(nodes: dict[str, Node], prefix: str) -> list[dict]:
+    def dump(nodes: dict[str, Node], prefix: str, inherited: str) -> list[dict]:
         out = []
         for slug, node in sorted_nodes(nodes):
             path = f"{prefix}/{slug}" if prefix else slug
+            primary = node.language or inherited
             out.append({
                 "slug": slug,
                 "path": path,
-                "title": node.title,
+                "title": titles.get(path) or node.title,
+                "translated": path in titles or (bool(tag) and primary == tag),
                 "order": node.order,
                 "published": node.published,
-                "has_content": node.content is not None,
-                "children": dump(node.children, path),
+                "has_content": node.chunks is not None,
+                "language": node.language,
+                "primary": primary,
+                "children": dump(node.children, path, primary),
             })
         return out
 
-    return dump(data.menu, "")
+    return dump(data.menu, "", i18n.ORIGINAL_LANGUAGE)
 
 
 @app.put("/_api/pages/{path:path}", status_code=204)
-async def save_page(path: str, page: PageIn) -> None:
+async def save_page(path: str, page: PageIn, lang: str | None = None) -> None:
     """Create or replace the page at a slug path ("" or "/" = front page).
 
     Missing ancestors are created as content-less category labels. Giving
@@ -505,13 +564,31 @@ async def save_page(path: str, page: PageIn) -> None:
     stripping) creates an empty page that renders with just its title —
     saving never deletes; use DELETE to remove a page (the page editor
     issues DELETE when you save empty text).
+
+    With a ``?lang=`` query (a translation, not the primary language) the
+    save is a translated-view edit (docs/localization.md): the markdown is
+    diffed against the currently served hybrid and the minimal diff is
+    appended as a Patch under ``patches[f"{path}:{lang}"]`` — node.chunks
+    and the original-language fields (title, published, banner) stay
+    untouched.
     """
     path = path.strip("/")
     _check_reserved(path)
+    lang = i18n.base_tag(lang or "")
+    if lang and lang != i18n.primary_lang(data.menu, path):
+        chain = resolve(data.menu, path)
+        node = chain[-1] if chain else None
+        if node is None or node.chunks is None:
+            raise HTTPException(404, "no such page")
+        with kanta.transaction("save translation", extra=path):
+            # Patches alone make the translated version exist.
+            if i18n.add_patch(data, node, path, lang, page.markdown):
+                _invalidate_pages()
+        return
     with kanta.transaction("save page", extra=path):
         node = _ensure(data.menu, path)
         node.title = page.title
-        node.content = page.markdown
+        node.chunks = store_chunks(data.chunks, page.markdown)
         node.published = page.published
         if page.banner is not None:
             node.banner = page.banner
@@ -529,12 +606,24 @@ class StructureOp(BaseModel):
     just the top-level node with slug "": renaming it away leaves no front
     page ("/" then redirects to the first nav item), and any childless
     top-level node can take the empty slug to become the front page.
+
+    With `lang` (a translation, not the node's primary language) a `title`
+    edit writes a per-language title fragment instead of the original — the
+    same storage as machine title translations (docs/localization.md);
+    sending the original's text removes the override. Structural fields are
+    not combinable with a translated title edit.
+
+    `language` sets the node's primary language (a BCP-47 base tag; "" =
+    inherit from the nearest ancestor, the front page last, site default
+    "en" final — Node.language), inherited by the whole subtree.
     """
 
     path: str
     order: float | None = None
     move_to: str | None = None
     title: str | None = None
+    lang: str | None = None
+    language: str | None = None
 
 
 @app.post("/_api/structure", status_code=204)
@@ -545,6 +634,24 @@ async def update_structure(op: StructureOp) -> None:
     if chain is None:
         raise HTTPException(404, "no such page")
     node = chain[-1]
+    lang = i18n.base_tag(op.lang or "")
+    if op.language is not None:
+        # Primary-language setting (inherited by the subtree): reselects
+        # what "the original" means for the node — its language is part of
+        # every render, so a change invalidates everywhere.
+        language = i18n.base_tag(op.language)
+        with kanta.transaction("set page language", extra=path):
+            if language != node.language:
+                node.language = language
+                _invalidate_pages()
+        return
+    if op.title is not None and lang and lang != i18n.primary_lang(data.menu, path):
+        # Translated title (i18n.set_title_translation): original title,
+        # slugs and hierarchy stay untouched.
+        with kanta.transaction("translate title", extra=path):
+            if i18n.set_title_translation(data, node, lang, op.title):
+                _invalidate_pages()
+        return
     target = op.move_to.strip("/") if op.move_to is not None else None
     if target is not None and target != path:
         _check_reserved(target)
@@ -584,7 +691,8 @@ async def update_structure(op: StructureOp) -> None:
 async def get_settings() -> dict:
     """Site-wide settings (brand, theme, custom CSS and favicon URL), plus
     the themes, banner designs and user fonts available on disk for the
-    selectors."""
+    selectors, the translator service keys and the wanted translation
+    languages (for the /_translate socket)."""
     return {
         "brand": data.brand,
         "brand_html": data.brand_html,
@@ -596,6 +704,11 @@ async def get_settings() -> dict:
         "fonts": views._user_fonts(),
         "transition": data.transition,
         "transitions": views._transition_names(),
+        "translate_keys": data.translate_keys,
+        # The site default primary language: the front page's resolved
+        # setting (every page may override it, inherited down the tree).
+        "primary_lang": i18n.primary_lang(data.menu, ""),
+        "translate_langs": sorted(data.translate_langs),
     }
 
 
@@ -607,6 +720,7 @@ class SettingsIn(BaseModel):
     custom_css: str
     brand_html: str = ""
     transition: str = "cube"
+    translate_langs: list[str] | None = None  # None keeps the current set
 
 
 @app.put("/_api/settings", status_code=204)
@@ -618,7 +732,32 @@ async def put_settings(settings: SettingsIn) -> None:
         data.theme = settings.theme
         data.custom_css = settings.custom_css
         data.transition = settings.transition
+        if settings.translate_langs is not None:
+            # Any language may be a target — including the site default
+            # (an article in another language can be translated INTO it);
+            # a node's own primary is excluded per article, not here.
+            data.translate_langs = {
+                tag: True
+                for lang in settings.translate_langs
+                if (tag := i18n.base_tag(lang))
+            }
         _invalidate_pages()
+
+
+@app.delete("/_api/translations", status_code=204)
+async def delete_translations() -> None:
+    """Drop all machine translations (Data.trans) so the dispatcher
+    re-translates everything from scratch (a "refresh translations" action:
+    the invalidation hook re-offers every fragment to connected
+    translators). User patches are kept; the availability index
+    (node.langs) is rebuilt from them — patches alone still make a language
+    exist on a page."""
+    with kanta.transaction("refresh translations"):
+        i18n.clear_translations(data)
+        _invalidate_pages()
+    # Fragments rejected this run (segment validation) stay skipped no
+    # longer: a refresh is precisely the "another chance" for them.
+    dispatcher.validation_failures.clear()
 
 
 @app.put("/_api/settings/favicon")
@@ -689,13 +828,15 @@ async def toggle_task_endpoint(body: ToggleTaskIn) -> dict[str, str]:
         return {"markdown": new_markdown}
     chain = resolve(data.menu, path)
     node = chain[-1] if chain else None
-    if node is None or node.content is None:
+    if node is None or node.chunks is None:
         raise HTTPException(404, "no such page")
-    new_markdown = toggle_task(node.content, body.index)
+    new_markdown = toggle_task(node_markdown(data, node) or "", body.index)
     if new_markdown is None:
         raise HTTPException(400, "invalid task index")
     with kanta.transaction("toggle task", extra=path):
-        node.content = new_markdown
+        # Re-chunk like any save: only the chunk containing the toggled
+        # checkbox gets a new hash, the rest keep theirs.
+        node.chunks = store_chunks(data.chunks, new_markdown)
         node.modified = datetime.now(UTC)
         _invalidate_pages()
     return {"markdown": new_markdown}
@@ -925,11 +1066,29 @@ async def delete_page(path: str) -> None:
         raise HTTPException(404, "no such page")
     with kanta.transaction("delete page", extra=path):
         if node.children:
-            node.content = None
+            node.chunks = None
             node.modified = datetime.now(UTC)
         else:
             del slot[0][slot[1]]
         _invalidate_pages()
+
+
+# WebSocket API for external translation services (not under /_api: it is keyed
+# with Data.translate_keys instead of the SSO forward-auth). The dispatcher —
+# protocol, connected clients and the job pipeline — lives in translate.py.
+dispatcher = translate.Dispatcher(data, kanta, _invalidate_pages)
+
+
+@app.websocket("/_translate/{clientkey}")
+async def translate_ws(ws: WebSocket, clientkey: str) -> None:
+    """Translator service channel (docs/localization.md).
+
+    Deliberately NOT under /_api/: the external forward-auth is skipped;
+    the server-generated client key in the path is the access control
+    (``Data.translate_keys``: key -> display name; the first is generated
+    at bootstrap, all are shown in the admin's /_api/settings).
+    """
+    await dispatcher.handle_ws(ws, clientkey)
 
 
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
@@ -1248,15 +1407,25 @@ async def editor_ws(ws: WebSocket) -> None:
     """Editor session: open pages, render previews, save — over one socket.
 
     Stateless protocol (each message carries the path):
-      <- {"type": "open", "path"}
+      <- {"type": "open", "path", "lang"?}
       -> {"type": "doc", "path", "exists", "title", "markdown", "published",
-          "banner", "banner_design"}
+          "banner", "banner_design", "lang", "primary_lang", "langs",
+          "translate_langs"}
       <- {"type": "render", "path", "markdown"}
       -> {"type": "html", "path", "html"}
       <- {"type": "save", "path", "title"?, "markdown"?, "published"?,
-          "banner"?, "banner_design"?, "move_from"?}   (absent fields keep
-          their old values; move_from: rename/move a page, subtree included)
+          "banner"?, "banner_design"?, "move_from"?, "lang"?, "base"?}
+          (absent fields keep their old values; move_from: rename/move a
+          page, subtree included)
       -> {"type": "saved", "path"} | {"type": "error", "detail"}
+
+    With "lang" (a translation, not the primary language), open returns the
+    effective hybrid Markdown and title for that language plus the language
+    metadata the picker's UI needs; save diffs the submitted Markdown
+    against "base" (the editor's shadow copy of the hybrid it started from
+    — absent: the current hybrid) and stores it as a user Patch, and a
+    changed title becomes a fragment in Data.trans — node.chunks and the
+    other fields stay untouched (docs/localization.md).
     """
     await ws.accept()
     try:
@@ -1272,12 +1441,29 @@ async def editor_ws(ws: WebSocket) -> None:
                 case "open":
                     chain = resolve(data.menu, path)
                     node = chain[-1] if chain else None
+                    # The article's primary language: its own setting,
+                    # inherited down the tree ("en" final fallback).
+                    node_lang = i18n.primary_lang(data.menu, path)
+                    lang = i18n.base_tag(str(msg.get("lang") or ""))
+                    if lang == node_lang:
+                        lang = ""
+                    markdown = ""
+                    title = node.title if node else ""
+                    if node is not None:
+                        markdown = node_markdown(data, node) or ""
+                        if lang and node.chunks is not None:
+                            # Translation view: the effective (hybrid)
+                            # Markdown and title for that language —
+                            # machine fragments + user patches over the
+                            # original (docs/localization.md editor flow).
+                            markdown = i18n.hybrid_markdown(data, node, path, lang)
+                            title = i18n.title_map(data, lang).get(path) or title
                     await ws.send_json({
                         "type": "doc",
                         "path": path,
                         "exists": node is not None,
-                        "title": node.title if node else "",
-                        "markdown": node.content if node and node.content is not None else "",
+                        "title": title,
+                        "markdown": markdown,
                         "published": node.published if node else True,
                         "banner": node.banner if node else "",
                         # Own banner design setting: null = inherit,
@@ -1300,6 +1486,15 @@ async def editor_ws(ws: WebSocket) -> None:
                             if src is not None
                             else views.theme_banner_design(data.theme)
                         ),
+                        # Language context for the editor's picker: the
+                        # language this Markdown represents ("" = primary),
+                        # the page's own primary language, the translations
+                        # this page already has, and the site-wide
+                        # configured target languages.
+                        "lang": lang,
+                        "primary_lang": node_lang,
+                        "langs": sorted(node.langs) if node else [],
+                        "translate_langs": sorted(data.translate_langs),
                     })
                 case "render":
                     markdown = msg.get("markdown", "")
@@ -1325,6 +1520,8 @@ async def editor_ws(ws: WebSocket) -> None:
                     })
                 case "save":
                     move_from = (msg.get("move_from") or path).strip("/")
+                    lang = i18n.base_tag(str(msg.get("lang") or ""))
+                    translated = bool(lang and lang != i18n.primary_lang(data.menu, move_from))
                     try:
                         _check_reserved(move_from)
                     except HTTPException:
@@ -1358,6 +1555,19 @@ async def editor_ws(ws: WebSocket) -> None:
                                 "detail": "target path exists",
                             })
                             continue
+                    if translated and (move_from != path or old is None or old.chunks is None):
+                        # A translated-view save patches an existing
+                        # original; it cannot create or move pages.
+                        await ws.send_json({"type": "error", "detail": "no such page"})
+                        continue
+                    if translated and "markdown" in msg and not msg["markdown"].strip():
+                        # Saving never deletes; an emptied translation would
+                        # render as a blank page in that language.
+                        await ws.send_json({
+                            "type": "error",
+                            "detail": "a translation cannot be emptied",
+                        })
+                        continue
                     with kanta.transaction("editor save", extra=path):
                         if move_from != path:
                             same_menu = (
@@ -1375,21 +1585,43 @@ async def editor_ws(ws: WebSocket) -> None:
                             tnodes[tslug] = node
                         else:
                             node = old if old is not None else _ensure(data.menu, path)
-                        if "markdown" in msg:
-                            # Saving never deletes; empty markdown is an
-                            # empty page. Deletion is an explicit choice by
-                            # the page editor (REST DELETE).
-                            node.content = msg["markdown"]
-                        if "title" in msg:
-                            node.title = msg["title"]
-                        if "published" in msg:
-                            node.published = bool(msg["published"])
-                        if "banner" in msg:
-                            node.banner = msg["banner"]
-                        if "banner_design" in msg:
-                            node.banner_design = msg["banner_design"]
-                        node.modified = datetime.now(UTC)
-                        _invalidate_pages()
+                        if translated:
+                            # node.chunks and the original-language fields
+                            # stay untouched: the markdown diff (against the
+                            # editor's shadow "base" — the hybrid it started
+                            # from; absent: the current hybrid) is appended
+                            # as a Patch, a changed title becomes a
+                            # per-language title override (i18n).
+                            changed = False
+                            if "markdown" in msg:
+                                base = msg.get("base")
+                                changed = i18n.add_patch(
+                                    data, node, path, lang, msg["markdown"],
+                                    base=base if isinstance(base, str) else None,
+                                )
+                            if "title" in msg and node.title:
+                                changed = (
+                                    i18n.set_title_translation(data, node, lang, msg["title"])
+                                    or changed
+                                )
+                            if changed:
+                                _invalidate_pages()
+                        else:
+                            if "markdown" in msg:
+                                # Saving never deletes; empty markdown is an
+                                # empty page. Deletion is an explicit choice
+                                # by the page editor (REST DELETE).
+                                node.chunks = store_chunks(data.chunks, msg["markdown"])
+                            if "title" in msg:
+                                node.title = msg["title"]
+                            if "published" in msg:
+                                node.published = bool(msg["published"])
+                            if "banner" in msg:
+                                node.banner = msg["banner"]
+                            if "banner_design" in msg:
+                                node.banner_design = msg["banner_design"]
+                            node.modified = datetime.now(UTC)
+                            _invalidate_pages()
                     await ws.send_json({"type": "saved", "path": path})
     except WebSocketDisconnect:
         pass
@@ -1414,7 +1646,7 @@ async def sitemap(request: Request) -> Response:
             (
                 slug
                 for slug, node in sorted_nodes(nodes)
-                if node.published and node.content is not None
+                if node.published and node.chunks is not None
             ),
             None,
         )
@@ -1425,14 +1657,14 @@ async def sitemap(request: Request) -> Response:
                 not parent_has_content
                 and slug == first_content_slug
                 and node.published
-                and node.content is not None
+                and node.chunks is not None
                 and depth > 0
             ):
                 depth -= 1
-            if node.published and node.content is not None:
+            if node.published and node.chunks is not None:
                 entries.append((path, node.modified, depth))
             if node.children:
-                walk(node.children, path, node.content is not None)
+                walk(node.children, path, node.chunks is not None)
 
     walk(data.menu, "")
 
@@ -1508,14 +1740,29 @@ async def show_page(request: Request, path: str) -> Response:
         raise HTTPException(404)
     chain = resolve(data.menu, path)
     node = chain[-1] if chain else None
-    if node is not None and node.published and node.content is not None:
+    if node is not None and node.published and node.chunks is not None:
+        # Language selection (docs/localization.md): ?lang= wins when a
+        # translation exists, else header logic. Analytics keep the raw
+        # Accept-Language header regardless of the selection.
+        query_lang = request.query_params.get("lang")
+        lang = i18n.select_language(
+            query_lang,
+            accept_language,
+            lambda tag: tag in node.langs,
+            original=i18n.primary_lang(data.menu, path),
+        )
+        # A ?lang= override is replicated onto the page's navigation links
+        # (link_lang), so clicks and prefetches stay in the chosen language.
+        # Query and header-selected renders of the same language differ in
+        # their links, so link_lang is part of the ETag and body cache key.
+        link_lang = i18n.base_tag(query_lang or "")
         # no-cache forbids serving a stored page without revalidation
         # (browsers would otherwise cache heuristically and serve stale
         # pages, e.g. after a theme change). In-session speed instead comes
         # from pagerite.js's in-memory page cache (preload everything, never
         # fetch on navigation); the ETag just makes those one-time preload
         # fetches and any revalidation cheap.
-        etag = f'"{path}@{node.modified.timestamp()}g{_render_gen}"'
+        etag = f'"{path}@{node.modified.timestamp()}g{_render_gen}l{lang}q{link_lang}"'
         if request.headers.get("if-none-match") == etag:
             return Response(status_code=304)
         if _is_trackable_path(path):
@@ -1530,10 +1777,25 @@ async def show_page(request: Request, path: str) -> Response:
                 "last-modified": _http_date(node.modified),
                 "cache-control": "no-cache",
             },
+            lang=lang,
+            link_lang=link_lang,
         )
-    if node is not None and node.published and node.content is None:
+    if node is not None and node.published and node.chunks is None:
         # Category label without a landing page: placeholder with the pen
         # to create it (404 — no page here, but the node is real).
+        # Language selection as on content pages, but over the whole
+        # subtree's availability: the category has no chunks of its own —
+        # its heading, the navigation and the cards' text localize from
+        # the title map and the target articles' translations.
+        query_lang = request.query_params.get("lang")
+        subtree_langs = i18n.subtree_languages(node)
+        lang = i18n.select_language(
+            query_lang,
+            accept_language,
+            lambda tag: tag in subtree_langs,
+            original=i18n.primary_lang(data.menu, path),
+        )
+        link_lang = i18n.base_tag(query_lang or "")
         if _is_trackable_path(path):
             flushed = _track_entry(path, request, status=404)
             _schedule_client_enrichment(flushed)
@@ -1546,6 +1808,8 @@ async def show_page(request: Request, path: str) -> Response:
                 "last-modified": _http_date(node.modified),
                 "cache-control": "no-cache",
             },
+            lang=lang,
+            link_lang=link_lang,
         )
     if node is None and not path:
         # No front page (no top-level node with slug ""): "/" opens the

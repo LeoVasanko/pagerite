@@ -447,39 +447,51 @@ def _heading_ids(state) -> None:
         wrap(i, token, f"#{hid}")
 
 
-md = (
-    MarkdownIt(
-        "default",
-        {
-            "html": True,
-            "highlight": _highlight,
-            "typographer": True,
-            "breaks": True,
-        },
+def make_md(*, verbatim: bool = False) -> MarkdownIt:
+    """A fully configured parser. The module-level ``md`` (below) is the
+    render instance; ``verbatim=True`` builds the segmentation instance for
+    segments.py, where token text must stay byte-identical to the source so
+    prose spans can be spliced back by offset: no typographer (quotes and
+    dashes stay straight), no tasklist label wrapping (the item text stays
+    a plain text token), and soft line breaks (wrapped prose merges into
+    one segment instead of splitting at hardbreaks)."""
+    parser = (
+        MarkdownIt(
+            "default",
+            {
+                "html": True,
+                "highlight": _highlight,
+                "typographer": not verbatim,
+                "breaks": not verbatim,
+            },
+        )
+        .use(attrs_plugin)
+        .use(admon_plugin)
+        .use(container_plugin, "block", validate=_container_validate)
+        .use(footnote_plugin)
+        .use(deflist_plugin)
+        # label wrapping (render) puts the item text inside the checkbox
+        # <label> html_inline; without it the text stays a plain token.
+        .use(tasklists_plugin, enabled=True, label=not verbatim, label_after=not verbatim)
+        .use(gfm_autolink_plugin)
+        .use(sub_plugin)
+        .use(superscript_plugin)
     )
-    .use(attrs_plugin)
-    .use(admon_plugin)
-    .use(container_plugin, "block", validate=_container_validate)
-    .use(footnote_plugin)
-    .use(deflist_plugin)
-    # label_after: the item text is wrapped in <label for> after the
-    # checkbox, so clicking the text toggles it.
-    .use(tasklists_plugin, enabled=True, label=True, label_after=True)
-    .use(gfm_autolink_plugin)
-    .use(sub_plugin)
-    .use(superscript_plugin)
-)
-md.add_render_rule("image", _image_rule)
-md.add_render_rule("fence", _fence_rule)
-# GFM alerts (`> [!NOTE]` etc.), built into markdown-it-py's blockquote rule.
-md.options["alerts"] = True
-# Block attrs must be stripped before the typographer curlifies their quotes.
-md.core.ruler.before("replacements", "block_attrs", _block_attrs)
-md.core.ruler.push("container_attrs", _container_attrs)
-md.core.ruler.push("unwrap_lone_figures", _unwrap_lone_figures)
-md.core.ruler.push("tag_task_checkboxes", _tag_task_checkboxes)
-md.core.ruler.push("shorten_autolinks", _shorten_autolinks)
-md.core.ruler.push("heading_ids", _heading_ids)
+    parser.add_render_rule("image", _image_rule)
+    parser.add_render_rule("fence", _fence_rule)
+    # GFM alerts (`> [!NOTE]` etc.), built into markdown-it-py's blockquote rule.
+    parser.options["alerts"] = True
+    # Block attrs must be stripped before the typographer curlifies their quotes.
+    parser.core.ruler.before("replacements", "block_attrs", _block_attrs)
+    parser.core.ruler.push("container_attrs", _container_attrs)
+    parser.core.ruler.push("unwrap_lone_figures", _unwrap_lone_figures)
+    parser.core.ruler.push("tag_task_checkboxes", _tag_task_checkboxes)
+    parser.core.ruler.push("shorten_autolinks", _shorten_autolinks)
+    parser.core.ruler.push("heading_ids", _heading_ids)
+    return parser
+
+
+md = make_md()
 
 
 # Text-length thresholds (visible characters, code blocks excluded) for the

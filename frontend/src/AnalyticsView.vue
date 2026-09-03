@@ -27,6 +27,8 @@ import VisitorCell from './VisitorCell.vue'
 import TransitionGraph from './TransitionGraph.vue'
 import VisitorCharts from './VisitorCharts.vue'
 import { VIEW_W } from './analytics/chart.js'
+import { reconnectPolicy, socketSlot, watchConnecting } from './reconnect'
+import ConnNote from './ConnNote.vue'
 
 // Same centering margin as the charts, so the totals row's left edge
 // aligns with the chart svg above the natural width.
@@ -40,7 +42,19 @@ const error = ref('')
 const now = ref(Date.now())
 let ws = null
 let reconnectTimeout = null
+let connectWatchdog = null
+const reconnects = reconnectPolicy()
 let timeInterval = null
+
+// The panel is live data over its socket: while it is connecting or waiting
+// to reconnect, say so (ConnNote) instead of showing a silent stale view.
+const conn = ref('connecting') // connecting | open | waiting
+const retryIn = ref(0)
+const connNote = computed(() =>
+  conn.value === 'connecting' ? 'connecting to the server…'
+    : conn.value === 'waiting' ? `connection lost — reconnecting in ~${retryIn.value} s…`
+    : '',
+)
 
 // The initial range comes from the URL hash (shareable links); without one,
 // it is derived from the first analytics snapshot: day when the recorded
@@ -51,9 +65,16 @@ let rangePinned = Boolean(RANGES[hashRange])
 
 function connectAnalytics() {
   if (ws) return
+  conn.value = 'connecting'
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
   ws = new WebSocket(`${proto}//${location.host}/_api/ws/analytics`)
-  ws.onopen = () => { error.value = '' }
+  clearTimeout(connectWatchdog)
+  connectWatchdog = watchConnecting(ws, 'analytics')
+  ws.onopen = () => {
+    conn.value = 'open'
+    reconnects.opened()
+    error.value = ''
+  }
   ws.onmessage = (event) => {
     try {
       data.value = JSON.parse(event.data)
@@ -75,12 +96,19 @@ function connectAnalytics() {
   }
   ws.onclose = () => {
     ws = null
-    reconnectTimeout = setTimeout(connectAnalytics, 2000)
+    // The policy paces the retry: doubling backoff with jitter, reset only
+    // by a healthy connection — a fixed rapid loop trips the browser's
+    // WebSocket throttling (all sockets then sit "pending" for minutes).
+    const wait = reconnects.closed()
+    retryIn.value = Math.max(1, Math.round(wait / 1000))
+    conn.value = 'waiting'
+    reconnectTimeout = setTimeout(connectAnalytics, wait)
   }
 }
 
 onMounted(async () => {
-  connectAnalytics()
+  // The first connection takes a staggered slot (see ./reconnect).
+  reconnectTimeout = setTimeout(connectAnalytics, socketSlot())
   now.value = Date.now()
   timeInterval = setInterval(() => { now.value = Date.now() }, 1000)
   // The site tree for the transition map (all pages in menu order). Not
@@ -93,6 +121,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (reconnectTimeout) clearTimeout(reconnectTimeout)
+  if (connectWatchdog) clearTimeout(connectWatchdog)
   if (timeInterval) clearInterval(timeInterval)
   if (ws) {
     ws.onclose = null
@@ -151,6 +180,7 @@ const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], c
         </nav>
         <a href="/" class="close" title="home">✕</a>
       </header>
+      <ConnNote :text="connNote" />
       <p v-if="error" class="error">⚠️ {{ error }}</p>
       <p v-else-if="!data" class="loading">loading…</p>
       <template v-else>
