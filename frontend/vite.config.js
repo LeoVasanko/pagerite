@@ -16,7 +16,7 @@ const CONTENT_PROXY = '^(?!/_|/@|/src|/node_modules|/__).*$'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
-    fastapiVue({ paths: ["/_api", "/_f", "/_themes", "/_fonts", "/_a", "/_translate"] }),
+    fastapiVue({ paths: ["/_api", "/_f", "/_themes", "/_fonts", "/_a", "/_ws", "/_translate"] }),
     vue(),
     vueDevTools(),
   ],
