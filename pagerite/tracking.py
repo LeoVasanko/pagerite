@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import socket
+from datetime import date
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
@@ -44,6 +45,59 @@ _analytics_broadcast_task: asyncio.Task | None = None
 
 # Repository root from this file's location (pagerite/tracking.py -> ..).
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+
+DBIP_URL = "https://download.db-ip.com/free/dbip-city-lite-{month}.mmdb.gz"
+
+
+def _download_dbip() -> None:
+    """Download the latest dbip-city-lite MMDB if ours is missing or older."""
+    today = date.today()
+    months = [f"{today:%Y-%m}"]
+    # The current month's file may not be published yet; fall back to last month.
+    prev = (today.replace(day=1) - date.resolution).replace(day=1)
+    months.append(f"{prev:%Y-%m}")
+
+    existing = sorted(
+        p.stem.removeprefix("dbip-city-lite-").removesuffix(".mmdb")
+        for p in _REPO_ROOT.glob("dbip-city-lite-*.mmdb*")
+    )
+    if existing and existing[-1] >= months[0]:
+        logger.info("DB-IP database is current (%s), skipping download", existing[-1])
+        return
+
+    for month in months:
+        url = DBIP_URL.format(month=month)
+        target = _REPO_ROOT / f"dbip-city-lite-{month}.mmdb.gz"
+        tmp = target.with_suffix(".mmdb.gz.tmp")
+        logger.info("Downloading %s", url)
+        try:
+            with httpx.stream("GET", url, follow_redirects=True, timeout=120) as r:
+                if r.status_code == 404:
+                    continue
+                r.raise_for_status()
+                with open(tmp, "wb") as f:
+                    for chunk in r.iter_bytes():
+                        f.write(chunk)
+        except httpx.HTTPError as e:
+            logger.warning("DB-IP download failed: %s", e)
+            tmp.unlink(missing_ok=True)
+            continue
+        # Verify it is actually gzip data before installing it.
+        try:
+            with gzip.open(tmp, "rb") as f:
+                f.read(1)
+        except OSError:
+            logger.warning("DB-IP download for %s was not valid gzip", month)
+            tmp.unlink(missing_ok=True)
+            continue
+        os.replace(tmp, target)
+        # Drop older databases so the app never picks up a stale one.
+        for old in _REPO_ROOT.glob("dbip-city-lite-*.mmdb*"):
+            if old.name != target.name:
+                old.unlink()
+        logger.info("DB-IP database updated to %s", target.name)
+        return
+    logger.warning("Could not download a DB-IP database")
 
 
 def _geoip_db_path() -> Path | None:

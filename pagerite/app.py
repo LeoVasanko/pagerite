@@ -30,6 +30,7 @@ walking the tree (``resolve``), moves are slot detach/attach
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -49,8 +50,11 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator:
     async with kanta:
         await asyncio.to_thread(file_store.load)
         await frontend.load()
-        # Decompress/open the DB-IP MMDB once at startup.  Lookups are then
-        # read-only and safe to run in background ``to_thread`` workers.
+        # --dbip: update the DB-IP database first, then decompress/open the
+        # MMDB once.  Lookups are then read-only and safe to run in
+        # background ``to_thread`` workers.
+        if os.environ.get("PAGERITE_DBIP") == "1":
+            await asyncio.to_thread(tracking._download_dbip)
         await asyncio.to_thread(tracking._geoip._load)
         analytics_store.subscribe(tracking._schedule_analytics_broadcast)
         # Backfill favicons for external sites already in the recorded data.

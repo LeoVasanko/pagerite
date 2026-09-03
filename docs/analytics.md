@@ -123,7 +123,8 @@ WebSocket reports actual navigations and active time spent on a page.
   message handling is never delayed.  The decompressed `dbip-*.mmdb` file is kept in
   the repository root and ignored by git.  The CLI flag `--dbip`
   (`uv run pagerite --dbip`) downloads the latest
-  `dbip-city-lite-YYYY-MM.mmdb.gz` from DB-IP before the server starts,
+  `dbip-city-lite-YYYY-MM.mmdb.gz` from DB-IP at startup (in the app
+  lifespan, before the MMDB is opened),
   skipping the download when the local database is already current and
   removing older versions after an update; without the flag only an existing
   file is used.
