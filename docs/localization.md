@@ -88,6 +88,10 @@ Region tags normalize to their base subtag (`fi-FI` → `fi`).
 ### Rendering
 
 - The translated Markdown goes through the same `markdown.render` pipeline.
+- Section anchors (`#hash` ids on h1/h2 headings) stay in the original
+  language: render(anchors_from=...) pins the translated render's heading
+  ids to the original text's slugs, matched by heading position, so links
+  to sections don't break across languages.
 - Navigation/sidebar titles come from the translation's title map, with
   per-node fallback to the original title (a partially translated tree must
   still render).

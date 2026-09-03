@@ -402,7 +402,9 @@ def _heading_ids(state) -> None:
     its self-link is ``href=""`` (back to the top of the page). An
     author-set `{#id}` always wins; auto ids slugify the heading text
     (python-slugify, mirroring the editor's slugify.js) and dedupe with
-    -2/-3 suffixes per render. Headings that already contain a link are
+    -2/-3 suffixes per render — unless env["anchor_ids"] presets them, as
+    render(anchors_from=...) does for translated pages so section URLs
+    stay in the original language. Headings that already contain a link are
     ``data-line`` records the heading's markdown source line (0-based, after
     undoing the render(title=...) injection offset via ``env``) — the page
     editor uses it for section pens and piecewise-linear scroll sync.
@@ -443,15 +445,25 @@ def _heading_ids(state) -> None:
     if len(heads) < ANCHOR_MIN_HEADINGS:
         return
     seen: set[str] = set()
-    for i, token in heads:
+    preset = state.env.get("anchor_ids")
+    for k, (i, token) in enumerate(heads):
         inline = tokens[i + 1]
         hid = token.attrGet("id")
         if not isinstance(hid, str) or not hid:
-            # Slug the visible text, not the raw markdown (`## [a](url)`).
-            text = "".join(
-                c.content for c in inline.children if c.type in ("text", "code_inline")
-            )
-            base = slugify(text) or "section"
+            if preset is not None and k < len(preset):
+                # Translated render: the original language's slug, matched
+                # by heading position (a translation never adds, removes or
+                # reorders headings; a patched one that does falls back to
+                # slugging its own text past the end of the list).
+                base = preset[k]
+            else:
+                # Slug the visible text, not the raw markdown (`## [a](url)`).
+                text = "".join(
+                    c.content
+                    for c in inline.children
+                    if c.type in ("text", "code_inline")
+                )
+                base = slugify(text) or "section"
             hid, n = base, 2
             while hid in seen:
                 hid = f"{base}-{n}"
@@ -461,6 +473,36 @@ def _heading_ids(state) -> None:
         if token.map:
             token.attrSet("data-line", str(max(0, token.map[0] - line_offset)))
         wrap(i, token, f"#{hid}")
+
+
+def anchor_ids(text: str, title: str | None = None) -> list[str]:
+    """The section anchor ids of text, in heading order.
+
+    render(anchors_from=...) feeds these to _heading_ids via
+    env["anchor_ids"], pinning a translated render's anchors to the
+    original language's slugs. The selection mirrors _heading_ids exactly
+    (the same md instance assigns the ids during this parse, author-set
+    {#id} included as-is); the in-body title h1 is excluded.
+    """
+    if title and not has_h1(text):
+        text = f"# {title}\n\n{text}"
+    tokens = md.parse(text, {"page_path": ""})
+    first_h1 = next(
+        (
+            i
+            for i, t in enumerate(tokens)
+            if t.type == "heading_open" and t.tag == "h1" and t.level == 0
+        ),
+        None,
+    )
+    return [
+        t.attrGet("id")
+        for i, t in enumerate(tokens)
+        if t.type == "heading_open"
+        and t.tag in ("h1", "h2")
+        and t.level == 0
+        and i != first_h1
+    ]
 
 
 def make_md(*, verbatim: bool = False) -> MarkdownIt:
@@ -618,12 +660,16 @@ def render(
     created: datetime | None = None,
     modified: datetime | None = None,
     title: str | None = None,
+    anchors_from: tuple[str, str] | None = None,
 ) -> Rendered:
     """Render Markdown text to the article body's HTML and layout flags.
 
     ``title`` injects a ``# {title}`` line at the top when the markdown has
     no h1 of its own, so the implicit page title goes through the exact
     same pipeline as an explicit one (first-h1 anchor treatment included).
+    ``anchors_from`` is the (markdown, title) of the ORIGINAL language when
+    rendering a translation: section anchors are pinned to its slugs so
+    localized pages keep the original #hash URLs.
 
     The top-level blocks are grouped into column segments: boundary blocks
     (h1/h2 headings, .wide — see _is_boundary) are rendered bare, the runs
@@ -641,6 +687,8 @@ def render(
     right after the article's h1.
     """
     env = {"page_path": page_path, "line_offset": 0}
+    if anchors_from is not None:
+        env["anchor_ids"] = anchor_ids(*anchors_from)
     if title and not has_h1(text):
         text = f"# {title}\n\n{text}"
         # The injected title shifts source lines by two; _heading_ids

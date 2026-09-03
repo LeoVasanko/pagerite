@@ -503,6 +503,14 @@ async def editor_ws(ws: WebSocket) -> None:
                         # The title is injected as h1 when the markdown has
                         # none; the editor's title field edits live-preview.
                         title=msg.get("title") or (node.title if node else ""),
+                        # Pin section anchors to the original language so the
+                        # preview of a translation matches the served page
+                        # (no-op when the previewed markdown is the original).
+                        anchors_from=(
+                            (node_markdown(data, node) or "", node.title)
+                            if node
+                            else None
+                        ),
                     )
                     await ws.send_json(
                         {

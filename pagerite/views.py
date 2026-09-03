@@ -783,7 +783,11 @@ def page_content(
     node = resolve(menu, path)[-1]
     content = node_markdown(data, node) or ""
     title = node.title
+    # The original text pins the section anchors: on a translated page the
+    # heading slugs (and thus #hash URLs) stay in the original language.
+    anchors_from = None
     if translation:
+        anchors_from = (content, title)
         if translation.markdown is not None:
             content = translation.markdown
         title = (
@@ -793,7 +797,9 @@ def page_content(
         )
     # The title is injected into the markdown (as # title when it has no
     # h1 of its own), so title and content render as one article.
-    rendered = render(content, path, node.created, node.modified, title=title)
+    rendered = render(
+        content, path, node.created, node.modified, title=title, anchors_from=anchors_from
+    )
     # Long articles get .multicol: the article column cap lifts (see the
     # #content grid in pagerite.css) and the .cols segments lay out in at
     # most two columns. The html is already segmented by render() — the
