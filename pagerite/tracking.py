@@ -31,6 +31,10 @@ from pagerite.state import SITE_URL, _html_response, analytics_store
 
 logger = logging.getLogger(__name__)
 
+# httpx logs every request at INFO (e.g. the favicon fetches below); our own
+# one-line summary in _schedule_favicon_fetch replaces that noise.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 router = APIRouter()
 
 # Live WebSocket clients for the analytics stream.
@@ -253,9 +257,18 @@ async def _fetch_favicon(origin: str) -> None:
 
 def _schedule_favicon_fetch() -> None:
     """Start background favicon fetches for origins that need one."""
-    for origin in analytics_store.favicon_origins_needed():
-        if origin in _favicon_in_flight:
-            continue
+    origins = [
+        origin
+        for origin in analytics_store.favicon_origins_needed()
+        if origin not in _favicon_in_flight
+    ]
+    if not origins:
+        return
+    logger.info(
+        "Fetching favicons: %s",
+        ", ".join(o.removeprefix("https://") for o in origins),
+    )
+    for origin in origins:
         _favicon_in_flight.add(origin)
         asyncio.create_task(_fetch_favicon(origin))
 
