@@ -415,14 +415,23 @@ formatting syntax into the translated block. The boundaries are found by
 **text processing alone** —
 markers on the wire are hopeless (an earlier sentinel-masking design let
 the model see and mangle exactly that punctuation: Seed-X renumbered the
-tokens and turned `![` into `¡¡…!!`). Each mark's weight ratio in the
-source block (word units before its text boundaries over the block total;
-CJK ideographs count as one unit each, kana runs as one — no spaces to
-count words by) is applied to the translation's units; the inner text ends
-at its last unit, so punctuation and whitespace between the mark and the
-next word stay outside it. Placement is
-approximate and drift accumulates across several marks in one block — the
-accepted trade: better a coherent sentence with a slightly shifted link
+tokens and turned `![` into `¡¡…!!`). Each mark's source words are aligned
+to the translation's words by **form similarity** (`_find_mark` in
+segments.py): a word-level alignment (sequence ratio plus shared prefix,
+case-folded — inflection moves word endings, `banana` → `banaanilla`, and
+articles or prepositions drop out; a mid-sentence capital on BOTH sides
+earns a bonus, naming conventions being the likeliest shared cause) with
+small penalties for skipped words, so reordering and dropped function
+words don't break the match. An alignment is accepted only with an anchor
+(one pair of similarity ≥ 0.7) and a decent average, and the slice is cut
+exactly at word boundaries, so the whitespace between the mark and its
+neighbors stays in the plain text. A mark with no convincing alignment
+falls back to its weight ratio in the source block (word units before its
+text boundaries over the block total) applied to the translation's units
+— CJK ideographs count as one unit each, kana runs as one; for CJK targets
+the fallback IS the path, cross-script form similarity being nil. Placement is
+approximate and several reordered marks in one block can still cluster —
+the accepted trade: better a coherent sentence with a slightly shifted link
 than separately translated snippets that don't fit together. A boundary
 that maps to an empty slice degrades to the source text rather than
 emitting a broken `[](url)` or `**`. Blocks mixing in any other inline

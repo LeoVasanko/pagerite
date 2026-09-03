@@ -30,10 +30,12 @@ mangles it: sentinels get renumbered, ``**`` gets dropped or moved) —
 because a label translated apart from its sentence comes back
 grammatically incompatible with it (case government, particles, word
 order). ``join`` re-inserts the link/formatting markdown into the
-translated block at weight-mapped positions (``_place_marks``): no
-markers on the wire, the boundaries are found by text processing alone —
-each mark's word/CJK-char weight ratio in the source applied to the
-translation's units. Placement is approximate and CJK-safe: better a
+translated block at fuzzily matched positions (``_place_marks``): no
+markers on the wire, the boundaries are found by aligning the mark's
+source words to the translation's words by form similarity (``_find_mark``
+— inflection, dropped articles and reordering tolerated), with the
+source/translation weight ratio as fallback (the CJK path, where
+cross-script form similarity is nil). Placement is approximate: better a
 coherent sentence with a slightly shifted link than separately translated
 snippets that don't fit together. Blocks with any other inline markup
 (code, images, HTML) still split into runs at those boundaries.
@@ -45,6 +47,8 @@ prose/markup boundary on the wire — translators cut their output there,
 so such pieces could not survive the round trip.
 """
 
+import bisect
+import difflib
 import re
 from typing import NamedTuple
 
@@ -86,11 +90,12 @@ _UNIT = re.compile(
 class Mark(NamedTuple):
     """One inline link or paired formatting (strong/em/s) inside a
     whole-block segment: the source weight (unit count, see _UNIT) at the
-    inner text's start and end for mapping the boundaries into the
-    translation, the exact source syntax around the text ("[" / "](url)",
-    "**" / "**", ...) and the source text itself, used as the fallback when
-    the mapped slice comes out empty (better an untranslated label than a
-    broken "[](url)")."""
+    inner text's start and end (fallback for mapping the boundaries into
+    the translation when fuzzy word alignment finds nothing, _find_mark),
+    the exact source syntax around the text ("[" / "](url)", "**" / "**",
+    ...) and the source text itself — the words fuzzy alignment looks for,
+    and the fallback when the mapped slice comes out empty (better an
+    untranslated label than a broken "[](url)")."""
 
     w_start: int
     w_end: int
@@ -113,11 +118,6 @@ class Span(NamedTuple):
 def _weight(text: str) -> int:
     """The text's weight in translation-mapping units (see _UNIT)."""
     return len(_UNIT.findall(text))
-
-
-def _unit_bounds(text: str) -> list[int]:
-    """Unit-start offsets of the text, plus its end as the last bound."""
-    return [m.start() for m in _UNIT.finditer(text)] + [len(text)]
 
 
 def _runs(children: list) -> list[str]:
@@ -444,39 +444,148 @@ def pure_prose(text: str) -> bool:
     return all(t.type in ("text", "softbreak") for t in children)
 
 
+def _word_sim(a: str, b: str) -> float:
+    """How likely two words are the same term across a translation, 0..1.
+
+    A case-folded exact match is 1; otherwise the better of the sequence
+    ratio and the shared-prefix ratio — inflection and derivational change
+    mostly move the ending ("banana" -> "banaanilla") or drop an article or
+    preposition around it. Case-folded so capitalization differences across
+    languages don't hide a term, with a small bonus when BOTH sides are
+    capitalized: a mid-sentence capital on both sides is likely the same
+    name (capitalization conventions differ per language, so its absence
+    proves nothing).
+    """
+    bonus = 0.1 if a[:1].isupper() and b[:1].isupper() else 0.0
+    a, b = a.casefold(), b.casefold()
+    if a == b:
+        return 1.0
+    prefix = 0
+    for ca, cb in zip(a, b):
+        if ca != cb:
+            break
+        prefix += 1
+    sim = max(
+        difflib.SequenceMatcher(None, a, b).ratio(),
+        prefix / max(len(a), len(b)),
+    )
+    return min(1.0, sim + bonus)
+
+
+#: Alignment costs for _find_mark: skipping a translation word (an article
+#: or preposition the target language added) is cheap, skipping a source
+#: word (one the translation dropped) costs more — a mark whose words
+#: mostly vanished is no match at all. Every matched pair pays _MATCH, so
+#: aligning a word to a lookalike-nothing (similarity below _MATCH) is
+#: worse than skipping it.
+_GAP_T = 0.25
+_GAP_S = 0.6
+_MATCH = 0.3
+
+
+def _find_mark(src: list[str], units: list[re.Match], start: int) -> tuple[int, int] | None:
+    """Locate a mark's source words in the translation's units (from unit
+    index ``start`` on), as the (start, end) unit-index span of the best
+    fuzzy alignment; None when no alignment is convincing (the caller falls
+    back to the weight ratio).
+
+    Word-for-word alignment with skips (_word_sim per pair, _GAP_T/_GAP_S
+    per skipped word): reordering is handled by the search itself, an added
+    or dropped article/preposition by the skip penalties. Accepted only
+    with an anchor — one pair of similarity >= 0.7 — and a decent average,
+    so a fully reworded label doesn't snap onto chance lookalikes.
+    """
+    tgt = [u.group() for u in units[start:]]
+    n, m = len(src), len(tgt)
+    if not n or not m:
+        return None
+    # dp[i][j]: best score aligning src[:i] to tgt[:j]; a free tail (the
+    # answer is the best dp[n][j] over j) keeps trailing words costless.
+    dp = [[0.0] * (m + 1) for _ in range(n + 1)]
+    back: list[list[tuple[int, int]]] = [[(0, 0)] * (m + 1) for _ in range(n + 1)]
+    for i in range(1, n + 1):
+        dp[i][0] = dp[i - 1][0] - _GAP_S
+        back[i][0] = (i - 1, 0)
+        for j in range(1, m + 1):
+            options = [
+                (dp[i - 1][j - 1] + _word_sim(src[i - 1], tgt[j - 1]) - _MATCH, (i - 1, j - 1)),
+                (dp[i][j - 1] - _GAP_T, (i, j - 1)),
+                (dp[i - 1][j] - _GAP_S, (i - 1, j)),
+            ]
+            dp[i][j], back[i][j] = max(options, key=lambda o: o[0])
+    j_end = max(range(m + 1), key=lambda j: dp[n][j])
+    pairs: list[tuple[int, int]] = []  # matched (source, target) indices
+    i, j = n, j_end
+    while i > 0:
+        pi, pj = back[i][j]
+        if (pi, pj) == (i - 1, j - 1):
+            pairs.append((i - 1, j - 1))
+        i, j = pi, pj
+    if not pairs:
+        return None
+    pairs.reverse()  # backtracking collected them last-first
+    sims = [_word_sim(src[a], tgt[t]) for a, t in pairs]
+    # Weak pairs at the span's ends are not part of the label (a declined
+    # neighbor the DP matched for a pittance) — trim them off.
+    while len(sims) > 1 and sims[0] < 0.5:
+        pairs.pop(0)
+        sims.pop(0)
+    while len(sims) > 1 and sims[-1] < 0.5:
+        pairs.pop()
+        sims.pop()
+    if max(sims) < 0.7 or sum(sims) / len(sims) < 0.45:
+        return None
+    return start + pairs[0][1], start + pairs[-1][1] + 1
+
+
 def _place_marks(translation: str, weight: int, marks: list[Mark]) -> str | None:
     """Re-insert a whole-block segment's links into its translation.
 
-    Each mark's source weight ratio (units before the boundary / total) is
-    applied to the translation's units — a rough bilingual alignment that
-    needs no markers in the wire text (sentinels never survived the model)
-    and works for CJK, where exact placement matters less. A boundary
-    landing empty degrades to the source link text: better an untranslated
-    label than a broken "[](url)". None when the translation has no units
-    to map onto (the caller rejects the result).
+    Each mark's boundaries are found by fuzzy word-form alignment
+    (_find_mark): the mark's source words are matched against the
+    translation's units by form similarity — no markers on the wire
+    (sentinels never survived the model), no assumption that word order or
+    count survived either. Slicing exactly at unit boundaries keeps the
+    whitespace between the mark and its neighbors in the plain text, where
+    it belongs. A mark with no convincing alignment falls back to its
+    source weight ratio (units before the boundary / total applied to the
+    translation's units) — the pre-fuzz heuristic, still the CJK path,
+    where form similarity across scripts is nil. A boundary landing empty
+    degrades to the source link text: better an untranslated label than a
+    broken "[](url)". None when the translation has no units to map onto
+    (the caller rejects the result).
     """
-    bounds = _unit_bounds(translation)
-    total = len(bounds) - 1
+    units = list(_UNIT.finditer(translation))
+    total = len(units)
     if not total or not weight:
         return None
+    starts = [u.start() for u in units]
+    bounds = starts + [len(translation)]
     out: list[str] = []
-    cur = 0
+    cur = 0  # char cursor: never before the previous mark's end
+    ucur = 0  # unit cursor, the same monotonicity in unit indices
     for mark in marks:
-        x1 = bounds[min(round(mark.w_start / weight * total), total)]
-        x2 = bounds[min(round(mark.w_end / weight * total), total)]
-        x1 = max(x1, cur)  # monotonic: never before the previous mark's end
-        x2 = max(x2, x1)
-        # The slice ends at the next unit's start, so the whitespace and
-        # punctuation before that unit is inside it — but it belongs
-        # BETWEEN the mark and the following word, not in the inner text:
-        # end the inner text at its last unit and leave the rest for the
-        # following slice (the cursor stays ahead of it).
-        raw = translation[x1:x2]
-        units = list(_UNIT.finditer(raw))
-        inner_end = x1 + units[-1].end() if units else x1
-        inner = translation[x1:inner_end].strip() or mark.inner
+        found = _find_mark(_UNIT.findall(mark.inner), units, ucur)
+        if found is not None:
+            u1, u2 = found
+            x1, x2 = units[u1].start(), units[u2 - 1].end()
+        else:
+            x1 = bounds[min(round(mark.w_start / weight * total), total)]
+            x2 = bounds[min(round(mark.w_end / weight * total), total)]
+            x1 = max(x1, cur)
+            x2 = max(x2, x1)
+            # The slice ends at the next unit's start, so the whitespace
+            # and punctuation before that unit is inside it — but it
+            # belongs BETWEEN the mark and the following word, not in the
+            # inner text: end the inner text at its last unit and leave
+            # the rest for the following slice.
+            raw = translation[x1:x2]
+            inner_units = list(_UNIT.finditer(raw))
+            x2 = x1 + inner_units[-1].end() if inner_units else x1
+        inner = translation[x1:x2].strip() or mark.inner
         out += [translation[cur:x1], mark.pre, inner, mark.post]
-        cur = inner_end
+        cur = x2
+        ucur = bisect.bisect_left(starts, x2)
     out.append(translation[cur:])
     return "".join(out)
 
