@@ -49,12 +49,18 @@ def main() -> None:
     # logging is already set up.
     if args.dbip:
         os.environ["PAGERITE_DBIP"] = "1"
+    run_args: dict = {}
+    if args.hostname != "localhost":
+        # A public site sits behind TLS on its hostname; show that URL in the
+        # startup box instead of the local listen address.
+        run_args["startup_box"] = f"{{Name}} {{version}}\nhttps://{args.hostname}"
     server.run(
         "pagerite.app:app",
         listen=args.listen,
         default_port=DEFAULT_PORT,
         server_header=False,
         reload=Path(__file__).parent if DEVMODE else False,
+        **run_args,
     )
 
 
