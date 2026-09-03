@@ -144,9 +144,9 @@ article h1 {
   font-weight: 700;
   padding-bottom: 0.5rem;
   /* The hazard-stripe underline breaks out of the page box: the negative
-     right margin extends the h1's box (and thus its background) all the
-     way to the viewport's right edge. */
-  margin-right: calc((100% - 100vw) / 2);
+     end margin extends the h1's box (and thus its background) all the
+     way to the viewport's edge on that side. */
+  margin-inline-end: calc((100% - 100vw) / 2);
   background:
     linear-gradient(-55deg,
       transparent 0 0.2rem,
@@ -186,20 +186,21 @@ article ul ul ul li::before {
 }
 
 blockquote {
-  border-left-color: var(--accent2);
+  border-inline-start-color: var(--accent2);
   background: color-mix(var(--accent2) 6%, transparent);
   padding: 0.25rem 0.75rem;
   /* Keep the quoted text on the paragraph edge: the tinted box extends
      past it by its own border/padding, like code blocks. */
-  margin: 0 -0.75rem 1rem -1rem;
+  margin: 0 0 1rem;
+  margin-inline: -1rem -0.75rem;
 }
 
 /* Code follows the color scheme; the dark-scheme well joins the violet
    family (--code-bg above). The orange side bar stays in both. */
 pre {
-  border-left: 0.25rem solid var(--accent);
+  border-inline-start: 0.25rem solid var(--accent);
   /* Text on the paragraph edge: the box extends by padding + border. */
-  margin-left: calc(-0.8rem - 0.25rem);
+  margin-inline-start: calc(-0.8rem - 0.25rem);
   border-radius: 3px;
 }
 

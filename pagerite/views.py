@@ -349,8 +349,9 @@ def _layout(
     property attributes, everything else (description, twitter:*) as name.
 
     ``lang`` is the served language for <html lang>; an RTL language (ar,
-    fa, ...) also puts dir="rtl" on <html> (the editor panel carries its own
-    lang="en" dir="ltr", so it is unaffected). ``canonical`` and
+    fa, ...) also puts dir="rtl" on <html> (the editor panel and the
+    analytics dashboard carry their own lang="en" dir="ltr", so they are
+    unaffected). ``canonical`` and
     ``alternates`` ((hreflang, href) pairs) are the page's language URLs
     (see docs/localization.md), emitted right after the viewport and before
     the social tags: canonical first, then the hreflang alternates.

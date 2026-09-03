@@ -160,7 +160,7 @@ main::before {
    top edge and a grassy shadow. */
 #sidebar {
   background: linear-gradient(160deg, #f4faddd9, #d9eec5cf);
-  border-right: 1px solid #ffffff80;
+  border-inline-end: 1px solid #ffffff80;
   border-bottom: 1px solid var(--line);
   box-shadow: 0 0.3rem 1rem #4f913b1f;
   border-radius: 1rem;
@@ -225,7 +225,7 @@ article ul ul ul li::before {
 /* Quotes get a grassy edge and a wash of sunlight. */
 blockquote {
   color: #4d6849;
-  border-left-color: var(--accent2);
+  border-inline-start-color: var(--accent2);
   background: linear-gradient(90deg, #fff0a238, transparent 70%);
   padding-top: 0.25rem;
   padding-bottom: 0.25rem;

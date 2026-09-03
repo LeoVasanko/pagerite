@@ -111,12 +111,13 @@ article h3 {
 }
 
 blockquote {
-  border-left-color: var(--accent);
+  border-inline-start-color: var(--accent);
   background: color-mix(var(--accent) 6%, transparent);
   padding: 0.4rem 0.9rem;
   /* Keep the quoted text on the paragraph edge: the tinted box extends
      past it by its own border/padding, like code blocks. */
-  margin: 0 -0.9rem 1rem calc(-0.25rem - 0.9rem);
+  margin: 0 0 1rem;
+  margin-inline: calc(-0.25rem - 0.9rem) -0.9rem;
   border-radius: 6px;
 }
 
@@ -125,9 +126,9 @@ blockquote {
    bar stays in both. */
 pre {
   border: 1px solid transparent;
-  border-left: 0.25rem solid var(--accent);
+  border-inline-start: 0.25rem solid var(--accent);
   /* Text on the paragraph edge: the box extends by padding + border. */
-  margin-left: calc(-0.8rem - 0.25rem);
+  margin-inline-start: calc(-0.8rem - 0.25rem);
   border-radius: 6px;
 }
 

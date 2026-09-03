@@ -168,7 +168,8 @@ const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], c
 </script>
 
 <template>
-  <div class="analytics-view">
+  <!-- Untranslated admin dashboard: always LTR, like the editor panel. -->
+  <div class="analytics-view" lang="en" dir="ltr">
     <div class="analytics-panel">
       <header>
         <h1>Analytics</h1>
