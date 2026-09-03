@@ -435,10 +435,16 @@ async def activity_ws(ws: WebSocket) -> None:
     DB-IP geoip lookups happen in background tasks so message handling is
     never delayed by slow DNS or the first MMDB decompress.
     """
-    await ws.accept()
     ip = _client_ip(ws)
     ua = ws.headers.get("user-agent", "")
     accept_language = ws.headers.get("accept-language", "")
+    # Identify the visitor on the access-log open/close lines (the IP is
+    # already printed there): compact UA plus the browser's language tag.
+    lang, _country = analytics._parse_accept_language(accept_language)
+    ws.scope.setdefault("state", {})["log_extra"] = " ".join(
+        part for part in (analytics._compact_user_agent(ua), lang) if part
+    )
+    await ws.accept()
     try:
         while True:
             text = await ws.receive_text()

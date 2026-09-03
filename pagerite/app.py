@@ -37,6 +37,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
 from fastapi_vue import Frontend
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from pagerite import api, files, pages, tracking
 from pagerite.__main__ import DEVMODE
@@ -51,6 +52,28 @@ logger = logging.getLogger(__name__)
 frontend = Frontend(
     Path(__file__).with_name("frontend-build"), spa=False, cached="/_assets/"
 )
+
+
+class _AccessLogExtraMiddleware:
+    """Fill the ``log_extra`` slot of fastapi_vue's access log.
+
+    Everything under ``/_api`` is gated by the SSO forward-auth, which names
+    the authenticated user in the ``remote-user`` header; put that user on
+    the access-log line, for plain requests and WebSocket open/close alike.
+    The scope dict is shared with the outer AccessLogMiddleware, which reads
+    the slot back at response/accept/close time.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] in ("http", "websocket") and scope["path"].startswith("/_api"):
+            headers = dict(scope["headers"])
+            user = headers.get(b"remote-user", b"").decode("latin-1")
+            if user:
+                scope.setdefault("state", {})["log_extra"] = user
+        await self.app(scope, receive, send)
 
 
 @asynccontextmanager
@@ -82,6 +105,8 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+
+app.add_middleware(_AccessLogExtraMiddleware)
 
 
 @app.middleware("http")
