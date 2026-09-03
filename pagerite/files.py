@@ -268,19 +268,19 @@ async def put_favicon(request: Request) -> dict[str, str]:
         raise HTTPException(400, "empty file")
     ext = _ext(request.headers.get("x-filename", "favicon.ico"))
     stored = await asyncio.to_thread(store_image, body, ext, FAVICON_MAXSIZE)
-    with kanta.transaction("upload favicon"):
+    with kanta.transaction("settings", user=request.headers.get("remote-user")):
         data.favicon = stored
         _invalidate_pages()
     return {"path": f"/_f/{stored}"}
 
 
 @router.delete("/_api/settings/favicon", status_code=204)
-async def delete_favicon() -> None:
+async def delete_favicon(request: Request) -> None:
     """Clear the custom favicon (back to the build's /favicon.ico).
 
     The blob stays in the content-addressed store; only the reference goes.
     """
-    with kanta.transaction("clear favicon"):
+    with kanta.transaction("settings", user=request.headers.get("remote-user")):
         data.favicon = ""
         _invalidate_pages()
 

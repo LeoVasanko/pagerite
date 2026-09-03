@@ -209,6 +209,7 @@ class _Connection:
         #: and link marks).
         self.spans: list[Span] = []
         self.original: str = ""  # its full source text (for the splicing)
+        self.kind: str = ""  # "chunk" | "title" (for the transaction action)
 
 
 class Dispatcher:
@@ -307,6 +308,7 @@ class Dispatcher:
             state.inflight = (job.lang, job.key)  # before the await: no double-assign
             state.spans = spans
             state.original = original
+            state.kind = job.kind
             try:
                 await ws.send_text(msgspec.json.encode(job).decode())
             except Exception:  # send failed: the receive loop cleans up
@@ -356,6 +358,7 @@ class Dispatcher:
                         await ws.close(code=1002)
                         return
                     texts, spans, original = msg.texts, state.spans, state.original
+                    kind, state.kind = state.kind, ""
                     state.inflight = None
                     state.spans = []
                     state.original = ""
@@ -379,7 +382,8 @@ class Dispatcher:
                         self.schedule()
                         continue
                     with self.db.transaction(
-                        "translator results", user=clientkey, extra=lang
+                        f"translate:{lang}{':title' if kind == 'title' else ''}",
+                        user=clientkey,
                     ):
                         paths = store_results(
                             self.data, lang, [TransResult(key=msg.key, text=text)]

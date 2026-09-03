@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from fastapi import (
     APIRouter,
     HTTPException,
+    Request,
     WebSocket,
     WebSocketDisconnect,
 )
@@ -96,7 +97,9 @@ async def list_pages(lang: str | None = None) -> list[dict]:
 
 
 @router.put("/_api/pages/{path:path}", status_code=204)
-async def save_page(path: str, page: PageIn, lang: str | None = None) -> None:
+async def save_page(
+    path: str, page: PageIn, request: Request, lang: str | None = None
+) -> None:
     """Create or replace the page at a slug path ("" or "/" = front page).
 
     Missing ancestors are created as content-less category labels. Giving
@@ -120,12 +123,16 @@ async def save_page(path: str, page: PageIn, lang: str | None = None) -> None:
         node = chain[-1] if chain else None
         if node is None or node.chunks is None:
             raise HTTPException(404, "no such page")
-        with kanta.transaction("save translation", extra=path):
+        with kanta.transaction(
+            f"page:{lang}", user=request.headers.get("remote-user"), extra=path
+        ):
             # Patches alone make the translated version exist.
             if i18n.add_patch(data, node, path, lang, page.markdown):
                 _invalidate_pages()
         return
-    with kanta.transaction("save page", extra=path):
+    with kanta.transaction(
+        "page", user=request.headers.get("remote-user"), extra=path
+    ):
         node = _ensure(data.menu, path)
         node.title = page.title
         node.chunks = store_chunks(data.chunks, page.markdown)
@@ -137,7 +144,7 @@ async def save_page(path: str, page: PageIn, lang: str | None = None) -> None:
 
 
 @router.delete("/_api/pages/{path:path}", status_code=204)
-async def delete_page(path: str) -> None:
+async def delete_page(path: str, request: Request) -> None:
     """Delete a node by slug path.
 
     A category (node with children) loses only its landing page and stays
@@ -145,7 +152,9 @@ async def delete_page(path: str) -> None:
     """
     path = path.strip("/")
     _check_reserved(path)
-    with kanta.transaction("delete page", extra=path):
+    with kanta.transaction(
+        "page:delete", user=request.headers.get("remote-user"), extra=path
+    ):
         if not _remove_page(data.menu, path):
             raise HTTPException(404, "no such page")
         _invalidate_pages()
@@ -182,7 +191,7 @@ class StructureOp(BaseModel):
 
 
 @router.post("/_api/structure", status_code=204)
-async def update_structure(op: StructureOp) -> None:
+async def update_structure(op: StructureOp, request: Request) -> None:
     """Apply one structure operation (see StructureOp)."""
     path = op.path.strip("/")
     chain = resolve(data.menu, path)
@@ -195,7 +204,9 @@ async def update_structure(op: StructureOp) -> None:
         # what "the original" means for the node — its language is part of
         # every render, so a change invalidates everywhere.
         language = i18n.base_tag(op.language)
-        with kanta.transaction("set page language", extra=path):
+        with kanta.transaction(
+            "page:language", user=request.headers.get("remote-user"), extra=path
+        ):
             if language != node.language:
                 node.language = language
                 _invalidate_pages()
@@ -203,7 +214,9 @@ async def update_structure(op: StructureOp) -> None:
     if op.title is not None and lang and lang != i18n.primary_lang(data.menu, path):
         # Translated title (i18n.set_title_translation): original title,
         # slugs and hierarchy stay untouched.
-        with kanta.transaction("translate title", extra=path):
+        with kanta.transaction(
+            f"page:{lang}:title", user=request.headers.get("remote-user"), extra=path
+        ):
             if i18n.set_title_translation(data, node, lang, op.title):
                 _invalidate_pages()
         return
@@ -220,7 +233,18 @@ async def update_structure(op: StructureOp) -> None:
             raise HTTPException(400, "target path exists")
         if not tslug and node.children:
             raise HTTPException(400, "the front page cannot have children")
-    with kanta.transaction("update structure", extra=path):
+    # One structure call can combine a title set, a move/rename and a
+    # reorder; the action names the most significant of them.
+    action = (
+        "page:slug"
+        if target is not None and target != path
+        else "page:title"
+        if op.title is not None
+        else "structure:reorder"
+    )
+    with kanta.transaction(
+        action, user=request.headers.get("remote-user"), extra=path
+    ):
         if op.title is not None:
             node.title = op.title
         if target is not None and target != path:
@@ -281,9 +305,11 @@ class SettingsIn(BaseModel):
 
 
 @router.put("/_api/settings", status_code=204)
-async def put_settings(settings: SettingsIn) -> None:
+async def put_settings(settings: SettingsIn, request: Request) -> None:
     """Update site-wide settings; invalidates cached pages and ETags."""
-    with kanta.transaction("update settings"):
+    with kanta.transaction(
+        "settings", user=request.headers.get("remote-user")
+    ):
         data.brand = settings.brand
         data.brand_html = settings.brand_html
         data.theme = settings.theme
@@ -302,14 +328,16 @@ async def put_settings(settings: SettingsIn) -> None:
 
 
 @router.delete("/_api/translations", status_code=204)
-async def delete_translations() -> None:
+async def delete_translations(request: Request) -> None:
     """Drop all machine translations (Data.trans) so the dispatcher
-    re-translates everything from scratch (a "refresh translations" action:
+    re-translates everything from scratch (a translate:reset action:
     the invalidation hook re-offers every fragment to connected
     translators). User patches are kept; the availability index
     (node.langs) is rebuilt from them — patches alone still make a language
     exist on a page."""
-    with kanta.transaction("refresh translations"):
+    with kanta.transaction(
+        "translate:reset", user=request.headers.get("remote-user")
+    ):
         i18n.clear_translations(data)
         _invalidate_pages()
     # Fragments rejected this run (segment validation) stay skipped no
@@ -326,7 +354,7 @@ class ToggleTaskIn(BaseModel):
 
 
 @router.post("/_api/toggle-task")
-async def toggle_task_endpoint(body: ToggleTaskIn) -> dict[str, str]:
+async def toggle_task_endpoint(body: ToggleTaskIn, request: Request) -> dict[str, str]:
     """Toggle the Nth task-list checkbox in a page's Markdown source.
 
     If ``markdown`` is provided the source is left untouched and the toggled
@@ -348,7 +376,9 @@ async def toggle_task_endpoint(body: ToggleTaskIn) -> dict[str, str]:
     new_markdown = toggle_task(node_markdown(data, node) or "", body.index)
     if new_markdown is None:
         raise HTTPException(400, "invalid task index")
-    with kanta.transaction("toggle task", extra=path):
+    with kanta.transaction(
+        "page", user=request.headers.get("remote-user"), extra=path
+    ):
         # Re-chunk like any save: only the chunk containing the toggled
         # checkbox gets a new hash, the rest keep theirs.
         node.chunks = store_chunks(data.chunks, new_markdown)
@@ -554,7 +584,11 @@ async def editor_ws(ws: WebSocket) -> None:
                             }
                         )
                         continue
-                    with kanta.transaction("editor save", extra=path):
+                    with kanta.transaction(
+                        f"page:{lang}" if translated else "page",
+                        user=ws.headers.get("remote-user"),
+                        extra=path,
+                    ):
                         if move_from != path:
                             same_menu = (
                                 move_from.rpartition("/")[0] == path.rpartition("/")[0]
