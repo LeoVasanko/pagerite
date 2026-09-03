@@ -130,9 +130,7 @@ async def save_page(
             if i18n.add_patch(data, node, path, lang, page.markdown):
                 _invalidate_pages()
         return
-    with kanta.transaction(
-        "page", user=request.headers.get("remote-user"), extra=path
-    ):
+    with kanta.transaction("page", user=request.headers.get("remote-user"), extra=path):
         node = _ensure(data.menu, path)
         node.title = page.title
         node.chunks = store_chunks(data.chunks, page.markdown)
@@ -242,9 +240,7 @@ async def update_structure(op: StructureOp, request: Request) -> None:
         if op.title is not None
         else "structure:reorder"
     )
-    with kanta.transaction(
-        action, user=request.headers.get("remote-user"), extra=path
-    ):
+    with kanta.transaction(action, user=request.headers.get("remote-user"), extra=path):
         if op.title is not None:
             node.title = op.title
         if target is not None and target != path:
@@ -307,9 +303,7 @@ class SettingsIn(BaseModel):
 @router.put("/_api/settings", status_code=204)
 async def put_settings(settings: SettingsIn, request: Request) -> None:
     """Update site-wide settings; invalidates cached pages and ETags."""
-    with kanta.transaction(
-        "settings", user=request.headers.get("remote-user")
-    ):
+    with kanta.transaction("settings", user=request.headers.get("remote-user")):
         data.brand = settings.brand
         data.brand_html = settings.brand_html
         data.theme = settings.theme
@@ -335,9 +329,7 @@ async def delete_translations(request: Request) -> None:
     translators). User patches are kept; the availability index
     (node.langs) is rebuilt from them — patches alone still make a language
     exist on a page."""
-    with kanta.transaction(
-        "translate:reset", user=request.headers.get("remote-user")
-    ):
+    with kanta.transaction("translate:reset", user=request.headers.get("remote-user")):
         i18n.clear_translations(data)
         _invalidate_pages()
     # Fragments rejected this run (segment validation) stay skipped no
@@ -376,9 +368,7 @@ async def toggle_task_endpoint(body: ToggleTaskIn, request: Request) -> dict[str
     new_markdown = toggle_task(node_markdown(data, node) or "", body.index)
     if new_markdown is None:
         raise HTTPException(400, "invalid task index")
-    with kanta.transaction(
-        "page", user=request.headers.get("remote-user"), extra=path
-    ):
+    with kanta.transaction("page", user=request.headers.get("remote-user"), extra=path):
         # Re-chunk like any save: only the chunk containing the toggled
         # checkbox gets a new hash, the rest keep theirs.
         node.chunks = store_chunks(data.chunks, new_markdown)

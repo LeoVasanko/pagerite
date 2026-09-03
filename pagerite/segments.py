@@ -483,7 +483,9 @@ _GAP_S = 0.6
 _MATCH = 0.3
 
 
-def _find_mark(src: list[str], units: list[re.Match], start: int) -> tuple[int, int] | None:
+def _find_mark(
+    src: list[str], units: list[re.Match], start: int
+) -> tuple[int, int] | None:
     """Locate a mark's source words in the translation's units (from unit
     index ``start`` on), as the (start, end) unit-index span of the best
     fuzzy alignment; None when no alignment is convincing (the caller falls
@@ -508,7 +510,10 @@ def _find_mark(src: list[str], units: list[re.Match], start: int) -> tuple[int, 
         back[i][0] = (i - 1, 0)
         for j in range(1, m + 1):
             options = [
-                (dp[i - 1][j - 1] + _word_sim(src[i - 1], tgt[j - 1]) - _MATCH, (i - 1, j - 1)),
+                (
+                    dp[i - 1][j - 1] + _word_sim(src[i - 1], tgt[j - 1]) - _MATCH,
+                    (i - 1, j - 1),
+                ),
                 (dp[i][j - 1] - _GAP_T, (i, j - 1)),
                 (dp[i - 1][j] - _GAP_S, (i - 1, j)),
             ]
