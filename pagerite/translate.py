@@ -277,34 +277,40 @@ class Dispatcher:
             job = None
             spans: list[Span] = []
             original = ""
-            for lang in sorted(langs):
-                # Titles first: a page's name in the menu is its most
-                # visible string (stable: menu order kept within each kind).
-                for item in sorted(
-                    pending_items(self.data, lang), key=lambda it: it.kind != "title"
-                ):
-                    if (lang, item.key) in inflight or (
-                        lang,
-                        item.key,
-                    ) in self.validation_failures:
-                        continue
-                    spans, texts, contexts = split(item.text)
-                    if not texts:
-                        continue  # prose that could not be located for splicing
-                    original = item.text
-                    if item.kind == "title" and item.context:
-                        # A title's surround is the article's opening prose
-                        # (TransItem.context), not its own one-word block.
-                        contexts = [item.context] * len(texts)
-                    job = Job(
-                        lang=lang,
-                        key=item.key,
-                        texts=texts,
-                        path=item.path,
-                        kind=item.kind,
-                        contexts=contexts,
-                    )
-                    break
+            # Titles before articles — across languages too, so every menu
+            # is named before any article body is worked on (a page's name
+            # is its most visible string). pending_items emits in menu
+            # order, a page's title before its chunks; filtering by kind
+            # keeps that stable order within each kind.
+            pending = {lang: pending_items(self.data, lang) for lang in sorted(langs)}
+            for kind in ("title", "chunk"):
+                for lang in sorted(langs):
+                    for item in pending[lang]:
+                        if (
+                            item.kind != kind
+                            or (lang, item.key) in inflight
+                            or (lang, item.key) in self.validation_failures
+                        ):
+                            continue
+                        spans, texts, contexts = split(item.text)
+                        if not texts:
+                            continue  # prose that could not be located for splicing
+                        original = item.text
+                        if item.kind == "title" and item.context:
+                            # A title's surround is the article's opening prose
+                            # (TransItem.context), not its own one-word block.
+                            contexts = [item.context] * len(texts)
+                        job = Job(
+                            lang=lang,
+                            key=item.key,
+                            texts=texts,
+                            path=item.path,
+                            kind=item.kind,
+                            contexts=contexts,
+                        )
+                        break
+                    if job is not None:
+                        break
                 if job is not None:
                     break
             if job is None:
