@@ -156,14 +156,27 @@ def _image_rule(
         page = env.get("page_path", "")
         token.attrs["src"] = f"/{page}/{src}" if page else f"/{src}"
     token.attrs["alt"] = self.renderInlineAsText(token.children, options, env)
-    img = self.renderToken(tokens, idx, options, env)
     if len(tokens) == 1:
         # The only inline content of its paragraph: render as a block
         # figure, captioned when titled. (The <p> wrapper is dropped by
-        # _unwrap_lone_figures below.)
+        # _unwrap_lone_figures below.) {.margin} positions the whole
+        # figure, so it moves from the img onto the figure wrapper — left
+        # on the img, the margin-breakout CSS would pull the image out of
+        # the figure (and mostly off-screen), leaving the caption behind.
+        classes = (token.attrs.get("class") or "").split()
+        figure_class = ""
+        if "margin" in classes:
+            classes.remove("margin")
+            if classes:
+                token.attrs["class"] = " ".join(classes)
+            else:
+                del token.attrs["class"]
+            figure_class = ' class="margin"'
+        img = self.renderToken(tokens, idx, options, env)
         title = token.attrs.get("title")
         caption = f"<figcaption>{escapeHtml(title)}</figcaption>" if title else ""
-        return f"<figure>{img}{caption}</figure>"
+        return f"<figure{figure_class}>{img}{caption}</figure>"
+    img = self.renderToken(tokens, idx, options, env)
     # Inline with other content: a plain inline image.
     return img
 

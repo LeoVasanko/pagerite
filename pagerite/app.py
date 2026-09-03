@@ -30,6 +30,7 @@ walking the tree (``resolve``), moves are slot detach/attach
 
 import asyncio
 import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -39,12 +40,12 @@ from pagerite import api, files, pages, tracking, translate
 from pagerite.__main__ import DEVMODE
 from pagerite.files import file_store
 from pagerite.state import HOSTNAME, analytics_store, data, frontend, kanta
-
+from collections.abc import AsyncGenerator
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI):
+async def lifespan(_app: FastAPI) -> AsyncGenerator:
     """Open the database (migrations run inside kanta.open), load assets, load GeoIP."""
     async with kanta:
         translate.log_service_urls(data.translate_keys, HOSTNAME)

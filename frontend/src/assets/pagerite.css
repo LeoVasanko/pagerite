@@ -847,7 +847,7 @@ article.multicol {
 
   article.multicol .margin,
   article.multicol .aside,
-  article.multicol figure:has(.margin) {
+  article.multicol figure.margin {
     position: absolute;
     left: 0;
     width: 14rem;
@@ -898,7 +898,7 @@ article.multicol {
 
   body:has(#sidebar):has(.multicol):not(.editing) article.multicol .margin,
   body:has(#sidebar):has(.multicol):not(.editing) article.multicol .aside,
-  body:has(#sidebar):has(.multicol):not(.editing) article.multicol figure:has(.margin) {
+  body:has(#sidebar):has(.multicol):not(.editing) article.multicol figure.margin {
     position: absolute;
     /* Attached to the article's left border (1.25rem gap), hanging into
        the left lane and growing leftward with it: 12rem when the lane is
@@ -916,7 +916,7 @@ article.multicol {
 /* A shrink-wrapped figure (explicit image width) centers in the plain
    layout; inside a column the centering looks adrift — left-align.
    Floated figures keep their own margins (the text gap). */
-.multicol .colseg.cols figure:has(img[width]):not(:has(.left), :has(.right), :has(.margin)) {
+.multicol .colseg.cols figure:has(img[width]):not(:has(.left), :has(.right), .margin) {
   margin-inline: 0;
 }
 
@@ -1094,7 +1094,8 @@ blockquote p + p {
 }
 
 /* Side boxes: ::: aside is a muted floated box; {.margin} / ::: margin
-   is a plainer margin note, and figures take {.margin} like {.left}.
+   is a plainer margin note, and figures take the class directly on the
+   <figure> (the renderer moves it off the img), floating like {.left}.
    Where the layout has room for a side zone — multicol pages, the
    sidebar's track, the wide single-column gutter (see the article
    section and the figure rules below) — the boxes are taken out of flow
@@ -1287,7 +1288,8 @@ dd {
    Markdown images standing alone in a paragraph render as a block
    <figure> (with <figcaption> when the image has a title); the
    brace-attribute positioning class ({.left}, {.right}, {.wide}) lives
-   on the img inside, but only the figure is ever positioned, so the
+   on the img inside — except {.margin}, which the renderer moves onto
+   the figure itself — but only the figure is ever positioned, so the
    caption stays below the image. Raw <img> HTML written by the author
    stays inline and unstyled beyond these defaults. */
 img {
@@ -1353,9 +1355,10 @@ figure:has(img[width]) {
   width: fit-content;
 }
 
-/* {.margin} figures float left like {.left} ones — until they fall into
+/* {.margin} figures (the class moves onto the figure wrapper at render —
+   see markdown.py) float left like {.left} ones — until they fall into
    the side zone (see the composition rules up in the article section). */
-figure:has(.margin) {
+figure.margin {
   float: left;
   width: 30%;
   max-width: 50%;
@@ -1445,7 +1448,7 @@ article figure img {
 @media (min-width: 104rem) {
   body:not(.editing):not(:has(.multicol)) article .margin,
   body:not(.editing):not(:has(.multicol)) article .aside,
-  body:not(.editing):not(:has(.multicol)) article figure:has(.margin) {
+  body:not(.editing):not(:has(.multicol)) article figure.margin {
     position: absolute;
     --box-w: min(18rem, (100vw - 78rem) / 2 - 1.25rem);
     width: var(--box-w);
@@ -1668,7 +1671,7 @@ article h2 {
 
   figure:has(.right),
   figure:has(.left),
-  figure:has(.margin) {
+  figure.margin {
     float: none;
     width: 100%;
     max-width: none;
