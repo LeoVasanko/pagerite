@@ -23,8 +23,10 @@ _FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 #: end at the first blank line, which the generic blank-line split
 #: already does.
 _HTML_ATOMIC = (
-    (re.compile(r"^ {0,3}<(?:script|pre|style|textarea)(?:\s|>|$)", re.I),
-     re.compile(r"</(?:script|pre|style|textarea)\s*>", re.I)),
+    (
+        re.compile(r"^ {0,3}<(?:script|pre|style|textarea)(?:\s|>|$)", re.I),
+        re.compile(r"</(?:script|pre|style|textarea)\s*>", re.I),
+    ),
     (re.compile(r"^ {0,3}<!--"), re.compile(r"-->")),
     (re.compile(r"^ {0,3}<\?"), re.compile(r"\?>")),
     (re.compile(r"^ {0,3}<!\[CDATA\["), re.compile(r"\]\]>")),

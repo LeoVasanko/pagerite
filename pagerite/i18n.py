@@ -128,7 +128,9 @@ def make_patch(base: str, edited: str) -> Patch:
     """
     a, b = chunk_markdown(base), chunk_markdown(edited)
     hunks: list[tuple[str, str]] = []
-    for tag, i1, i2, j1, j2 in SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+    for tag, i1, i2, j1, j2 in SequenceMatcher(
+        None, a, b, autojunk=False
+    ).get_opcodes():
         if tag == "equal":
             continue
         search = "\n\n".join(a[i1:i2])
@@ -155,12 +157,14 @@ def hybrid_markdown(data: Data, node: Node, path: str, lang: str) -> str:
     Not gated on ``node.langs`` (get_translation is the gated view): the
     editor save path diffs against this even for a language's first patch.
     """
-    hybrid = join_chunks([
-        data.chunks.get(h, "")
-        if h in node.no_trans
-        else data.trans.get(h, {}).get(lang) or data.chunks.get(h, "")
-        for h in node.chunks or []
-    ])
+    hybrid = join_chunks(
+        [
+            data.chunks.get(h, "")
+            if h in node.no_trans
+            else data.trans.get(h, {}).get(lang) or data.chunks.get(h, "")
+            for h in node.chunks or []
+        ]
+    )
     for patch in data.patches.get(f"{path}:{lang}", []):
         hybrid = apply_patch(hybrid, patch)
     return hybrid
@@ -175,7 +179,9 @@ def add_patch(
     translated version exist, so ``node.langs`` is set. Returns True when
     a patch was stored. Pure data ops — the caller wraps in a transaction
     and invalidates."""
-    patch = make_patch(base if base is not None else hybrid_markdown(data, node, path, lang), edited)
+    patch = make_patch(
+        base if base is not None else hybrid_markdown(data, node, path, lang), edited
+    )
     if not patch.hunks:
         return False
     data.patches.setdefault(f"{path}:{lang}", []).append(patch)

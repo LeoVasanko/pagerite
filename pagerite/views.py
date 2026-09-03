@@ -39,7 +39,9 @@ def _data_roots() -> list[Path]:
     roots = [user_data_path("pagerite", appauthor=False)]
     # site_data_dir keeps the multipath (site_data_path collapses it to the
     # first entry, since a Path cannot hold several).
-    roots += site_data_dir("pagerite", appauthor=False, multipath=True).split(os.pathsep)
+    roots += site_data_dir("pagerite", appauthor=False, multipath=True).split(
+        os.pathsep
+    )
     return [Path(r) for r in roots]
 
 
@@ -104,13 +106,15 @@ def _theme_color_schemes(theme: str) -> set[str]:
         return set()
     try:
         css = path.read_text()
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return set()
     css = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
     m = re.search(r"color-scheme\s*:\s*([^;]+);", css, re.IGNORECASE)
     if not m:
         return set()
-    return {tok.lower() for tok in m.group(1).split() if tok.lower() in {"light", "dark"}}
+    return {
+        tok.lower() for tok in m.group(1).split() if tok.lower() in {"light", "dark"}
+    }
 
 
 def _theme_mode(theme: str) -> str:
@@ -346,7 +350,9 @@ def _layout(
     (see docs/localization.md), emitted right after the viewport and before
     the social tags: canonical first, then the hreflang alternates.
     """
-    doc = Document(E.Title, lang=lang, dir="rtl" if lang in i18n.RTL_LANGUAGES else "ltr")
+    doc = Document(
+        E.Title, lang=lang, dir="rtl" if lang in i18n.RTL_LANGUAGES else "ltr"
+    )
     # Responsive layout (see the 48rem breakpoint in pagerite.css) needs
     # the real device width, not the default 980px layout viewport.
     doc.meta(name="viewport", content="width=device-width, initial-scale=1")
@@ -426,8 +432,7 @@ def _layout(
     if custom_css.strip():
         doc.style(custom_css, id="pagerite-user")
     body = (
-        doc
-        .header(
+        doc.header(
             E.div(E.Banner, id="page-banner"),
             E.Brand,
             E.nav(E.Nav, id="nav"),
@@ -463,10 +468,16 @@ def _brand_link(brand: str, brand_html: str = "", link_lang: str = "") -> HTML:
     when neither is set."""
     if brand_html.strip():
         return HTML(str(E.div(HTML(brand_html), id="brand")))
-    return HTML(str(E.a(brand, href=_href("", link_lang), id="brand"))) if brand else HTML("")
+    return (
+        HTML(str(E.a(brand, href=_href("", link_lang), id="brand")))
+        if brand
+        else HTML("")
+    )
 
 
-def _title(slug: str, node: Node, translation: Translation | None = None, path: str = "") -> str:
+def _title(
+    slug: str, node: Node, translation: Translation | None = None, path: str = ""
+) -> str:
     """Menu label: the configured title, prettified slug, "Home" fallback.
 
     With a translation, its title map (keyed by node path) wins, falling
@@ -486,8 +497,13 @@ def _href(path: str, link_lang: str = "") -> str:
 
 
 def _nav_link(
-    doc, menu: dict[str, Node], node: Node, path: str, current: str,
-    ancestors_current: bool = True, translation: Translation | None = None,
+    doc,
+    menu: dict[str, Node],
+    node: Node,
+    path: str,
+    current: str,
+    ancestors_current: bool = True,
+    translation: Translation | None = None,
     link_lang: str = "",
 ) -> None:
     """Render one <li> linking the node. Category labels (no content of
@@ -509,7 +525,12 @@ def _nav_link(
     )
 
 
-def nav_html(menu: dict[str, Node], current: str, translation: Translation | None = None, link_lang: str = "") -> HTML:
+def nav_html(
+    menu: dict[str, Node],
+    current: str,
+    translation: Translation | None = None,
+    link_lang: str = "",
+) -> HTML:
     """Render the contents of the #nav element for the current path.
 
     Top-level items in menu order; the front page (slug "", href "/")
@@ -520,11 +541,24 @@ def nav_html(menu: dict[str, Node], current: str, translation: Translation | Non
     with nav:
         for slug, node in sorted_nodes(menu):
             if node.published:
-                _nav_link(nav, menu, node, slug, current, translation=translation, link_lang=link_lang)
+                _nav_link(
+                    nav,
+                    menu,
+                    node,
+                    slug,
+                    current,
+                    translation=translation,
+                    link_lang=link_lang,
+                )
     return HTML(str(nav))
 
 
-def sidebar_html(menu: dict[str, Node], current: str, translation: Translation | None = None, link_lang: str = "") -> HTML:
+def sidebar_html(
+    menu: dict[str, Node],
+    current: str,
+    translation: Translation | None = None,
+    link_lang: str = "",
+) -> HTML:
     """Render the #sidebar element for the current path (empty when none).
 
     The sidebar is the current main level section's sub-navigation: the
@@ -558,20 +592,41 @@ def sidebar_html(menu: dict[str, Node], current: str, translation: Translation |
     nav = E.ul
     with nav:
         for slug, child in items:
-            _sidebar_item(nav, menu, child, f"{section}/{slug}", current, translation, link_lang)
+            _sidebar_item(
+                nav, menu, child, f"{section}/{slug}", current, translation, link_lang
+            )
     return HTML(str(E.aside(nav, id="sidebar")))
 
 
-def _sidebar_item(doc, menu: dict[str, Node], node: Node, path: str, current: str, translation: Translation | None = None, link_lang: str = "") -> None:
+def _sidebar_item(
+    doc,
+    menu: dict[str, Node],
+    node: Node,
+    path: str,
+    current: str,
+    translation: Translation | None = None,
+    link_lang: str = "",
+) -> None:
     """One sidebar <li>: the node link, with its published children as a
     nested list (third level and deeper, recursively)."""
-    _nav_link(doc, menu, node, path, current, ancestors_current=False, translation=translation, link_lang=link_lang)
+    _nav_link(
+        doc,
+        menu,
+        node,
+        path,
+        current,
+        ancestors_current=False,
+        translation=translation,
+        link_lang=link_lang,
+    )
     sub = [(s, c) for s, c in sorted_nodes(node.children) if c.published]
     if sub:
         # doc.li.a(...) above left the <li> open for nesting.
         with doc.ul:
             for slug, child in sub:
-                _sidebar_item(doc, menu, child, f"{path}/{slug}", current, translation, link_lang)
+                _sidebar_item(
+                    doc, menu, child, f"{path}/{slug}", current, translation, link_lang
+                )
 
 
 def first_leaf(menu: dict[str, Node], path: str) -> str | None:
@@ -703,7 +758,14 @@ def banner_source(menu: dict[str, Node], path: str) -> str | None:
     return None
 
 
-def page_content(menu: dict[str, Node], data: Data, path: str, translation: Translation | None = None, link_lang: str = "", lang: str = "") -> HTML:
+def page_content(
+    menu: dict[str, Node],
+    data: Data,
+    path: str,
+    translation: Translation | None = None,
+    link_lang: str = "",
+    lang: str = "",
+) -> HTML:
     """Render the contents of the #main element for a page.
 
     A page with published children (a category page) lists them as cards
@@ -718,7 +780,11 @@ def page_content(menu: dict[str, Node], data: Data, path: str, translation: Tran
     if translation:
         if translation.markdown is not None:
             content = translation.markdown
-        title = _title(path.rpartition("/")[2], node, translation, path) if node.title else title
+        title = (
+            _title(path.rpartition("/")[2], node, translation, path)
+            if node.title
+            else title
+        )
     # The title is injected into the markdown (as # title when it has no
     # h1 of its own), so title and content render as one article.
     rendered = render(content, path, node.created, node.modified, title=title)
@@ -733,7 +799,16 @@ def page_content(menu: dict[str, Node], data: Data, path: str, translation: Tran
     return HTML(str(doc))
 
 
-def _cards(doc, menu: dict[str, Node], data: Data, node: Node, path: str, translation: Translation | None = None, link_lang: str = "", lang: str = "") -> None:
+def _cards(
+    doc,
+    menu: dict[str, Node],
+    data: Data,
+    node: Node,
+    path: str,
+    translation: Translation | None = None,
+    link_lang: str = "",
+    lang: str = "",
+) -> None:
     """Card stacks of the node's published children (nothing when childless).
 
     One column per direct child, all in a single full-width row (the .wide
@@ -773,7 +848,15 @@ def _walk(node: Node, path: str):
             yield from _walk(child, f"{path}/{slug}")
 
 
-def _card(doc, data: Data, node: Node, path: str, translation: Translation | None = None, link_lang: str = "", lang: str = "") -> None:
+def _card(
+    doc,
+    data: Data,
+    node: Node,
+    path: str,
+    translation: Translation | None = None,
+    link_lang: str = "",
+    lang: str = "",
+) -> None:
     """One card in a stack: cover + title, plus the description when the
     page has no image (its card shows a gradient cover instead).
 
@@ -796,7 +879,9 @@ def _card(doc, data: Data, node: Node, path: str, translation: Translation | Non
             doc.span(class_="cover", style=f'background-image: url("{image}")')
         else:
             doc.span(class_="cover")
-        doc.span(_title(path.rpartition("/")[2], node, translation, path), class_="title")
+        doc.span(
+            _title(path.rpartition("/")[2], node, translation, path), class_="title"
+        )
         if description:
             doc.span(description, class_="desc")
 
@@ -823,7 +908,9 @@ def _description(html: str, limit: int = 200) -> str:
         return text
     # Prefer a clean cut: the last sentence ending within the limit, as
     # long as it does not reduce the description to a tiny fragment.
-    if (end := max((m.end() for m in _SENTENCE_END.finditer(text[:limit])), default=0)) > limit // 2:
+    if (
+        end := max((m.end() for m in _SENTENCE_END.finditer(text[:limit])), default=0)
+    ) > limit // 2:
         return text[:end]
     return text[:limit].rsplit(" ", 1)[0] + "…"
 
@@ -879,7 +966,12 @@ def _share_media(html: str, base_url: str) -> tuple[str, str]:
 
 
 def _social_meta(
-    node: Node, path: str, title: str, html: str, brand: str, base_url: str,
+    node: Node,
+    path: str,
+    title: str,
+    html: str,
+    brand: str,
+    base_url: str,
 ) -> dict[str, str]:
     """Open Graph/Twitter/SEO meta tags for a content page.
 
@@ -896,9 +988,7 @@ def _social_meta(
     url = f"{base_url}/{path}" if base_url else ""
     text = _description(html)
     image, video = _share_media(html, base_url)
-    twitter_image = (
-        re.sub(r"(/_f/[0-9a-f]{12})$", r"\1.webp", image) if image else ""
-    )
+    twitter_image = re.sub(r"(/_f/[0-9a-f]{12})$", r"\1.webp", image) if image else ""
     return {
         "description": text,
         "og:type": "article",
@@ -964,8 +1054,16 @@ def render_page(
             ]
     return str(
         _layout(
-            *_page_assets(), custom_css, theme, banner_design(menu, path, theme),
-            transition, favicon, social, lang, canonical, alternates,
+            *_page_assets(),
+            custom_css,
+            theme,
+            banner_design(menu, path, theme),
+            transition,
+            favicon,
+            social,
+            lang,
+            canonical,
+            alternates,
         )(
             Title=f"{title} – {brand}" if brand else title,
             Brand=_brand_link(brand, brand_html, link_lang),
@@ -1015,7 +1113,15 @@ def render_category(
         else:
             doc.p("This section has no page of its own yet.")
     return str(
-        _layout(*_page_assets(), custom_css, theme, banner_design(menu, path, theme), transition, favicon, lang=lang)(
+        _layout(
+            *_page_assets(),
+            custom_css,
+            theme,
+            banner_design(menu, path, theme),
+            transition,
+            favicon,
+            lang=lang,
+        )(
             Title=f"{title} – {brand}" if brand else title,
             Brand=_brand_link(brand, brand_html, link_lang),
             Nav=nav_html(menu, path, translation, link_lang),
@@ -1042,7 +1148,14 @@ def render_not_found(
         doc.h1("Not Found")
         doc.p(f"No article at /{path}. If there was before, it may have been deleted.")
     return str(
-        _layout(*_page_assets(), custom_css, theme, banner_design(menu, path, theme), transition, favicon)(
+        _layout(
+            *_page_assets(),
+            custom_css,
+            theme,
+            banner_design(menu, path, theme),
+            transition,
+            favicon,
+        )(
             Title=f"Not Found – {brand}" if brand else "Not Found",
             Brand=_brand_link(brand, brand_html),
             Nav=nav_html(menu, path),

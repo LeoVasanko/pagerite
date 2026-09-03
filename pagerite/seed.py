@@ -21,6 +21,7 @@ ASSETS = Path(__file__).with_name("seed-assets")
 def _asset(name: str) -> bytes:
     return (ASSETS / name).read_bytes()
 
+
 WELCOME = """\
 Welcome to your new **Pagerite** site. Everything you see is a page written in Markdown, served from a pretty URL, and editable right here in the browser.
 

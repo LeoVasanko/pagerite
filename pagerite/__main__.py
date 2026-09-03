@@ -33,7 +33,9 @@ def _download_dbip() -> None:
         for p in _REPO_ROOT.glob("dbip-city-lite-*.mmdb*")
     )
     if existing and existing[-1] >= months[0]:
-        print(f"pagerite: DB-IP database is current ({existing[-1]}), skipping download")
+        print(
+            f"pagerite: DB-IP database is current ({existing[-1]}), skipping download"
+        )
         return
 
     for month in months:
@@ -58,7 +60,10 @@ def _download_dbip() -> None:
             with gzip.open(tmp, "rb") as f:
                 f.read(1)
         except OSError:
-            print(f"pagerite: DB-IP download for {month} was not valid gzip", file=sys.stderr)
+            print(
+                f"pagerite: DB-IP download for {month} was not valid gzip",
+                file=sys.stderr,
+            )
             tmp.unlink(missing_ok=True)
             continue
         os.replace(tmp, target)
@@ -78,9 +83,11 @@ def main() -> None:
         "hostname",
         nargs="?",
         default="localhost",
-        help=("Public hostname of the site; names the data directory "
-              "<hostname>/{content.kantadb, analytics.json, files} under the "
-              "cwd (default: localhost)."),
+        help=(
+            "Public hostname of the site; names the data directory "
+            "<hostname>/{content.kantadb, analytics.json, files} under the "
+            "cwd (default: localhost)."
+        ),
     )
     parser.add_argument(
         "-l",

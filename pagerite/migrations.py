@@ -6,9 +6,9 @@ omitted) before it is decoded into ``Data`` structs, and runs exactly once
 per database based on its recorded version.
 
 All storage/schema upgrades live here — including on-disk file work, which
-runs through app.py's file store (imported lazily: app.py owns the store
-and passes this module to Kanta; at migration time, during lifespan
-``kanta.open()``, the app module is fully loaded).
+runs through files.py's file store (imported lazily: files.py owns the store
+and state.py passes this module to Kanta; at migration time, during lifespan
+``kanta.open()``, both modules are fully loaded).
 """
 
 import base64
@@ -25,7 +25,7 @@ def _append_order(nodes: dict) -> float:
 
 
 def _ensure(menu: dict, path: str) -> dict:
-    """Raw-dict equivalent of app._ensure: the node dict at ``path``,
+    """Raw-dict equivalent of state._ensure: the node dict at ``path``,
     creating it and any missing ancestors (content-less category labels)
     appended at the end of their level."""
     nodes = menu
@@ -44,7 +44,7 @@ def migrate_v1(d: dict) -> None:
     and rebuild the legacy flat page store (``pages``) as the menu tree."""
     files = d.pop("files", None)
     if files:
-        from pagerite.app import file_store
+        from pagerite.files import file_store
 
         for name, body in files.items():
             if isinstance(body, str):  # JSON-level bytes are base64 strings
@@ -74,9 +74,16 @@ def _backfill_derivatives() -> None:
     AVIF, and SVGs no raster variants at all).  WebP/JPEG are re-encoded
     from an existing AVIF when available, everything else from the
     original (SVGs rasterized first)."""
-    from pagerite import app
+    from pagerite.files import (
+        IMAGE_MAXSIZE,
+        IMAGE_WEBP_QUALITY,
+        IMAGE_JPG_QUALITY,
+        _avif_to_format,
+        _svg_to_png,
+        _to_avif,
+        file_store,
+    )
 
-    file_store = app.file_store
     try:
         paths = [f for f in file_store.path.iterdir() if f.is_file()]
     except FileNotFoundError:
@@ -96,22 +103,22 @@ def _backfill_derivatives() -> None:
             ext = source.suffix
             body = source.read_bytes()
             if ext == ".svg":
-                png = app._svg_to_png(body, app.IMAGE_MAXSIZE)
+                png = _svg_to_png(body, IMAGE_MAXSIZE)
                 if png is None:
                     continue
                 body, ext = png, ".png"
-            converted = app._to_avif(body, ext)
+            converted = _to_avif(body, ext)
             if converted is None:
                 continue
             file_store.put(f"{digest}.avif", converted)
             avif = file_store.get(f"{digest}.avif")
         for fmt, quality in (
-            ("webp", app.IMAGE_WEBP_QUALITY),
-            ("jpg", app.IMAGE_JPG_QUALITY),
+            ("webp", IMAGE_WEBP_QUALITY),
+            ("jpg", IMAGE_JPG_QUALITY),
         ):
             if f"{digest}.{fmt}" not in names:
                 file_store.put(
-                    f"{digest}.{fmt}", app._avif_to_format(avif[0], f".{fmt}", quality)
+                    f"{digest}.{fmt}", _avif_to_format(avif[0], f".{fmt}", quality)
                 )
 
 

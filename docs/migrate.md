@@ -53,7 +53,7 @@ class Node(msgspec.Struct, omit_defaults=True):
 class Data(msgspec.Struct):
     ...
     #: API keys gating the translator service WebSocket (/_translate/{key}):
-    #: key -> display name; the first is generated at bootstrap (app.py).
+    #: key -> display name; the first is generated at bootstrap (state.py).
     translate_keys: dict[str, str] = {}
     #: Wanted target languages for the translator service (presence-keys);
     #: jobs are offered only in these ∩ a connection's capabilities.
@@ -147,7 +147,7 @@ translation data, in the same transaction:
 Chunking must be deterministic and shared with render/save, so
 `chunk_markdown` + `chunk_key` live in `pagerite/i18n.py` (or a small
 `pagerite/chunks.py`) and are imported by both `migrations.py` and
-`views.py`/`app.py`.
+`views.py`/`state.py`.
 
 ## Implementation notes (deviations from the plan above)
 

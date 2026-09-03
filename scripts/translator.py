@@ -50,13 +50,34 @@ SEED_X = "ByteDance-Seed/Seed-X-PPO-7B"
 
 # Seed-X language tags (appended to the prompt; required by its PPO training)
 SEED_X_TAGS = {
-    "arabic": "ar", "chinese": "zh", "czech": "cs", "danish": "da",
-    "dutch": "nl", "english": "en", "finnish": "fi", "french": "fr",
-    "german": "de", "greek": "el", "hungarian": "hu", "indonesian": "id",
-    "italian": "it", "japanese": "ja", "korean": "ko", "malay": "ms",
-    "norwegian": "no", "persian": "fa", "polish": "pl", "portuguese": "pt",
-    "romanian": "ro", "russian": "ru", "spanish": "es", "swedish": "sv",
-    "thai": "th", "turkish": "tr", "ukrainian": "uk", "vietnamese": "vi",
+    "arabic": "ar",
+    "chinese": "zh",
+    "czech": "cs",
+    "danish": "da",
+    "dutch": "nl",
+    "english": "en",
+    "finnish": "fi",
+    "french": "fr",
+    "german": "de",
+    "greek": "el",
+    "hungarian": "hu",
+    "indonesian": "id",
+    "italian": "it",
+    "japanese": "ja",
+    "korean": "ko",
+    "malay": "ms",
+    "norwegian": "no",
+    "persian": "fa",
+    "polish": "pl",
+    "portuguese": "pt",
+    "romanian": "ro",
+    "russian": "ru",
+    "spanish": "es",
+    "swedish": "sv",
+    "thai": "th",
+    "turkish": "tr",
+    "ukrainian": "uk",
+    "vietnamese": "vi",
 }
 SEED_X_NAMES = {v: k for k, v in SEED_X_TAGS.items()}
 
@@ -91,11 +112,11 @@ PROMPTS = {
     # separator in the output (the model merged them) → seed_x_chunk falls
     # back to the plain kind template.
     "title+context": "Translate the following {source_lang} title and the beginning of its article "
-                     "into {target_lang}:\n{text}\n\n{context} <{tag}>",
+    "into {target_lang}:\n{text}\n\n{context} <{tag}>",
     # A segment carved out of a larger block (link text, partial run) with
     # its sentence as context — same mechanics as title+context.
     "chunk+context": "Translate the following {source_lang} text into {target_lang}:\n"
-                     "{text}\n\n{context} <{tag}>",
+    "{text}\n\n{context} <{tag}>",
 }
 TERMINAL_PUNCT = ".,!?:;…。，！？；：、"
 
@@ -176,7 +197,8 @@ class SeedX:
     def _load(self):
         t0 = time.monotonic()
         self.model = AutoModelForCausalLM.from_pretrained(
-            SEED_X, dtype=torch.bfloat16, device_map="auto")
+            SEED_X, dtype=torch.bfloat16, device_map="auto"
+        )
         print(f"[seed-x loaded in {time.monotonic() - t0:.0f}s]", file=sys.stderr)
 
     def get(self):
@@ -207,8 +229,16 @@ class SeedX:
             print(f"[seed-x unloaded after {IDLE_UNLOAD_S}s idle]", file=sys.stderr)
 
 
-def seed_x_chunk(tokenizer, model, text: str, target_lang: str, tag: str,
-                 kind: str = "chunk", context: str = "", source_lang: str = "English"):
+def seed_x_chunk(
+    tokenizer,
+    model,
+    text: str,
+    target_lang: str,
+    tag: str,
+    kind: str = "chunk",
+    context: str = "",
+    source_lang: str = "English",
+):
     """Translate one segment; returns (translation, output_tokens, generation_seconds).
 
     With context, the segment is translated together with its surround (a
@@ -224,8 +254,13 @@ def seed_x_chunk(tokenizer, model, text: str, target_lang: str, tag: str,
     """
     # No chat template on this model; the trailing language tag is required (trans/ style prompt).
     template = PROMPTS.get(f"{kind}+context" if context else kind, PROMPTS["chunk"])
-    prompt = template.format(source_lang=source_lang, target_lang=target_lang,
-                             text=text, tag=tag, context=context)
+    prompt = template.format(
+        source_lang=source_lang,
+        target_lang=target_lang,
+        text=text,
+        tag=tag,
+        context=context,
+    )
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     t0 = time.monotonic()
     # The only stop string is the context separator. "<" must NOT be one:
@@ -234,11 +269,17 @@ def seed_x_chunk(tokenizer, model, text: str, target_lang: str, tag: str,
     # decode; the post-decode cut at the first "<" then enforces the wire
     # invariant (prose only) against markup bleed.
     kwargs = {"stop_strings": ["\n\n"], "tokenizer": tokenizer} if context else {}
-    out = model.generate(**inputs, max_new_tokens=max(1024, 2 * inputs.input_ids.shape[1]),
-                         do_sample=False, **kwargs)
+    out = model.generate(
+        **inputs,
+        max_new_tokens=max(1024, 2 * inputs.input_ids.shape[1]),
+        do_sample=False,
+        **kwargs,
+    )
     dt = time.monotonic() - t0
     n = out.shape[1] - inputs.input_ids.shape[1]
-    decoded = tokenizer.decode(out[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
+    decoded = tokenizer.decode(
+        out[0][inputs.input_ids.shape[1] :], skip_special_tokens=True
+    )
     translated = decoded.partition("<")[0]
     if not context:
         return translated.strip(), n, dt
@@ -256,8 +297,9 @@ def seed_x_chunk(tokenizer, model, text: str, target_lang: str, tag: str,
         return out, n, dt
     # The model merged segment and context (no separator, or an empty first
     # part): retry without the context.
-    again, n2, dt2 = seed_x_chunk(tokenizer, model, text, target_lang, tag,
-                                  kind=kind, source_lang=source_lang)
+    again, n2, dt2 = seed_x_chunk(
+        tokenizer, model, text, target_lang, tag, kind=kind, source_lang=source_lang
+    )
     return again, n + n2, dt + dt2
 
 
@@ -272,14 +314,20 @@ async def do_job(ws, job: Job, seed_x: SeedX) -> None:
     tokens = dt = 0
     for i, text in enumerate(job.texts):
         ctx = job.contexts[i] if i < len(job.contexts) else ""
-        translated, n, t = seed_x_chunk(tokenizer, model, text, lang_name, job.lang,
-                                        kind=job.kind, context=ctx)
+        translated, n, t = seed_x_chunk(
+            tokenizer, model, text, lang_name, job.lang, kind=job.kind, context=ctx
+        )
         texts.append(match_punctuation(text, translated))
         tokens += n
         dt += t
-    print(f"[{job.lang} {job.kind} {job.path or '/'}: {len(texts)} segments, "
-          f"{tokens} tokens in {dt:.1f}s = {tokens / dt:.1f} tok/s]", file=sys.stderr)
-    await ws.send(msgspec.json.encode(Result(lang=job.lang, key=job.key, texts=texts)).decode())
+    print(
+        f"[{job.lang} {job.kind} {job.path or '/'}: {len(texts)} segments, "
+        f"{tokens} tokens in {dt:.1f}s = {tokens / dt:.1f} tok/s]",
+        file=sys.stderr,
+    )
+    await ws.send(
+        msgspec.json.encode(Result(lang=job.lang, key=job.key, texts=texts)).decode()
+    )
     seed_x.idle()
 
 
@@ -291,23 +339,34 @@ async def serve(url: str, seed_x: SeedX) -> None:
         try:
             async with websockets.connect(url) as ws:
                 backoff = 1
-                await ws.send(msgspec.json.encode(Hello(langs=sorted(SEED_X_NAMES))).decode())
-                print(f"[connected; announced {len(SEED_X_NAMES)} language capabilities]",
-                      file=sys.stderr)
+                await ws.send(
+                    msgspec.json.encode(Hello(langs=sorted(SEED_X_NAMES))).decode()
+                )
+                print(
+                    f"[connected; announced {len(SEED_X_NAMES)} language capabilities]",
+                    file=sys.stderr,
+                )
                 async for raw in ws:
                     await do_job(ws, msgspec.json.decode(raw, type=Job), seed_x)
         except websockets.exceptions.InvalidHandshake:
             sys.exit("handshake rejected; check the URL (including the key)")
         except (OSError, websockets.exceptions.ConnectionClosed) as e:
-            print(f"[connection lost ({e}); reconnecting in {backoff}s]", file=sys.stderr)
+            print(
+                f"[connection lost ({e}); reconnecting in {backoff}s]", file=sys.stderr
+            )
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 60)
 
 
 def main():
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("url", help="full translator WebSocket URL including the key, "
-                               "e.g. ws://localhost:8410/_translate/KEY")
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    p.add_argument(
+        "url",
+        help="full translator WebSocket URL including the key, "
+        "e.g. ws://localhost:8410/_translate/KEY",
+    )
     args = p.parse_args()
     if not args.url.startswith(("ws://", "wss://")):
         p.error("url must start with ws:// or wss://")

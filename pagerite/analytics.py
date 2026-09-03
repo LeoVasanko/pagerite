@@ -362,6 +362,7 @@ def _is_bot_ua(ua: str) -> bool:
     """True when the UA claims a crawler identity (bot or spider)."""
     return bool(_BOT_UA.search(ua))
 
+
 #: Plain-404 count per IP that classifies it as abuse even without a
 #: telltale path hit.
 _ABUSE_404_THRESHOLD = 10
@@ -399,9 +400,7 @@ def _client_hash(ip: str, ua: str, lang: str) -> bytes:
     The key is the prettified IP (IPv6 /64), the raw UA string and the
     extracted language tag, separated by null bytes.
     """
-    return blake3.blake3(
-        f"{_network_ip(ip)}\0{ua}\0{lang}".encode()
-    ).digest()[:6]
+    return blake3.blake3(f"{_network_ip(ip)}\0{ua}\0{lang}".encode()).digest()[:6]
 
 
 class Store:
@@ -538,7 +537,9 @@ class Store:
                 if nav.to.startswith("/"):
                     nav_views = display.views.setdefault(nav.to, {})
                     nav_views[nb] = nav_views.get(nb, 0) + 1
-                nbuckets = display.transitions.setdefault(nav.fr, {}).setdefault(nav.to, {})
+                nbuckets = display.transitions.setdefault(nav.fr, {}).setdefault(
+                    nav.to, {}
+                )
                 nbuckets[nb] = nbuckets.get(nb, 0) + 1
         return display
 
@@ -664,16 +665,22 @@ class Store:
             self.data.abuse_ips[ip] = True
             moved = [h for h in self.data.crawlers if self._client_ip(h.client) == ip]
             if moved:
-                self.data.crawlers = [h for h in self.data.crawlers if self._client_ip(h.client) != ip]
+                self.data.crawlers = [
+                    h for h in self.data.crawlers if self._client_ip(h.client) != ip
+                ]
                 for h in moved:
                     self._abuse_hit(
                         h.client,
                         h.entry + (f"?{h.query}" if h.query else ""),
                         start=h.start,
                     )
-            pending = [h for h in self.pending_crawlers if self._client_ip(h.client) == ip]
+            pending = [
+                h for h in self.pending_crawlers if self._client_ip(h.client) == ip
+            ]
             if pending:
-                self.pending_crawlers = [h for h in self.pending_crawlers if self._client_ip(h.client) != ip]
+                self.pending_crawlers = [
+                    h for h in self.pending_crawlers if self._client_ip(h.client) != ip
+                ]
                 for h in pending:
                     self._abuse_hit(
                         h.client,
@@ -917,5 +924,7 @@ class Store:
             else:
                 visit.trail[now] = TrailItem(to=target, status=target_status)
         self._save()
-        visit_index = index if index is not None and index < len(self.data.visits) else None
+        visit_index = (
+            index if index is not None and index < len(self.data.visits) else None
+        )
         return visit_index, flushed

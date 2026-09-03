@@ -1,7 +1,7 @@
 """Translator service protocol, dispatcher and its transport-independent core.
 
 The external machine-translation service connects over WebSocket
-(``/_translate/<key>``, the route itself is in app.py) and exchanges JSON
+(``/_translate/<key>``, the route itself is in api.py) and exchanges JSON
 frames decoded into the tagged msgspec structs below (``bytes`` fields ride
 as base64 — no manual encoding anywhere). This module holds everything
 else: the message structs, the connected-client dispatcher (``Dispatcher``
@@ -117,7 +117,9 @@ def pending_items(data: Data, lang: str) -> list[TransItem]:
         if key in seen or lang in data.trans.get(key, {}):
             return
         seen.add(key)
-        items.append(TransItem(key=key, text=text, path=path, kind=kind, context=context))
+        items.append(
+            TransItem(key=key, text=text, path=path, kind=kind, context=context)
+        )
 
     def opening(node: Node) -> str:
         """The article's opening prose (first segment, capped): the title
@@ -137,8 +139,13 @@ def pending_items(data: Data, lang: str) -> list[TransItem]:
             node_lang = node.language or inherited
             if node.chunks is not None and node_lang != lang:
                 if node.title:
-                    emit(chunk_key(node.title), node.title, path, "title",
-                         context=opening(node))
+                    emit(
+                        chunk_key(node.title),
+                        node.title,
+                        path,
+                        "title",
+                        context=opening(node),
+                    )
                 for h in node.chunks:
                     text = data.chunks.get(h)
                     if (
@@ -238,7 +245,7 @@ class Dispatcher:
     def __init__(self, data: Data, db: Kanta, invalidate) -> None:
         self.data = data
         self.db = db
-        #: Sync content-change hook (app._invalidate_pages), called inside
+        #: Sync content-change hook (state._invalidate_pages), called inside
         #: transactions; schedules the next dispatch pass.
         self.invalidate = invalidate
         #: Connected translator sockets and their per-connection state.
@@ -246,6 +253,12 @@ class Dispatcher:
         #: (lang, chunk key) of fragments whose result failed validation
         #: (segment count, empty or non-prose segments, segments.py) this run.
         self.validation_failures: set[tuple[str, bytes]] = set()
+
+    def reset_validation_failures(self) -> None:
+        """Clear the skip list of fragments rejected this run (segment
+        validation): a translations refresh is precisely the "another
+        chance" for them."""
+        self.validation_failures.clear()
 
     def schedule(self) -> None:
         """Schedule a dispatch pass, if any translator is connected.
@@ -265,9 +278,7 @@ class Dispatcher:
     async def _dispatch(self) -> None:
         """Offer one pending item to every free capable connection."""
         wanted = {
-            tag
-            for lang in self.data.translate_langs
-            if (tag := i18n.base_tag(lang))
+            tag for lang in self.data.translate_langs if (tag := i18n.base_tag(lang))
         }
         if not wanted:
             return
@@ -283,7 +294,10 @@ class Dispatcher:
             original = ""
             for lang in sorted(langs):
                 for item in pending_items(self.data, lang):
-                    if (lang, item.key) in inflight or (lang, item.key) in self.validation_failures:
+                    if (lang, item.key) in inflight or (
+                        lang,
+                        item.key,
+                    ) in self.validation_failures:
                         continue
                     spans, texts, contexts = split(item.text)
                     if not texts:
@@ -294,8 +308,12 @@ class Dispatcher:
                         # (TransItem.context), not its own one-word block.
                         contexts = [item.context] * len(texts)
                     job = Job(
-                        lang=lang, key=item.key, texts=texts,
-                        path=item.path, kind=item.kind, contexts=contexts,
+                        lang=lang,
+                        key=item.key,
+                        texts=texts,
+                        path=item.path,
+                        kind=item.kind,
+                        contexts=contexts,
                     )
                     break
                 if job is not None:
@@ -339,9 +357,9 @@ class Dispatcher:
                     if state is not None:  # one Hello per connection
                         await ws.close(code=1002)
                         return
-                    state = _Connection({
-                        tag for lang in msg.langs if (tag := i18n.base_tag(lang))
-                    })
+                    state = _Connection(
+                        {tag for lang in msg.langs if (tag := i18n.base_tag(lang))}
+                    )
                     self.clients[ws] = state
                     self.schedule()
                 else:  # Result
@@ -357,7 +375,11 @@ class Dispatcher:
                     state.inflight = None
                     state.spans = []
                     state.original = ""
-                    text = join(original, spans, texts) if len(texts) == len(spans) else None
+                    text = (
+                        join(original, spans, texts)
+                        if len(texts) == len(spans)
+                        else None
+                    )
                     if text is None:
                         # The model broke the segment contract (count
                         # mismatch, empty or non-prose segment): drop the
@@ -367,11 +389,14 @@ class Dispatcher:
                         self.validation_failures.add((lang, msg.key))
                         logger.warning(
                             "[%s] result for chunk %s rejected: invalid segments",
-                            lang, msg.key.hex(),
+                            lang,
+                            msg.key.hex(),
                         )
                         self.schedule()
                         continue
-                    with self.db.transaction("translator results", user=clientkey, extra=lang):
+                    with self.db.transaction(
+                        "translator results", user=clientkey, extra=lang
+                    ):
                         paths = store_results(
                             self.data, lang, [TransResult(key=msg.key, text=text)]
                         )
@@ -379,7 +404,9 @@ class Dispatcher:
                     if paths:
                         logger.info(
                             "[%s] now available for %d page(s): %s",
-                            lang, len(paths), ", ".join(sorted(paths)),
+                            lang,
+                            len(paths),
+                            ", ".join(sorted(paths)),
                         )
         except WebSocketDisconnect:
             pass

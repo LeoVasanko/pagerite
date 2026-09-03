@@ -347,7 +347,7 @@ patches, so the dispatcher re-translates everything from scratch; the
 run's validation skip-list is cleared with it, giving rejected fragments
 another chance.
 
-Dispatch semantics (the `Dispatcher` in `pagerite/translate.py`; app.py only
+Dispatch semantics (the `Dispatcher` in `pagerite/translate.py`; api.py only
 registers the route):
 
 - **One job at a time per connection** — the next job is sent only after

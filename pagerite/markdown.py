@@ -422,7 +422,10 @@ def _heading_ids(state) -> None:
     heads = [
         (i, token)
         for i, token in enumerate(tokens)
-        if token.type == "heading_open" and token.tag in ("h1", "h2") and token.level == 0 and i != first_h1
+        if token.type == "heading_open"
+        and token.tag in ("h1", "h2")
+        and token.level == 0
+        and i != first_h1
     ]
     if len(heads) < ANCHOR_MIN_HEADINGS:
         return
@@ -472,7 +475,9 @@ def make_md(*, verbatim: bool = False) -> MarkdownIt:
         .use(deflist_plugin)
         # label wrapping (render) puts the item text inside the checkbox
         # <label> html_inline; without it the text stays a plain token.
-        .use(tasklists_plugin, enabled=True, label=not verbatim, label_after=not verbatim)
+        .use(
+            tasklists_plugin, enabled=True, label=not verbatim, label_after=not verbatim
+        )
         .use(gfm_autolink_plugin)
         .use(sub_plugin)
         .use(superscript_plugin)

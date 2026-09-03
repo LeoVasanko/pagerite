@@ -91,22 +91,22 @@ CRAWLER_PROFILES: list[CrawlerProfile] = [
     CrawlerProfile(
         "googlebot",
         "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Googlebot/2.1; +http://www.google.com/bot.html) Chrome/128.0.0.0 Safari/537.36",
-        "66.249.64.66",                         # US, Google
+        "66.249.64.66",  # US, Google
     ),
     CrawlerProfile(
         "bingbot",
         "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm) Chrome/128.0.0.0 Safari/537.36",
-        "40.77.167.0",                          # US, Microsoft
+        "40.77.167.0",  # US, Microsoft
     ),
     CrawlerProfile(
         "duckduckbot",
         "DuckDuckBot/1.1; (+http://duckduckgo.com/duckduckbot.html)",
-        "95.217.0.1",                           # Germany, Hetzner VPS
+        "95.217.0.1",  # Germany, Hetzner VPS
     ),
     CrawlerProfile(
         "curl",
         "curl/8.5.0",
-        "139.162.0.1",                          # Singapore, Linode VPS
+        "139.162.0.1",  # Singapore, Linode VPS
     ),
 ]
 
@@ -115,14 +115,14 @@ CRAWLER_PROFILES: list[CrawlerProfile] = [
 # host part; the host may rotate once mid-session.
 RESIDENTIAL_SOURCE_IPS: list[str] = [
     # Residential IPv4
-    "91.154.140.209",                       # Finland, Elisa
-    "84.143.145.207",                       # Germany, Deutsche Telekom
-    "220.165.255.254",                      # China, Chinanet / China Telecom
-    "84.235.83.162",                        # Saudi Arabia, SaudiNet / STC
+    "91.154.140.209",  # Finland, Elisa
+    "84.143.145.207",  # Germany, Deutsche Telekom
+    "220.165.255.254",  # China, Chinanet / China Telecom
+    "84.235.83.162",  # Saudi Arabia, SaudiNet / STC
     # Residential IPv6 /64 prefixes
-    "2a02:8109:ac82:6f0c::/64",             # Germany, Deutsche Telekom
-    "240e:45d:1e60:5b0::/64",               # China, China Telecom
-    "2409:8904:6720:4123::/64",             # China, China Unicom
+    "2a02:8109:ac82:6f0c::/64",  # Germany, Deutsche Telekom
+    "240e:45d:1e60:5b0::/64",  # China, China Telecom
+    "2409:8904:6720:4123::/64",  # China, China Unicom
 ]
 
 # Concrete datacenter IPs used for abuse scanner bursts.  They stay pinned for
@@ -130,9 +130,9 @@ RESIDENTIAL_SOURCE_IPS: list[str] = [
 # Index 0 randomises its UA per request, index 1 uses a fixed browser UA,
 # and index 2 uses a fixed crawler UA.
 ABUSE_SOURCE_IPS: list[str] = [
-    "45.63.0.12",                           # US, Vultr VPS
-    "138.197.0.89",                         # US, DigitalOcean / Cloudways
-    "2a01:4f8:0:2::1234",                   # Germany, Hetzner VPS
+    "45.63.0.12",  # US, Vultr VPS
+    "138.197.0.89",  # US, DigitalOcean / Cloudways
+    "2a01:4f8:0:2::1234",  # Germany, Hetzner VPS
 ]
 
 # Paths commonly probed by attackers looking for exposed config, admin panels,
@@ -284,10 +284,16 @@ TAGGED_REFERRERS: list[tuple[str, dict[str, str]]] = [
     ("https://twitter.com/", {"utm_source": "twitter", "utm_medium": "social"}),
     ("https://www.linkedin.com/", {"utm_source": "linkedin", "utm_medium": "social"}),
     ("https://github.com/", {"utm_source": "github", "utm_medium": "referral"}),
-    ("https://news.ycombinator.com/", {"utm_source": "hackernews", "utm_medium": "referral"}),
+    (
+        "https://news.ycombinator.com/",
+        {"utm_source": "hackernews", "utm_medium": "referral"},
+    ),
     ("https://www.reddit.com/", {"utm_source": "reddit", "utm_medium": "social"}),
     ("https://medium.com/", {"utm_source": "medium", "utm_medium": "referral"}),
-    ("https://www.producthunt.com/", {"utm_source": "producthunt", "utm_medium": "referral"}),
+    (
+        "https://www.producthunt.com/",
+        {"utm_source": "producthunt", "utm_medium": "referral"},
+    ),
 ]
 
 # Fraction of referered sessions that also carry UTM tags.
@@ -437,7 +443,7 @@ def _random_ipv6_host(prefix: str) -> str:
         raise ValueError(f"only /64 IPv6 prefixes are supported, got {prefix!r}")
     if base.endswith("::"):
         base = base[:-2]
-    host = ":".join(f"{random.randint(0, 0xffff):04x}" for _ in range(4))
+    host = ":".join(f"{random.randint(0, 0xFFFF):04x}" for _ in range(4))
     return f"{base}:{host}"
 
 
@@ -760,9 +766,11 @@ def _run_abuse_scanner(base: str, ip_index: int) -> dict[str, Any]:
     if ua_mode == 0:
         get_ua = _abuse_ua
     elif ua_mode == 1:
+
         def get_ua() -> str:
             return BROWSER_PROFILES[0].user_agent
     else:
+
         def get_ua() -> str:
             return CRAWLER_PROFILES[0].user_agent
 
@@ -804,8 +812,8 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         nargs="?",
         default="http://localhost:8200",
         help="Base URL of the Pagerite site (default: http://localhost:8200). "
-             "A bare :PORT or PORT is treated as http://localhost:PORT; a "
-             "missing scheme defaults to http://.",
+        "A bare :PORT or PORT is treated as http://localhost:PORT; a "
+        "missing scheme defaults to http://.",
     )
     parser.add_argument(
         "-t",

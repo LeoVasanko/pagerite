@@ -8,9 +8,10 @@ directory, e.g. `localhost/analytics.json`).
 - `pagerite/analytics.py` — data model (`Analytics`, `Client`, `Visit`,
   `CrawlerHit`, `AbuseHit`, `Favicon`) and the `Store` (in-memory data + session map,
   atomic JSON persistence).
-- `pagerite/app.py` — entry-referer stashing in `show_page` (`_track_entry`),
-  the `/_ws` activity WebSocket, and `WebSocket /_api/ws/analytics`
-  (admin-gated like every `/_api` endpoint).
+- `pagerite/pages.py` — entry-referer stashing in `show_page` (`_track_entry`,
+  in `pagerite/tracking.py`), 404 recording.
+- `pagerite/tracking.py` — the `/_ws` activity WebSocket, and
+  `WebSocket /_api/ws/analytics` (admin-gated like every `/_api` endpoint).
 - `frontend/src/pagerite.js` — the client activity channel and the 📊 pen.
 - `frontend/src/AnalyticsView.vue` — viewer component rendered inside the
   normal site layout on the `/_a` analytics page.

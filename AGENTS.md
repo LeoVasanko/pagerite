@@ -10,11 +10,16 @@ Please instead ask the user to see from dev tools what you need, e.g. to look up
 Pagerite is a CMS. See `docs` for the full design and implementation details. Key files for code changes:
 
 - `pagerite/` — Python backend package (hatchling build target).
-  - `app.py` — FastAPI app and route registration.
+  - `app.py` — thin FastAPI assembly: lifespan, `FastAPI(...)`, router includes (route ordering: api/tracking/files routers, then `frontend.route(app, "/")`, then the pages catch-all last).
+  - `state.py` — shared core, no routes: env-derived site constants, `data`/`kanta`, `analytics_store`, the fastapi-vue `frontend`, the render cache (`_html_response`, `_invalidate_pages`), the translator `dispatcher`, slug helpers, `@kanta.bootstrap` hooks.
+  - `files.py` — `FileStore` (content-addressed, RAM-cached), image derivative helpers (`store_image`), file routes (`/_api/files`, `/_f/`, `/_themes/`, `/_fonts/`, favicon settings).
+  - `api.py` — editor REST + WS: `/_api/pages`, `/_api/structure`, `/_api/settings`, `/_api/toggle-task`, `/_api/translations`, `/_api/ws/editor`, `/_translate/{key}`.
+  - `tracking.py` — visit analytics: GeoIP, client enrichment, favicon fetch, `/_ws`, `/_api/ws/analytics`, the `/_a` page (docs/analytics.md).
+  - `pages.py` — public content pages: `/`, `/sitemap.xml`, `/robots.txt`, the `/{path:path}` catch-all.
   - `data.py` — msgspec Structs for the kanta database.
   - `chunks.py` — block-level Markdown chunking and content-hash keys for the chunk stores (docs/migrate.md).
   - `i18n.py` — language selection, translation assembly (chunks + patches) and translated-edit recording (user patches, per-language title overrides, refresh).
-  - `translate.py` — translator service protocol (msgspec structs), the connected-client `Dispatcher` (job pipeline, result validation) and pending/store core for the `/_translate/{key}` WebSocket (docs/localization.md); app.py only registers the route.
+  - `translate.py` — translator service protocol (msgspec structs), the connected-client `Dispatcher` (job pipeline, result validation) and pending/store core for the `/_translate/{key}` WebSocket (docs/localization.md); api.py only registers the route.
   - `segments.py` — the translation round trip: fragments split into pure-prose wire segments (via markdown.make_md's verbatim parser; link- and formatting-carrying blocks stay whole, link/formatted texts inline, Markdown stripped) and translations spliced back by source offset, link/formatting markdown re-inserted at weight-mapped positions (docs/localization.md).
   - `migrations.py` — kanta migrations (`migrate_vN`); ALL schema/storage upgrades live here (raw state dict before struct decoding), never in the app lifespan: v1 moves legacy in-db file blobs to the on-disk store and rebuilds the legacy flat `pages` as the menu tree, v2 rewrites `/_f/{hash}.ext` image links to the extension-less form, backfills AVIF/WebP/JPEG derivatives on disk and drops the obsolete `version` field.
   - `markdown.py` — markdown-it-py renderer.

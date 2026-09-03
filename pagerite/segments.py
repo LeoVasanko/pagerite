@@ -222,7 +222,9 @@ def _linked_block(
     reconstruction; anything not byte-exact (entities, escapes, an odd
     link tail) bails to the fallback.
     """
-    pieces: list[tuple[str, str]] = []  # (text, mark): "" plain, "link", else the delimiter
+    pieces: list[
+        tuple[str, str]
+    ] = []  # (text, mark): "" plain, "link", else the delimiter
     buf: list[str] = []  # current plain piece
     link: list[str] | None = None  # current mark's text parts
     mark_kind = ""  # the current mark's opener ("link" or the delimiter)
@@ -236,7 +238,10 @@ def _linked_block(
             link = []
             mark_kind = "link" if tok.type == "link_open" else tok.markup
         elif tok.type in ("link_close", "strong_close", "em_close", "s_close"):
-            if link is None or ("link" if tok.type == "link_close" else tok.markup) != mark_kind:
+            if (
+                link is None
+                or ("link" if tok.type == "link_close" else tok.markup) != mark_kind
+            ):
                 return None
             inner = "".join(link)
             if not _LETTER.search(inner):
@@ -294,29 +299,31 @@ def _linked_block(
         # block-trailing one the scanned link tail or the close delimiter.
         if i == 0:
             opener = "[" if kind == "link" else kind
-            if s < len(opener) or source[s - len(opener):s] != opener:
+            if s < len(opener) or source[s - len(opener) : s] != opener:
                 return None
             pre, span_start = opener, s - len(opener)
         elif pieces[i - 1][1]:
             pre = ""  # the previous mark's post covers the whole gap
         else:
-            pre = source[located[i - 1][1]:s]
+            pre = source[located[i - 1][1] : s]
         if i + 1 < len(pieces):
-            post = source[e:located[i + 1][0]]
+            post = source[e : located[i + 1][0]]
         elif kind == "link":
             m = _LINK_TAIL.match(source, e)
             if m is None:
                 return None
             post, span_end = m.group(), m.end()
         else:
-            if source[e:e + len(kind)] != kind:
+            if source[e : e + len(kind)] != kind:
                 return None
             post, span_end = kind, e + len(kind)
         ps = min(max(offset - lead, 0), len(wire))
         pe = min(max(offset + len(text_) - lead, 0), len(wire))
         if pe <= ps:
             return None
-        marks.append(Mark(_weight(wire[:ps]), _weight(wire[:pe]), pre, post, wire[ps:pe]))
+        marks.append(
+            Mark(_weight(wire[:ps]), _weight(wire[:pe]), pre, post, wire[ps:pe])
+        )
         offset += len(text_)
     # Verify: the marks must reconstruct the source span exactly (the only
     # real risk is the guessed tail of a trailing link).
@@ -491,7 +498,7 @@ def join(original: str, spans: list[Span], texts: list[str]) -> str | None:
             translation = _place_marks(translation, span.weight, span.marks)
             if translation is None:
                 return None
-        out.append(original[cursor:span.start])
+        out.append(original[cursor : span.start])
         out.append(translation)
         cursor = span.end
     out.append(original[cursor:])
