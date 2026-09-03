@@ -75,25 +75,33 @@ const viewChart = computed(() => buildChart(viewSeries.value, now.value))
       <svg class="chart" :viewBox="`${-MARGIN_L} 0 ${VIEW_W} ${VIEW_H}`"
            :style="{ maxWidth: `${VIEW_W}px`, marginLeft: CHART_MARGIN }"
            role="img" :aria-label="axisLabel(c.chart.unit, c.ylabel)">
+        <!-- Clip the plot curves to the chart area: past-week overlays can
+             run far above the autoscaled y range, and the svg itself is
+             overflow: visible for the axis labels. -->
+        <clipPath :id="`plot-${c.ylabel}`">
+          <rect x="0" y="0" :width="CHART_W" :height="CHART_H" />
+        </clipPath>
         <line v-for="g in c.chart.majors.slice(1)" :key="'j' + g.value"
               :x1="0" :x2="CHART_W" :y1="g.y" :y2="g.y" class="major" />
         <template v-for="t in c.chart.xticks" :key="'t' + t.x">
           <line v-if="t.line" :x1="t.x" :x2="t.x" :y1="0" :y2="CHART_H"
                 class="minor vertical" />
         </template>
-        <template v-if="c.chart.bars">
-          <rect v-for="(b, i) in c.chart.bars" :key="'b' + i"
-                :x="b.x" :y="b.y" :width="b.width" :height="b.height" class="bar" />
-          <path :d="c.chart.skyline" class="line" />
-        </template>
-        <template v-else>
-          <!-- Oldest overlay weeks first so the current week paints on top. -->
-          <template v-for="(s, i) in [...c.chart.series].reverse()" :key="i">
-            <path v-if="s.area" :d="s.area" class="area" />
-            <path :d="s.line" class="line" :class="{ past: s.past }"
-                  :style="{ opacity: s.opacity }" />
+        <g :clip-path="`url(#plot-${c.ylabel})`">
+          <template v-if="c.chart.bars">
+            <rect v-for="(b, i) in c.chart.bars" :key="'b' + i"
+                  :x="b.x" :y="b.y" :width="b.width" :height="b.height" class="bar" />
+            <path :d="c.chart.skyline" class="line" />
           </template>
-        </template>
+          <template v-else>
+            <!-- Oldest overlay weeks first so the current week paints on top. -->
+            <template v-for="(s, i) in [...c.chart.series].reverse()" :key="i">
+              <path v-if="s.area" :d="s.area" class="area" />
+              <path :d="s.line" class="line" :class="{ past: s.past }"
+                    :style="{ opacity: s.opacity }" />
+            </template>
+          </template>
+        </g>
         <line :x1="0" :x2="CHART_W" :y1="CHART_H - 0.5" :y2="CHART_H - 0.5"
               class="axis" />
         <text v-for="g in c.chart.majors" :key="'y' + g.value" x="-5" :y="g.y"
