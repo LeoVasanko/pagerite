@@ -30,17 +30,27 @@ walking the tree (``resolve``), moves are slot detach/attach
 
 import asyncio
 import logging
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
+from fastapi_vue import Frontend
 
 from pagerite import api, files, pages, tracking
 from pagerite.__main__ import DEVMODE
 from pagerite.files import file_store
-from pagerite.state import analytics_store, config, frontend, kanta
-from collections.abc import AsyncGenerator
+from pagerite.state import analytics_store, config, kanta
+
 logger = logging.getLogger(__name__)
+
+# Vue build served at the site root, no SPA catch-all (assets only). The
+# build mirrors the URL space: hashed, immutable files live under
+# /_assets/ (assetsDir: '_/assets'), the favicon at /favicon.ico.
+frontend = Frontend(
+    Path(__file__).with_name("frontend-build"), spa=False, cached="/_assets/"
+)
 
 
 @asynccontextmanager

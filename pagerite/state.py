@@ -3,7 +3,7 @@
 Everything the route modules (files, api, tracking, pages) need that is not
 a route itself: environment-derived paths and tunables, the ``Data`` root
 with its ``Kanta`` handle (migrations in pagerite.migrations), the analytics
-store, the fastapi-vue ``Frontend``, the page render cache
+store, the page render cache
 (``_render_html``/``_cached_body``/``_html_response`` plus the
 ``_render_gen`` ETag generation, bumped by ``_invalidate_pages`` on every
 content/settings write), the translator ``dispatcher``, the slug charset
@@ -22,7 +22,6 @@ from pathlib import Path
 import blake3
 from fastapi import HTTPException, Request
 from fastapi.responses import Response
-from fastapi_vue import Frontend
 from kanta import Kanta
 from zstandard import ZstdCompressor
 
@@ -79,12 +78,6 @@ FAVICON_MAXSIZE = 192
 # Our own data root; kanta edits it in place, reads are plain attribute access.
 data = Data()
 kanta = Kanta(DB_PATH, data, migrations="pagerite.migrations")
-
-# Vue build served at the site root, no SPA catch-all (assets only). The
-# build mirrors the URL space: hashed, immutable files live under
-# /_assets/ (assetsDir: '_/assets'), the favicon at /favicon.ico.
-BUILD_DIR = Path(__file__).with_name("frontend-build")
-frontend = Frontend(BUILD_DIR, spa=False, cached="/_assets/")
 
 # Dynamic HTML is compressed per request at level 9 (static assets are
 # already pre-compressed by fastapi-vue's Frontend).
