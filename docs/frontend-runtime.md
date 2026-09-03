@@ -26,6 +26,7 @@ Vite builds ES-module `.js` outputs; in dev the backend links them as `<script t
 
 All site data lives under `<hostname>/` in the cwd — `content.kantadb`,
 `analytics.json` and `files/` — where `<hostname>` is the CLI's first
-positional argument (default `localhost`, exported as `PAGERITE_HOSTNAME`;
+positional argument (default `localhost`, passed to the app as JSON in
+`PAGERITE_CONFIG`, see `pagerite/config.py`;
 `PAGERITE_DB`/`PAGERITE_ANALYTICS`/`PAGERITE_FILES` override individual
 paths). gitignored. Do not delete it without asking.

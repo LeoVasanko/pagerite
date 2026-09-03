@@ -25,6 +25,7 @@ from html5tagger import HTML, Document, E, Template
 from platformdirs import site_data_dir, user_data_path
 
 from pagerite import i18n
+from pagerite.config import load as _load_config
 from pagerite.data import Data, Node, node_markdown, prettify, resolve, sorted_nodes
 from pagerite.i18n import Translation
 from pagerite.markdown import render
@@ -45,6 +46,10 @@ def _data_roots() -> list[Path]:
     return [Path(r) for r in roots]
 
 
+#: The CLI-passed configuration (PAGERITE_CONFIG) for this process.
+config = _load_config()
+
+
 def _theme_dirs() -> list[Path]:
     """Theme search roots, most specific first; first match wins per file.
 
@@ -57,7 +62,7 @@ def _theme_dirs() -> list[Path]:
     """
     return [
         Path("themes"),
-        Path(os.getenv("PAGERITE_HOSTNAME", "localhost")) / "themes",
+        Path(config.hostname) / "themes",
         *(root / "themes" for root in _data_roots()),
         Path(__file__).parent / "themes",
     ]
@@ -73,7 +78,7 @@ THEME_DIRS = _theme_dirs()
 # built-in --font-* variables.
 FONT_DIRS = [
     Path("fonts"),
-    Path(os.getenv("PAGERITE_HOSTNAME", "localhost")) / "fonts",
+    Path(config.hostname) / "fonts",
     *(root / "fonts" for root in _data_roots()),
 ]
 

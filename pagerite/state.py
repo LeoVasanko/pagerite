@@ -29,6 +29,7 @@ from zstandard import ZstdCompressor
 from pagerite import analytics, i18n, seed, translate, views
 from pagerite.__main__ import DEVMODE
 from pagerite.chunks import store_chunks
+from pagerite.config import load
 from pagerite.data import (
     Data,
     Node,
@@ -39,10 +40,13 @@ from pagerite.data import (
 
 logger = logging.getLogger(__name__)
 
+#: The CLI-passed configuration (PAGERITE_CONFIG) for this process.
+config = load()
+
 # Site identity: the hostname comes from the CLI (first positional argument,
-# exported as PAGERITE_HOSTNAME) and names the per-site data directory
+# passed in PAGERITE_CONFIG) and names the per-site data directory
 # ``<hostname>/{content.kantadb, analytics.json, files}`` under the cwd.
-HOSTNAME = os.getenv("PAGERITE_HOSTNAME", "localhost")
+HOSTNAME = config.hostname
 SITE_DIR = Path(HOSTNAME)
 #: Public origin of the site, used for absolute social/canonical/sitemap
 #: URLs. Localhost serves varying ports, so it falls back to the request's

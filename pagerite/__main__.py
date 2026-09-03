@@ -4,8 +4,10 @@ import argparse
 import os
 from pathlib import Path
 
+import msgspec
 from fastapi_vue import server
-from fastapi_vue.hostutil import parse_endpoints
+
+from pagerite.config import Config
 
 DEFAULT_PORT = 8100
 DEVMODE = os.getenv("PAGERITE_DEV") == "1"
@@ -36,19 +38,12 @@ def main() -> None:
         help="Download/update the DB-IP city lite database before starting.",
     )
     args = parser.parse_args()
-    # Export the hostname before pagerite.app is imported: it derives the
-    # data directory and public origin from it at import time.
-    os.environ["PAGERITE_HOSTNAME"] = args.hostname
-    # And the listen port: the app prints the translator WS URL at startup,
-    # which for localhost includes the actual port.
-    for endpoint in parse_endpoints(args.listen, DEFAULT_PORT):
-        if "port" in endpoint:
-            os.environ["PAGERITE_PORT"] = str(endpoint["port"])
-            break
-    # --dbip: the app lifespan downloads/updates the DB-IP database, where
-    # logging is already set up.
-    if args.dbip:
-        os.environ["PAGERITE_DBIP"] = "1"
+    # Hand configuration to the app as JSON in PAGERITE_CONFIG; it must be
+    # set before pagerite.app is imported, as state.py reads it at import
+    # time (data directory, public origin).
+    os.environ["PAGERITE_CONFIG"] = msgspec.json.encode(
+        Config(hostname=args.hostname, dbip=args.dbip)
+    ).decode()
     run_args: dict = {}
     if args.hostname != "localhost":
         # A public site sits behind TLS on its hostname; show that URL in the

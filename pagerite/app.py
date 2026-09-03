@@ -30,7 +30,6 @@ walking the tree (``resolve``), moves are slot detach/attach
 
 import asyncio
 import logging
-import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -39,7 +38,7 @@ from fastapi.responses import Response
 from pagerite import api, files, pages, tracking
 from pagerite.__main__ import DEVMODE
 from pagerite.files import file_store
-from pagerite.state import analytics_store, frontend, kanta
+from pagerite.state import analytics_store, config, frontend, kanta
 from collections.abc import AsyncGenerator
 logger = logging.getLogger(__name__)
 
@@ -53,7 +52,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator:
         # --dbip: update the DB-IP database first, then decompress/open the
         # MMDB once.  Lookups are then read-only and safe to run in
         # background ``to_thread`` workers.
-        if os.environ.get("PAGERITE_DBIP") == "1":
+        if config.dbip:
             await asyncio.to_thread(tracking._download_dbip)
         await asyncio.to_thread(tracking._geoip._load)
         analytics_store.subscribe(tracking._schedule_analytics_broadcast)
