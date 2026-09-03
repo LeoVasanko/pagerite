@@ -66,6 +66,10 @@ from pagerite.markdown import render, toggle_task
 
 logger = logging.getLogger(__name__)
 
+# mediapreview logs pyvips noise ("VipsForeignSaveJpegTarget argument strip is
+# deprecated", "threadpool completed with N workers") at INFO; keep warnings.
+logging.getLogger("mediapreview").setLevel(logging.WARNING)
+
 # Site identity: the hostname comes from the CLI (first positional argument,
 # exported as PAGERITE_HOSTNAME) and names the per-site data directory
 # ``<hostname>/{content.kantadb, analytics.json, files}`` under the cwd.
