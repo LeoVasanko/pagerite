@@ -305,14 +305,15 @@ An external machine-translation service connects over WebSocket at
 `/_translate/{key}` — deliberately **not** under `/_api`: the SSO
 forward-auth does not cover that route, and the key in the path is the
 access control. Keys live in `Data.translate_keys` (key -> display name) —
-12 lowercase alphanumeric characters each, the first one generated at
-database bootstrap and multiple keys reserved for future management (e.g.
-a web UI). The full WS URL(s) are printed in the startup log
-(`ws://localhost:{port}/_translate/{key}` locally,
-`wss://{hostname}/_translate/{key}` on a public hostname) and the keys are
-surfaced to the admin in `GET /_api/settings` as `translate_keys`. An
-unknown or empty key rejects the handshake (close-before-accept → HTTP
-403). Transactions storing results record the connecting key as the kanta
+12 lowercase alphanumeric characters each; the first is generated at
+database bootstrap, further ones are managed in the editor's lang tab
+(add/rename/delete ride the `PUT /_api/settings` round-trip; the name is
+an inline display label only). The full WS URL(s) are printed in the
+startup log (`ws://localhost:{port}/_translate/{key}` locally,
+`wss://{hostname}/_translate/{key}` on a public hostname) and shown in the
+lang tab as click-to-copy links; the keys are also surfaced in
+`GET /_api/settings` as `translate_keys`. An unknown or empty key rejects
+the handshake (close-before-accept → HTTP 403). Transactions storing results record the connecting key as the kanta
 transaction `user`.
 
 Frames are JSON-encoded tagged msgspec structs (`pagerite/translate.py`;

@@ -342,6 +342,7 @@ def _seed(data: Data) -> None:
 
 #: Translator key format: 12 lowercase alphanumeric characters — not
 #: brute-forceable over a WebSocket handshake, still human-manageable.
+#: The editor's lang tab generates further keys in the same format.
 _KEY_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 
@@ -349,10 +350,8 @@ _KEY_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 def _translator_defaults(data: Data) -> None:
     """Translator defaults on database creation: the first service key and
     the wanted target languages (Spanish and Chinese — English is the
-    original language, never a translation target).
-
-    Keys are a dict (key -> display name) with the future reservation that
-    multiple keys could be managed (e.g. via a web interface)."""
+    original language, never a translation target). Further keys are
+    managed in the editor shell's lang tab."""
     key = "".join(secrets.choice(_KEY_ALPHABET) for _ in range(12))
     data.translate_keys[key] = "default"
     data.translate_langs = {"es": True, "zh": True}

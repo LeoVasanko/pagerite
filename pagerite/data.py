@@ -104,8 +104,8 @@ class Data(msgspec.Struct):
     #: API keys gating the translator service WebSocket (/_translate/{key};
     #: the external forward-auth does not cover that route): key -> display
     #: name. Keys are 12 lowercase alphanumeric characters; the first is
-    #: generated at database bootstrap (see app.py), multiple keys are a
-    #: future reservation (e.g. managed via a web interface).
+    #: generated at database bootstrap, more are managed in the editor
+    #: shell's lang tab (via /_api/settings).
     translate_keys: dict[str, str] = {}
     #: Wanted target languages for the translator service (presence-keys,
     #: value always True). The dispatcher offers jobs only in the

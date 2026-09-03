@@ -298,6 +298,7 @@ class SettingsIn(BaseModel):
     brand_html: str = ""
     transition: str = "cube"
     translate_langs: list[str] | None = None  # None keeps the current set
+    translate_keys: dict[str, str] | None = None  # None keeps the current keys
 
 
 @router.put("/_api/settings", status_code=204)
@@ -318,6 +319,8 @@ async def put_settings(settings: SettingsIn, request: Request) -> None:
                 for lang in settings.translate_langs
                 if (tag := i18n.base_tag(lang))
             }
+        if settings.translate_keys is not None:
+            data.translate_keys = settings.translate_keys
         _invalidate_pages()
 
 

@@ -1,16 +1,21 @@
 <script setup>
 // Lang tab: the site-wide translation target languages (translate_langs)
-// and the translator service WebSocket URL(s) (translate_keys). ALL
-// languages are listed, English included — a page whose primary language
-// (Node.language, configured per row in the structure tab, inherited down
-// the hierarchy) differs can be translated INTO any other. Flag clicks
-// toggle and save immediately; the settings round-trip re-reads the
-// payload, so this tab only ever changes translate_langs. The settings
-// write's invalidation hook kicks the translation dispatcher. The refresh
-// button drops all machine translations (user patches are kept), making
-// the dispatcher re-translate everything.
+// and the translator service keys (translate_keys) with their WebSocket
+// URLs. ALL languages are listed, English included — a page whose primary
+// language (Node.language, configured per row in the structure tab,
+// inherited down the hierarchy) differs can be translated INTO any other.
+// Flag clicks toggle and save immediately; the settings round-trip
+// re-reads the payload, so this tab only ever changes translate_langs. The
+// settings write's invalidation hook kicks the translation dispatcher. The
+// refresh button drops all machine translations (user patches are kept),
+// making the dispatcher re-translate everything. Translator keys are
+// managed inline (➕ add, name edit, ✕ delete); new keys are generated
+// here in the server's format and everything rides the settings
+// round-trip. Clicking a key copies its full URL (following ws:// would
+// fail).
 import { computed, onActivated, onMounted, onUnmounted, ref } from 'vue'
 import { LANG_GROUPS, TRANSLATABLE, flagFor, langName } from './langs'
+import { copyList } from './analytics/format.js'
 import { dropPageCache } from './swapdoc'
 
 defineProps({ pagePath: { type: String, default: '' } })
@@ -20,6 +25,16 @@ defineEmits(['close', 'pathChange'])
 const saveError = ref('')
 const selected = ref(new Set())
 const keyUrls = ref([])
+
+// Full WebSocket URL for a key. New keys are generated right here: 12
+// lowercase alphanumerics, the server-side format (state._KEY_ALPHABET).
+const wsUrl = (key) =>
+  `${location.origin.replace(/^http/, 'ws')}/_translate/${key}`
+const KEY_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789'
+const newKey = () =>
+  [...crypto.getRandomValues(new Uint8Array(12))]
+    .map((b) => KEY_ALPHABET[b % KEY_ALPHABET.length])
+    .join('')
 
 // The toggleable targets: every translatable language, laid out in
 // geographic/cultural groups (one row each) rather than alphabetized —
@@ -52,9 +67,8 @@ onMounted(async () => {
   try {
     const s = await (await fetch('/_api/settings')).json()
     selected.value = new Set(s.translate_langs || [])
-    const wsBase = location.origin.replace(/^http/, 'ws')
     keyUrls.value = Object.entries(s.translate_keys || {})
-      .map(([key, name]) => ({ name, url: `${wsBase}/_translate/${key}` }))
+      .map(([key, name]) => ({ key, name, url: wsUrl(key) }))
   } catch { /* keep defaults */ }
 })
 
@@ -100,6 +114,39 @@ async function refresh() {
     refreshing.value = false
   }
 }
+
+// Key management rides the settings round-trip, like toggle() above:
+// mutate keyUrls, then PUT the whole settings payload with the new
+// translate_keys. ➕ adds a fresh unnamed key, names save on every
+// keystroke (@input — spamming the server is fine), ✕ deletes without
+// confirmation.
+async function saveKeys() {
+  try {
+    const s = await (await fetch('/_api/settings')).json()
+    const res = await fetch('/_api/settings', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ...s,
+        translate_keys: Object.fromEntries(keyUrls.value.map((k) => [k.key, k.name])),
+      }),
+    })
+    saveError.value = res.ok ? '' : '⚠️ changes could not be saved'
+  } catch {
+    saveError.value = '⚠️ changes could not be saved'
+  }
+}
+
+function addKey() {
+  const key = newKey()
+  keyUrls.value.push({ key, name: '', url: wsUrl(key) })
+  saveKeys()
+}
+
+function removeKey(k) {
+  keyUrls.value = keyUrls.value.filter((x) => x.key !== k.key)
+  saveKeys()
+}
 </script>
 
 <template>
@@ -129,28 +176,37 @@ async function refresh() {
 
     <section class="block">
       <div class="block-head">
-        <span class="field-label">translations</span>
-        <small class="muted">deleting re-translates everything; user edits are kept</small>
+        <span class="field-label">Translator API</span>
       </div>
-      <button
-        type="button"
-        class="refresh-btn"
-        :disabled="refreshing"
-        title="delete all machine translations and let the translator re-fill them"
-        @click="refresh"
-      >
-        {{ refreshing ? 'refreshing…' : 'refresh all translations' }}
-      </button>
-    </section>
-
-    <section v-if="keyUrls.length" class="block">
-      <div class="block-head">
-        <span class="field-label">translator service</span>
-        <small class="muted">connect scripts/translator.py to</small>
+      <div v-for="k in keyUrls" :key="k.key" class="key-row">
+        <a
+          :href="k.url"
+          class="key-link"
+          title="click to copy the URL"
+          @click.prevent="copyList(k.url, $event)"
+        >{{ k.key }}</a>
+        <input
+          v-model="k.name"
+          type="text"
+          class="edit key-name"
+          title="display name"
+          @input="saveKeys()"
+        >
+        <button type="button" class="act del" title="delete key" @click="removeKey(k)">✕</button>
       </div>
-      <div v-for="k in keyUrls" :key="k.url" class="key-row">
-        <code>{{ k.url }}</code>
-        <small class="muted">{{ k.name }}</small>
+      <div class="add-row">
+        <button type="button" class="add" title="new translator key" @click="addKey()">➕ API key</button>
+      </div>
+      <p><small class="muted">AI translator agents can connect with the API keys to do machine translations to your selected languages. Click the button below to delete all translations and start over. User edits are kept.</small></p>
+      <div class="refresh-row">
+        <button
+          type="button"
+          class="refresh-btn"
+          :disabled="refreshing"
+          @click="refresh"
+        >
+          {{ refreshing ? 'Reseting…' : 'Reset' }}
+        </button>
       </div>
     </section>
   </div>
@@ -252,8 +308,81 @@ async function refresh() {
   gap: 0.6rem;
 }
 
-.key-row code {
+/* Real links (handy for right-click/drag) showing just the key, but the
+   click copies the full URL instead of following — ws:// would fail to
+   navigate. Normal text color, not link-styled; position: relative
+   anchors the "Copied!" popup (analytics/format.js). */
+.key-link {
+  position: relative;
+  color: var(--text);
+  font-family: var(--font-code);
   user-select: all;
+}
+
+.refresh-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
+/* Name input / ✕ / ➕ follow the structure tab's conventions: inputs stay
+   borderless until interacted with, glyph buttons redden / solidify on
+   hover. */
+.key-name {
+  flex: 0 0 9rem;
+}
+
+.edit {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.1rem 0.4rem;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  min-width: 0;
+}
+
+.edit:hover {
+  border-color: var(--line);
+}
+
+.edit:focus {
+  background: var(--bg);
+  border-color: var(--accent);
+  outline: none;
+}
+
+.act {
+  padding: 0 0.25rem;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.del:hover {
+  color: #e06c75;
+}
+
+.add-row {
+  display: flex;
+  align-items: center;
+}
+
+.add {
+  padding: 0 0.3rem;
+  background: none;
+  border: none;
+  font-size: 0.9rem;
+  cursor: pointer;
+  opacity: 0.5;
+}
+
+.add:hover {
+  opacity: 1;
 }
 
 .refresh-btn {
