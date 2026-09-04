@@ -263,20 +263,31 @@ def _transition_css_url(transition: str) -> str | None:
 
 
 def _editor_css_url(vite_url: str | None) -> str | None:
-    """URL for the editor-specific stylesheet (Vue component styles).
+    """URLs (comma-joined) for the editor-specific stylesheets (Vue
+    component styles).
 
     This is linked by the public-page edit pen so the editor styles are
-    loaded before the editor JS dynamic-import resolves.
+    loaded before the editor JS dynamic-import resolves. Component styles
+    can land on shared chunks rather than the entry's own stylesheet —
+    LangSelect's ride on the shared store chunk, as it is also used by the
+    on-demand public language selector — so collect the stylesheets of the
+    entry and its imported chunks (the same traversal _langselect_assets
+    does).
     """
     if vite_url:
         return None
     manifest = _manifest()
-    entry = manifest["src/main.js"]
     base = manifest.get(_BASE_CSS_KEY, {}).get("file")
-    for css in entry.get("css", []):
-        if css != base:
-            return f"/{css}"
-    return None
+    stylesheets, seen = [], set()
+    queue = ["src/main.js"]
+    for key in queue:  # grows with imported chunks
+        if key in seen:
+            continue
+        seen.add(key)
+        entry = manifest[key]
+        stylesheets += [f"/{css}" for css in entry.get("css", []) if css != base]
+        queue += entry.get("imports", [])
+    return ",".join(stylesheets) or None
 
 
 def _inline_asset(url: str) -> str:
@@ -1047,9 +1058,12 @@ def _language_urls(
     canonical = url if lang == original else f"{url}?lang={lang}"
     alternates = []
     if data.translate_langs:
+        # Only languages the page actually has AND that are still enabled
+        # site-wide (a disabled target stops being advertised).
+        enabled = {original, *data.translate_langs}
         alternates = [("x-default", url)] + [
             (tag, url if tag == original else f"{url}?lang={tag}")
-            for tag in sorted({original, *node.langs})
+            for tag in sorted({original, *node.langs} & enabled)
         ]
     return canonical, alternates
 

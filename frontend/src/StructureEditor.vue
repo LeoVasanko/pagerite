@@ -19,7 +19,7 @@ import { computed, inject, onActivated, onMounted, onUnmounted, provide, ref, wa
 import StructureTree from './StructureTree.vue'
 import LangSelect from './LangSelect.vue'
 import { slugify } from './slugify'
-import { flagFor, langName } from './langs'
+import { flagFor, langName, langSort } from './langs'
 import { editorLang, pagePrimary } from './editorLang'
 import { dropPageCache, loadPlain } from './swapdoc'
 
@@ -40,9 +40,10 @@ const primaryLang = ref('en')
 const siteLangs = ref([])
 
 // The strip's options: the primary language first, then the configured
-// translation targets (the lang tab manages that set).
+// translation targets (the lang tab manages that set) in the lang tab's
+// geographic grouping (./langs langSort).
 const langOptions = computed(() =>
-  [primaryLang.value, ...siteLangs.value.filter((l) => l !== primaryLang.value)]
+  [primaryLang.value, ...langSort(siteLangs.value.filter((l) => l !== primaryLang.value))]
     .map((code) => ({
       tag: code === primaryLang.value ? '' : code,
       code,
@@ -63,7 +64,7 @@ watch(lang, () => refreshPages())
 // dropdown lists "inherit" first (naming what it resolves to), then every
 // site language. Setting it on a section covers its whole subtree.
 const rowLangChoices = computed(() =>
-  [primaryLang.value, ...siteLangs.value.filter((l) => l !== primaryLang.value)]
+  [primaryLang.value, ...langSort(siteLangs.value.filter((l) => l !== primaryLang.value))]
     .map((code) => ({ tag: code, code, name: langName(code), flag: flagFor(code), primary: false })),
 )
 function rowLangOptions(el) {

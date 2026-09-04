@@ -30,6 +30,20 @@ export const LANG_GROUPS = [
 
 const displayNames = new Intl.DisplayNames(['en'], { type: 'language' })
 
+// Consistent menu ordering for language selectors: the geographic/cultural
+// grouping above (similar languages sit together, and it does not vary with
+// the display language the way alphabetical-by-name would). Tags outside
+// the groups trail, ordered by tag. The primary language is not special
+// here — callers put it first themselves.
+const groupOrder = new Map(LANG_GROUPS.flat().map((c, i) => [c, i]))
+export function langSort(codes) {
+  return [...codes].sort(
+    (a, b) =>
+      (groupOrder.get(a) ?? groupOrder.size) - (groupOrder.get(b) ?? groupOrder.size)
+      || a.localeCompare(b),
+  )
+}
+
 // English display name for a language tag ("fi" -> "Finnish").
 export function langName(tag) {
   try {

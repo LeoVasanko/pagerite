@@ -9,23 +9,28 @@
 // store and re-renders it).
 import { computed } from 'vue'
 import LangSelect from './LangSelect.vue'
-import { flagFor, langName } from './langs'
+import { flagFor, langName, langSort } from './langs'
 import { useStore } from './store'
 
 const store = useStore()
 
 // The "(primary)" marker is admin-panel information; the public selector
-// lists plain languages.
-const options = computed(() =>
-  store.langAlternates.map((a) => ({
-    tag: a.tag,
-    code: a.tag,
-    name: langName(a.tag),
-    flag: flagFor(a.tag),
-    primary: false,
-  })),
-)
+// lists plain languages. Order: the primary language first, then the rest
+// in the lang tab's geographic grouping (./langs langSort) — the head's
+// hreflang order is just alphabetical.
 const primaryTag = computed(() => store.langAlternates.find((a) => a.primary)?.tag ?? '')
+const options = computed(() => {
+  const rest = langSort(
+    store.langAlternates.map((a) => a.tag).filter((t) => t !== primaryTag.value),
+  )
+  return [primaryTag.value, ...rest].filter(Boolean).map((tag) => ({
+    tag,
+    code: tag,
+    name: langName(tag),
+    flag: flagFor(tag),
+    primary: false,
+  }))
+})
 // The explicit pick, else the served language (header-autodetected pages
 // may have neither), else the primary.
 const model = computed(() => store.lang || store.servedLang || primaryTag.value)

@@ -33,7 +33,7 @@ import { keymap } from '@codemirror/view'
 import { indentWithTab } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
 import { cmHighlight, cmTheme } from './cmtheme'
-import { flagFor, langName } from './langs'
+import { flagFor, langName, langSort } from './langs'
 import { editorLang, pagePrimary } from './editorLang'
 import LangSelect from './LangSelect.vue'
 import ConnNote from './ConnNote.vue'
@@ -121,11 +121,13 @@ function normPath(p) {
 // localization settings tab).
 
 // The picker's options: the primary language first, then the union of the
-// page's translations and the site-wide configured targets, sorted.
+// page's translations and the site-wide configured targets in the lang
+// tab's geographic grouping (./langs langSort).
 const langOptions = computed(() => {
-  const others = [...new Set([...siteLangs.value, ...pageLangs.value])]
-    .filter((l) => l && l !== primaryLang.value)
-    .sort()
+  const others = langSort(
+    [...new Set([...siteLangs.value, ...pageLangs.value])]
+      .filter((l) => l && l !== primaryLang.value),
+  )
   return [primaryLang.value, ...others].map((code) => ({
     tag: code === primaryLang.value ? '' : code,
     code,
