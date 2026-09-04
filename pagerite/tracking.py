@@ -44,8 +44,9 @@ _analytics_ws_clients: set[WebSocket] = set()
 _analytics_broadcast_task: asyncio.Task | None = None
 
 
-# Repository root from this file's location (pagerite/tracking.py -> ..).
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+# DB-IP databases persist in the working directory (one download serves all
+# sites run from it). Not the package directory: reinstalls/upgrades wipe it.
+_DBIP_DIR = Path.cwd()
 
 DBIP_URL = "https://download.db-ip.com/free/dbip-city-lite-{month}.mmdb.gz"
 
@@ -60,7 +61,7 @@ def _download_dbip() -> None:
 
     existing = sorted(
         p.stem.removeprefix("dbip-city-lite-").removesuffix(".mmdb")
-        for p in _REPO_ROOT.glob("dbip-city-lite-*.mmdb*")
+        for p in _DBIP_DIR.glob("dbip-city-lite-*.mmdb*")
     )
     if existing and existing[-1] >= months[0]:
         logger.info("DB-IP database is current (%s), skipping download", existing[-1])
@@ -68,7 +69,7 @@ def _download_dbip() -> None:
 
     for month in months:
         url = DBIP_URL.format(month=month)
-        target = _REPO_ROOT / f"dbip-city-lite-{month}.mmdb.gz"
+        target = _DBIP_DIR / f"dbip-city-lite-{month}.mmdb.gz"
         tmp = target.with_suffix(".mmdb.gz.tmp")
         logger.info("Downloading %s", url)
         try:
@@ -93,7 +94,7 @@ def _download_dbip() -> None:
             continue
         os.replace(tmp, target)
         # Drop older databases so the app never picks up a stale one.
-        for old in _REPO_ROOT.glob("dbip-city-lite-*.mmdb*"):
+        for old in _DBIP_DIR.glob("dbip-city-lite-*.mmdb*"):
             if old.name != target.name:
                 old.unlink()
         logger.info("DB-IP database updated to %s", target.name)
@@ -102,13 +103,13 @@ def _download_dbip() -> None:
 
 
 def _geoip_db_path() -> Path | None:
-    """Find a DB-IP MMDB in the repo root, preferring an already-decompressed
+    """Find a DB-IP MMDB in the working directory, preferring an already-decompressed
     ``.mmdb`` over the matching ``.mmdb.gz``.  Returns None if none is present.
     """
-    mmdb = sorted(_REPO_ROOT.glob("dbip-*.mmdb"))
+    mmdb = sorted(_DBIP_DIR.glob("dbip-*.mmdb"))
     if mmdb:
         return mmdb[0]
-    gz = sorted(_REPO_ROOT.glob("dbip-*.mmdb.gz"))
+    gz = sorted(_DBIP_DIR.glob("dbip-*.mmdb.gz"))
     if gz:
         return gz[0]
     return None
