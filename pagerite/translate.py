@@ -101,7 +101,8 @@ ClientMsg = Hello | Result
 def pending_items(data: Data, lang: str) -> list[TransItem]:
     """Fragments of the site still untranslated for ``lang``, deduped by key.
 
-    Every page node (published or not) contributes its title and each chunk
+    Every node (published or not, pages and pure category labels alike)
+    contributes its title; pages also contribute each chunk
     that needs translation (``needs_translation``), is not editor-flagged
     no-translate (``node.no_trans``) and has no ``trans`` entry for ``lang``
     yet. Content-addressed text (shared paragraphs, repeated titles) appears
@@ -133,8 +134,10 @@ def pending_items(data: Data, lang: str) -> list[TransItem]:
             path = f"{prefix}/{slug}" if prefix else slug
             # An article whose primary language IS the target needs no
             # translation into it — skip its title and chunks entirely.
+            # Category labels (chunks is None) contribute only their title:
+            # it is their nav-menu label.
             node_lang = node.language or inherited
-            if node.chunks is not None and node_lang != lang:
+            if node_lang != lang:
                 if node.title:
                     emit(
                         chunk_key(node.title),
@@ -143,7 +146,7 @@ def pending_items(data: Data, lang: str) -> list[TransItem]:
                         "title",
                         context=opening(node),
                     )
-                for h in node.chunks:
+                for h in node.chunks or ():
                     text = data.chunks.get(h)
                     if (
                         text is not None
@@ -178,8 +181,8 @@ def store_results(data: Data, lang: str, items: list[TransResult]) -> list[str]:
         for slug, node in sorted_nodes(nodes):
             path = f"{prefix}/{slug}" if prefix else slug
             node_lang = node.language or inherited
-            if node.chunks is not None and node_lang != lang:
-                keys = set(node.chunks)
+            if node_lang != lang:
+                keys = set(node.chunks or ())
                 if node.title:
                     keys.add(chunk_key(node.title))
                 if keys & stored:
