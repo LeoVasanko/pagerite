@@ -372,8 +372,8 @@ def _layout(
                 doc.meta(property=key, content=value)
             else:
                 doc.meta(name=key, content=value)
-    # A custom favicon (from the site editor) is linked explicitly; without
-    # one, browsers fall back to the build's /favicon.ico by convention.
+    # A custom favicon (from the site editor) is linked explicitly;
+    # /favicon.ico redirects to the same store file for non-HTML contexts.
     if favicon:
         doc.link(rel="icon", href=f"/_f/{favicon}", id="pagerite-favicon")
     # Asset URLs for the on-demand bundles (editor, analytics) for

@@ -98,8 +98,8 @@ class Data(msgspec.Struct):
     #: Trusted author content; not sanitized.
     custom_css: str = ""
     #: Favicon: content-addressed file name (served at "/_f/{name}"),
-    #: linked as <link rel="icon"> on every page. Empty = the build's
-    #: /favicon.ico.
+    #: linked as <link rel="icon"> on every page; /favicon.ico redirects
+    #: to it. Empty = no icon (and /favicon.ico 404s).
     favicon: str = ""
     #: API keys gating the translator service WebSocket (/_translate/{key};
     #: the external forward-auth does not cover that route): key -> display

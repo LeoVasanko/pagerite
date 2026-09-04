@@ -6,7 +6,8 @@ when compression shrinks the body), served immutable at ``/_f/``. Raster
 images and SVGs are recompressed into AVIF/WebP/JPEG derivatives
 (``store_image`` and helpers); the untouched original is kept alongside as
 ``<hash>.orig<ext>`` (never served). Routes: upload/delete under
-``/_api/files``, the favicon settings endpoints, the ``/_f/`` server with
+``/_api/files``, the favicon settings endpoints, the /favicon.ico
+redirect to the configured icon, the ``/_f/`` server with
 Accept-negotiated formats, and the user assets (``/_themes/``, ``/_fonts/``).
 """
 
@@ -19,7 +20,7 @@ from pathlib import Path
 
 import blake3
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import RedirectResponse, Response
 from mediapreview import dispatch
 
 from pagerite import views
@@ -252,6 +253,20 @@ async def delete_file(name: str) -> None:
     file_store.delete(name)
 
 
+@router.get("/favicon.ico", include_in_schema=False)
+async def favicon_ico() -> Response:
+    """The conventional /favicon.ico: redirect to the configured site icon.
+
+    Browsers request this path on their own (tabs, bookmarks, feeds and
+    other non-HTML contexts) regardless of the <link rel="icon"> pages
+    carry. Redirect to the icon's store URL, which negotiates the format
+    and caches immutably; 404 when no custom icon is configured.
+    """
+    if not data.favicon:
+        raise HTTPException(404)
+    return RedirectResponse(f"/_f/{data.favicon}")
+
+
 @router.put("/_api/settings/favicon")
 async def put_favicon(request: Request) -> dict[str, str]:
     """Upload a favicon into the content-addressed store and activate it.
@@ -276,7 +291,8 @@ async def put_favicon(request: Request) -> dict[str, str]:
 
 @router.delete("/_api/settings/favicon", status_code=204)
 async def delete_favicon(request: Request) -> None:
-    """Clear the custom favicon (back to the build's /favicon.ico).
+    """Clear the custom favicon (/favicon.ico goes back to 404, pages drop
+    the <link rel="icon">).
 
     The blob stays in the content-addressed store; only the reference goes.
     """

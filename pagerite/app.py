@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 
 # Vue build served at the site root, no SPA catch-all (assets only). The
 # build mirrors the URL space: hashed, immutable files live under
-# /_assets/ (assetsDir: '_/assets'), the favicon at /favicon.ico.
+# /_assets/ (assetsDir: '_/assets').
 frontend = Frontend(
     Path(__file__).with_name("frontend-build"), spa=False, cached="/_assets/"
 )
@@ -124,7 +124,7 @@ app.include_router(tracking.router)
 app.include_router(files.router)
 
 # Vue build asset routes are inserted at this position during load(): the
-# build mirrors the URL space (/_assets/*, /favicon.ico at the root).
+# build mirrors the URL space (/_assets/*).
 frontend.route(app, "/")
 
 # The content catch-all goes last: built assets win over content slugs,
