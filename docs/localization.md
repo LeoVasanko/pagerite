@@ -146,7 +146,11 @@ served Markdown at render time.
 
 `chunk_markdown(markdown)` splits the source into block-level chunks —
 blank-line-separated blocks: headings, paragraphs, code fences (kept whole),
-list blocks, tables, HTML blocks. A chunk's identity is its **source text**,
+list blocks, tables, HTML blocks. Container fence lines (`::: name` openers
+and `:::` closers) are always their own chunk, blank lines or not — folded
+into a prose chunk the closer would cross to the translator as part of the
+text, where the model can drop it (the rest of the page then renders inside
+the container). A chunk's identity is its **source text**,
 gettext-msgid style:
 
 ```python

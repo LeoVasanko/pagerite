@@ -17,6 +17,13 @@ from pagerite.segments import has_prose
 #: backticks or tildes (CommonMark).
 _FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
+#: A container fence line (mdit-py-plugins container): the "::: aside"
+#: opener and the ":::" closer alike. Always its own block, even with no
+#: blank line around it: folded into a prose paragraph it would cross to
+#: the translator as part of the text run, where the model can drop it —
+#: the rest of the page then renders inside the container.
+_CONTAINER = re.compile(r"^ {0,3}:{3,}(?:[ \t]|$)")
+
 #: HTML block openers that may span blank lines (CommonMark types 1-5:
 #: script/pre/style/textarea, comments, processing instructions,
 #: declarations, CDATA) with their closing condition. Other HTML blocks
@@ -54,9 +61,11 @@ def chunk_markdown(markdown: str) -> list[str]:
     Blocks are separated by blank lines; fenced code blocks and the
     multi-line HTML blocks (comments, script/pre/style, CDATA...) are
     kept atomic, even across blank lines, and end at their closing
-    condition. Chunks carry no surrounding blank lines and no trailing
-    newline; rejoining with ``join_chunks`` reproduces the source modulo
-    blank-line normalization.
+    condition. Container fence lines (:::, open and close alike) are
+    always their own block, blank lines or not (see _CONTAINER). Chunks
+    carry no surrounding blank lines and no trailing newline; rejoining
+    with ``join_chunks`` reproduces the source modulo blank-line
+    normalization.
     """
     chunks: list[str] = []
     buf: list[str] = []
@@ -90,6 +99,13 @@ def chunk_markdown(markdown: str) -> list[str]:
             flush()
             fence = m.group(1)
             buf.append(line)
+            continue
+        if _CONTAINER.match(line):
+            # Container fence lines (open and close alike) are their own
+            # block — never part of a prose chunk (see _CONTAINER).
+            flush()
+            buf.append(line)
+            flush()
             continue
         if not buf:
             for open_re, close_re in _HTML_ATOMIC:
