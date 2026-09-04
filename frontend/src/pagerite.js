@@ -51,13 +51,18 @@ import { reconnectPolicy, socketSlot, watchConnecting } from "./reconnect";
     url.searchParams.delete("lang");
     history.replaceState(history.state, "", url);
   }
-  // The session language. While the editor panel is open, its language
-  // selection overrides the normal preference (swapdoc.setLangOverride):
-  // internal fetches and prefetches follow it until the panel closes and
-  // the override clears (null restores the initial ?lang=, if any).
+  // The session language: the user's explicit pick (initial ?lang=, public
+  // selector, editor dropdown) is kept in chosenLang; while the editor is
+  // open its selection overrides it (swapdoc.setLangOverride), and closing
+  // falls back to chosenLang. JS state only — pretty URLs, no reloads.
+  // window.__pageriteLang is the pin for swapdoc.loadPlain's fetches.
+  let chosenLang = langParam;
   let sessionLang = langParam;
+  window.__pageriteLang = sessionLang;
   addEventListener("pagerite:session-lang", (ev) => {
-    sessionLang = ev.detail?.lang || langParam;
+    if (ev.detail?.lang) chosenLang = ev.detail.lang;
+    sessionLang = ev.detail?.lang || chosenLang;
+    window.__pageriteLang = sessionLang;
   });
   // An internal URL as fetched: carries the session's ?lang= unless the
   // link already pins a language of its own. With no ?lang= on the initial
@@ -167,6 +172,22 @@ import { reconnectPolicy, socketSlot, watchConnecting } from "./reconnect";
     return a;
   }
 
+  // The banner top-right corner container: the language selector (first
+  // item) plus the admin pens and auth links. renderAuthUi rebuilds it from
+  // scratch; the selector's state lives in the shared store, not the DOM,
+  // so the langselect bundle re-mounts it into the fresh container.
+  function pensContainer() {
+    let pens = document.querySelector(".editor-pens");
+    if (!pens) {
+      const banner = document.getElementById("page-banner");
+      if (!banner) return null;
+      pens = document.createElement("div");
+      pens.className = "editor-pens";
+      banner.after(pens);
+    }
+    return pens;
+  }
+
   function removePens() {
     document.querySelectorAll(".editor-pens, #main article button.edit-link")
       .forEach((el) => el.remove());
@@ -178,32 +199,33 @@ import { reconnectPolicy, socketSlot, watchConnecting } from "./reconnect";
     // pens that may have been injected while the browser cache made us look
     // authenticated.
     removePens();
-    if (!authReady) return;
-
-    // Editing is open for admins and, as a dev/no-proxy fallback, when no
-    // Paskia SSO is detected at all.
-    const canEdit = isAdmin || !ssoAvailable;
-    // The analytics page is a read-only dashboard: editing pens and the side
-    // panel do not apply there. Login/logout links are still useful.
-    const onAnalytics = currentPath === "/_a";
-    const banner = document.getElementById("page-banner");
-    if (banner) {
-      const pens = document.createElement("div");
-      pens.className = "editor-pens";
-      if (canEdit && !onAnalytics) {
-        // Analytics viewer is now a normal page at /_a.
-        const a = document.createElement("a");
-        a.className = "edit-link analytics-link";
-        a.href = "/_a";
-        a.title = "analytics";
-        a.textContent = "📊";
-        pens.append(a);
-        pens.append(makePen("site"));
+    if (authReady) {
+      // Editing is open for admins and, as a dev/no-proxy fallback, when no
+      // Paskia SSO is detected at all.
+      const canEdit = isAdmin || !ssoAvailable;
+      // The analytics page is a read-only dashboard: editing pens and the side
+      // panel do not apply there. Login/logout links are still useful.
+      const onAnalytics = currentPath === "/_a";
+      if (document.getElementById("page-banner")) {
+        const pens = pensContainer();
+        if (canEdit && !onAnalytics) {
+          // Analytics viewer is now a normal page at /_a.
+          const a = document.createElement("a");
+          a.className = "edit-link analytics-link";
+          a.href = "/_a";
+          a.title = "analytics";
+          a.textContent = "📊";
+          pens.append(a);
+          pens.append(makePen("site"));
+        }
+        if (ssoAvailable) pens.append(makeAuthLink(isAdmin));
+        if (!pens.firstElementChild) pens.remove();
       }
-      if (ssoAvailable) pens.append(makeAuthLink(isAdmin));
-      banner.after(pens);
+      if (canEdit && !onAnalytics) injectPagePen();
     }
-    if (canEdit && !onAnalytics) injectPagePen();
+    // Re-mount the selector into the fresh container (no-op until the
+    // bundle has been loaded once).
+    langselectMod?.ensureMounted(document.querySelector(".editor-pens"));
   }
 
   async function setupAuth() {
@@ -407,6 +429,9 @@ import { reconnectPolicy, socketSlot, watchConnecting } from "./reconnect";
     // copy pinned to a language (?lang=) caches under its own key, where
     // navigation with the same session language finds it.
     pageCache.set(rawKey(ev.detail.url), ev.detail.html);
+    // Editor-driven swaps don't go through load(): re-evaluate the
+    // language selector from the fresh copy too.
+    mountLangselect(new DOMParser().parseFromString(ev.detail.html, "text/html"));
   });
 
   // Editors mutate site-wide state (theme, structure, headings, banners),
@@ -742,6 +767,56 @@ import { reconnectPolicy, socketSlot, watchConnecting } from "./reconnect";
     }
   }
 
+  // --- Public language selector ------------------------------------------
+  // Pages translated into more than one language advertise it via hreflang
+  // alternates (x-default + one link per language). Those pages get the
+  // editors' flag dropdown as the first item of the corner container; its
+  // bundle (Vue + the flag SVG set) loads on demand. Re-evaluated from the
+  // fresh document on every swap (the head's own alternates stay stale).
+  let langselectMod = null;
+  async function mountLangselect(doc) {
+    const links = [...doc.head.querySelectorAll('link[rel="alternate"][hreflang]')];
+    const dflt = links.find((l) => l.hreflang === "x-default");
+    const langs = links.filter((l) => l.hreflang && l.hreflang !== "x-default");
+    if (!dflt || langs.length <= 1) return langselectMod?.hide();
+    try {
+      langselectMod ??= await import(/* @vite-ignore */ assets["pagerite:langselect-src"]);
+      for (const css of (assets["pagerite:langselect-css"] || "").split(",")) {
+        if (css && !document.querySelector(`link[href="${css}"]`)) {
+          const link = document.createElement("link");
+          link.rel = "stylesheet";
+          link.href = css;
+          link.dataset.pagerite = "langselect-css";
+          document.head.append(link);
+        }
+      }
+      langselectMod.setLanguages(
+        // The original's alternate is the plain URL — x-default's href —
+        // which also marks it as the primary option.
+        langs.map((l) => ({ tag: l.hreflang, href: l.href, primary: l.href === dflt.href })),
+        doc.documentElement.lang,
+      );
+      langselectMod.ensureMounted(pensContainer());
+    } catch (e) {
+      console.error("language selector mount failed:", e);
+    }
+  }
+
+  // The selector's pick (LangSelector dispatches this): make it the
+  // session language and swap the page in place. With the editor open the
+  // pick already landed in the shared store — the editor's watch re-renders
+  // the page itself, so there is nothing to do here.
+  addEventListener("pagerite:set-session-lang", async (ev) => {
+    const tag = ev.detail?.lang;
+    if (!tag || tag === sessionLang) return;
+    if (document.body.classList.contains("editing")) return;
+    chosenLang = sessionLang = tag;
+    window.__pageriteLang = tag;
+    const y = scrollY; // a language switch is not a navigation: keep scroll
+    await load(currentPath, false);
+    scrollTo(0, y);
+  });
+
   // --- Fetch navigation ------------------------------------------------
   async function load(url, push = true, back = false) {
     // Navigating with the editor open closes it; unsaved edits are lost
@@ -843,6 +918,7 @@ import { reconnectPolicy, socketSlot, watchConnecting } from "./reconnect";
       runScripts(document.getElementById("main"));
       applyEffects();
       mountAnalytics(doc);
+      mountLangselect(doc);
     };
     // Rotating cube page transition (styles injected as #pagerite-transition
     // from the selected design's transition.css, e.g. themes/cube/);
@@ -1076,4 +1152,5 @@ import { reconnectPolicy, socketSlot, watchConnecting } from "./reconnect";
   setupAuth();
   applyEffects();
   mountAnalytics(document);
+  mountLangselect(document);
 })();

@@ -21,11 +21,11 @@ const currentPath = ref(props.pagePath)
 const activeMode = ref(props.initialMode)
 
 // The shared language selection (./editorLang, v-modeled by the tabs'
-// LangSelects) also drives the page preview: while the shell is open it
-// overrides the normal language preferences (?lang= / Accept-Language),
-// so the page renders in the language being edited; closing restores.
-// The primary selection pins by the CURRENT PAGE's own primary language
-// (pages may differ — Node.language is inherited down the tree).
+// LangSelects) is linked to the whole-page language: while the shell is
+// open it drives the page preview (overrides ?lang= / Accept-Language),
+// and closing keeps the pick as the session language. The primary
+// selection pins by the CURRENT PAGE's own primary language (pages may
+// differ — Node.language is inherited down the tree).
 let pinned = false
 function pinPreviewLang() {
   pinned = true
@@ -33,6 +33,15 @@ function pinPreviewLang() {
   // (i18n.ORIGINAL_LANGUAGE).
   setLangOverride(editorLang.value || pagePrimary.value || 'en')
   loadPlain(currentPath.value)
+}
+// Opening the panel must not switch the page's language: adopt the
+// session's chosen language (public selector / earlier pick) once, then
+// pin. Runs only on (re)open — after that the selection is the user's.
+function openShell() {
+  const session = window.__pageriteLang
+  if (!editorLang.value && session && session !== (pagePrimary.value || 'en'))
+    editorLang.value = session
+  pinPreviewLang()
 }
 function unpinPreviewLang() {
   if (!pinned) return
@@ -89,13 +98,13 @@ function onSwitchEvent(ev) {
 onMounted(() => {
   document.body.dataset.editorMode = activeMode.value
   addEventListener('pagerite:switch-editor', onSwitchEvent)
-  addEventListener('pagerite:editor-shown', pinPreviewLang)
+  addEventListener('pagerite:editor-shown', openShell)
   addEventListener('pagerite:editor-hidden', unpinPreviewLang)
-  // The shell mounts visible (openEditor), so pin immediately. The site
+  // The shell mounts visible (openEditor), so open immediately. The site
   // default primary language comes from the settings — it only fills the
   // unknown; the page/structure tabs refine pagePrimary per page as they
   // learn it (their knowledge is strictly better).
-  pinPreviewLang()
+  openShell()
   fetch('/_api/settings').then((r) => r.json()).then((s) => {
     if (!pagePrimary.value) pagePrimary.value = s.primary_lang || 'en'
   }).catch(() => { /* keep the fallback */ })
@@ -103,7 +112,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   removeEventListener('pagerite:switch-editor', onSwitchEvent)
-  removeEventListener('pagerite:editor-shown', pinPreviewLang)
+  removeEventListener('pagerite:editor-shown', openShell)
   removeEventListener('pagerite:editor-hidden', unpinPreviewLang)
 })
 </script>

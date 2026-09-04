@@ -29,6 +29,8 @@ Pagerite is a CMS. See `docs` for the full design and implementation details. Ke
 - `frontend/src/` — Vue editor and public-page JS entries.
   - `main.js` — Vue editor app entry.
   - `analytics-main.js` — analytics page entry (mounts `AnalyticsView` at `/_a`).
+  - `langselect-main.js` + `LangSelector.vue` — public language selector, imported on demand by pagerite.js on pages with more than one hreflang alternate (the editors' `LangSelect` flag dropdown).
+  - `store.js` — the shared Pinia store (`useStore`, id `pagerite`) for cross-bundle UI state.
   - `pagerite.js` — public page entry.
   - `editorLang.js` + `LangSelect.vue` — the editor shell's shared language selection and its selector component (page + structure tabs; drives the page preview while the panel is open, via `swapdoc.setLangOverride`).
   - `reconnect.js` — shared WebSocket pacing for all sockets (staggered connect slots, stuck-CONNECTING watchdog, exponential backoff): bursts and rapid retries trip the browser's WebSocket throttling.

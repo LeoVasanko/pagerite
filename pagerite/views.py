@@ -385,10 +385,14 @@ def _layout(
     # carries the on-demand URLs in one JSON script instead.
     vite_url = os.environ.get("PAGERITE_VITE_URL")
     editor_scripts, editor_css = _editor_assets()
+    langselect_scripts, langselect_css = _langselect_assets()
     config = {
         "pagerite:editor-src": editor_scripts[-1],
         "pagerite:analytics-src": _analytics_assets()[0][0],
+        "pagerite:langselect-src": langselect_scripts[-1],
     }
+    if langselect_css:
+        config["pagerite:langselect-css"] = ",".join(langselect_css)
     if editor_css:
         config["pagerite:editor-css"] = editor_css
     if vite_url:
@@ -1050,10 +1054,10 @@ def render_page(
     # the actually served language — the plain URL for the original (for
     # SEO the non-query URL means the article's language), ?lang= for a
     # translation — regardless of how the language was arrived at (query
-    # or header). The alternates are site-wide, the same set on every
-    # page: the configured translate_langs (the translator works to fill
-    # them all in), x-default first (the plain, autodetecting URL), then
-    # every language explicitly, the page's own primary included.
+    # or header). The alternates list the languages the page is actually
+    # available in: x-default first (the plain, autodetecting URL), then
+    # every available language — the original again by its plain URL,
+    # translations by ?lang=. The public language selector keys off these.
     canonical = ""
     alternates = []
     if base_url:
@@ -1061,8 +1065,8 @@ def render_page(
         canonical = url if lang == original else f"{url}?lang={lang}"
         if data.translate_langs:
             alternates = [("x-default", url)] + [
-                (tag, f"{url}?lang={tag}")
-                for tag in sorted({original, *data.translate_langs})
+                (tag, url if tag == original else f"{url}?lang={tag}")
+                for tag in sorted({original, *node.langs})
             ]
     return str(
         _layout(
@@ -1226,6 +1230,31 @@ def _analytics_assets() -> tuple[list[str], list[str]]:
         stylesheets = [f"/{css}" for css in entry.get("css", [])]
         _asset_cache["analytics"] = scripts, stylesheets
     return _asset_cache["analytics"]
+
+
+def _langselect_assets() -> tuple[list[str], list[str]]:
+    """Script and stylesheet URLs for the on-demand public language selector."""
+    vite_url = os.environ.get("PAGERITE_VITE_URL")
+    if vite_url:
+        return [f"{vite_url}/src/langselect-main.js"], []
+    if "langselect" not in _asset_cache:
+        manifest = _manifest()
+        # import() loads no CSS automatically: collect the stylesheets of
+        # the entry and its imported chunks (LangSelect's ride on the
+        # shared langs chunk).
+        scripts, stylesheets, seen = [], [], set()
+        queue = ["src/langselect-main.js"]
+        for key in queue:  # grows with imported chunks
+            if key in seen:
+                continue
+            seen.add(key)
+            entry = manifest[key]
+            if entry.get("isEntry"):
+                scripts.append(f"/{entry['file']}")
+            stylesheets += [f"/{css}" for css in entry.get("css", [])]
+            queue += entry.get("imports", [])
+        _asset_cache["langselect"] = scripts, stylesheets
+    return _asset_cache["langselect"]
 
 
 def render_analytics(

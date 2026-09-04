@@ -53,11 +53,13 @@ Region tags normalize to their base subtag (`fi-FI` → `fi`).
   article's own language), `?lang=xx` when serving a translation — however
   the language was arrived at (query or header).
 - `<link rel="alternate" hreflang="…">` entries follow the canonical
-  directly (before the social meta tags) and are the same set on every
-  page — the site-wide configured languages (`translate_langs`, which the
-  translator works to fill in): `x-default` first, pointing at the plain
-  autodetecting URL, then every language explicitly with `?lang=`, the
-  page's own primary language included.
+  directly (before the social meta tags) and list the languages the page
+  is **actually available in**: `x-default` first, pointing at the plain
+  autodetecting URL, then every available language — the original again by
+  its plain URL, translations by `?lang=`. The public language selector
+  keys off these: pagerite.js mounts the editors' flag dropdown in the
+  top-right corner when the head advertises x-default plus more than one
+  language, loading its bundle (Vue + the flag SVG set) on demand.
 - The override sticks for the session of clicks: a page requested with
   `?lang=` replicates the query onto the navigation links it renders (nav,
   sidebar, cards, brand — in-article links are content and stay as
@@ -66,6 +68,11 @@ Region tags normalize to their base subtag (`fi-FI` → `fi`).
   `history.replaceState` (pretty, shareable URLs), remembers the language,
   and adds it to every internal fetch that lacks one (preloads,
   fetch-navigations, history traversals); history entries stay query-less.
+- The public selector's pick is the same override, pure JS state
+  (`pagerite:set-session-lang`): the session language changes and the page
+  swaps in place — no `?lang=` in the address bar, no reload. The choice is
+  linked with the editor panel's language dropdown both ways; closing the
+  panel keeps the chosen language instead of reverting.
 - A full page refresh or a shared link resets to automatic selection (header
   only). This gives a clean one-time override without cookies.
 

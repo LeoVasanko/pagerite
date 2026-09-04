@@ -20,6 +20,7 @@
     "codemirror": "^6.0.2",
     "country-flag-icons": "^1.6.20",
     "overlayscrollbars": "^2.16.0",
+    "pinia": "^4.0.3",
     "transliteration": "^2.6.1",
     "vue": "^3.5.26",
     "vuedraggable": "^4.1.0"

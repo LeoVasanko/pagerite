@@ -38,7 +38,7 @@ export default defineConfig({
     chunkSizeWarningLimit: 1200,
     // Mirror the URL space in the build output: hashed files land under
     // frontend-build/_assets/ and the Frontend serves the build directory
-    // at the site root (frontend/public/favicon.ico -> /favicon.ico).
+    // at the site root.
     manifest: true,
     assetsDir: '_assets',
     rollupOptions: {
@@ -50,6 +50,7 @@ export default defineConfig({
         main: fileURLToPath(new URL('./src/main.js', import.meta.url)),
         pagerite: fileURLToPath(new URL('./src/pagerite.js', import.meta.url)),
         analytics: fileURLToPath(new URL('./src/analytics-main.js', import.meta.url)),
+        langselect: fileURLToPath(new URL('./src/langselect-main.js', import.meta.url)),
         // Only the base CSS is built; theme/banner-design stylesheets live
         // in pagerite/themes/{name}/ and are served by the backend as-is.
         pagerite_base: fileURLToPath(new URL('./src/assets/pagerite.css', import.meta.url)),

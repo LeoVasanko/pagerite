@@ -26,6 +26,7 @@
 // renders the version being edited, whichever language the page itself
 // was loaded in.
 import { computed, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
+import { usePopup } from './dropdown'
 import { EditorView, basicSetup } from 'codemirror'
 import { Compartment, EditorState } from '@codemirror/state'
 import { keymap } from '@codemirror/view'
@@ -621,8 +622,15 @@ const TABLE_MAX_ROWS = 6
 // Class pickers: popup listing the block class toggles (placement ↔︎,
 // text size AA), closed after applying. The block's current class of the
 // group is marked; choosing "normal" (or the current class) removes it.
+// All popups share the close behavior of ./dropdown (outside click /
+// Escape; never mouseleave).
 const classPicker = ref(null) // 'place' | 'size' | null
 const activeClasses = ref(new Set())
+const placeRoot = ref(null)
+const sizeRoot = ref(null)
+const tableRoot = ref(null)
+usePopup(classPicker, computed(() => (classPicker.value === 'place' ? placeRoot : sizeRoot).value))
+usePopup(tablePicker, tableRoot)
 
 function openClassPicker(which) {
   classPicker.value = classPicker.value === which ? null : which
@@ -1136,15 +1144,31 @@ onUnmounted(() => {
     <div class="format-bar">
       <button type="button" class="code-btn" title="code — inline wrap, or a fenced block for line-spanning selections; click again to unwrap" @click="insertCode"><code>&lt;/&gt;</code></button>
       <button type="button" title="link (toggle: click inside a link to unwrap it)" @click="insertLink">🔗︎</button>
-      <button
-        type="button"
-        title="table"
-        :class="{ active: tablePicker }"
-        @click="tablePicker = !tablePicker"
-      >⊞</button>
+      <span class="picker" ref="tableRoot">
+        <button
+          type="button"
+          title="table"
+          :class="{ active: tablePicker }"
+          @click="tablePicker = !tablePicker"
+        >⊞</button>
+        <div v-if="tablePicker" class="table-picker" @mouseleave="tableSize = { cols: 0, rows: 0 }">
+          <div class="tp-grid" :style="{ gridTemplateColumns: `repeat(${TABLE_MAX_COLS}, 1fr)` }">
+            <button
+              v-for="n in TABLE_MAX_COLS * TABLE_MAX_ROWS"
+              :key="n"
+              type="button"
+              class="tp-cell"
+              :class="{ on: tableSize.cols >= (n - 1) % TABLE_MAX_COLS + 1 && tableSize.rows >= Math.floor((n - 1) / TABLE_MAX_COLS) + 1 }"
+              @mouseenter="tableSize = { cols: (n - 1) % TABLE_MAX_COLS + 1, rows: Math.floor((n - 1) / TABLE_MAX_COLS) + 1 }"
+              @click="insertTable(tableSize.cols, tableSize.rows)"
+            />
+          </div>
+          <div class="tp-size">{{ tableSize.cols || '–' }} × {{ tableSize.rows || '–' }}</div>
+        </div>
+      </span>
       <button type="button" title="insert image (upload) — pasting works too" @click="fileInput.click()">🖼︎</button>
       <button type="button" title="aside box (::: aside) — wraps the selection or the cursor's line; clicked inside one, removes it" @click="insertAside">◧</button>
-      <span class="picker">
+      <span class="picker" ref="placeRoot">
         <button
           type="button"
           title="block placement class"
@@ -1166,7 +1190,7 @@ onUnmounted(() => {
       </span>
       <button type="button" title="bold" @click="wrapInline('**')"><b>B</b></button>
       <button type="button" title="italic" @click="wrapInline('*')"><i>i</i></button>
-      <span class="picker">
+      <span class="picker" ref="sizeRoot">
         <button
           type="button"
           title="text size class"
@@ -1368,7 +1392,7 @@ onUnmounted(() => {
 .table-picker {
   position: absolute;
   top: 100%;
-  left: 6.5rem;
+  left: 0;
   z-index: 20;
   padding: 0.5rem;
   background: var(--bg);

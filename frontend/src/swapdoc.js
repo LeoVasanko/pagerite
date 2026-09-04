@@ -12,12 +12,13 @@ export function dropPageCache() {
 }
 
 // The editor's language override (set by EditorShell): while the panel is
-// open, its language selection wins over the normal preferences (?lang= /
-// Accept-Language) — every in-place re-render asks for that language
-// explicitly, and pagerite.js applies it to its own fetches and prefetches
-// (pagerite:session-lang). The primary selection pins by its code:
-// ?lang=<primary> selects the original explicitly (i18n.select_language).
-let overrideLang = null // the ?lang= value in force, null = normal prefs
+// open, its language selection wins over the normal preferences — every
+// in-place re-render asks for that language explicitly, and pagerite.js
+// applies it to its own fetches and prefetches (pagerite:session-lang).
+// The primary selection pins by its code: ?lang=<primary> selects the
+// original explicitly (i18n.select_language). Panel closed, the session's
+// chosen language (window.__pageriteLang) takes over — the pick stays.
+let overrideLang = null // the ?lang= value in force, null = the session's
 
 export function setLangOverride(queryLang) {
   overrideLang = queryLang || null
@@ -129,14 +130,16 @@ function swapRegions(doc) {
 // Fetch /p, swap its regions into the live page and replaceState to it.
 // Returns the final URL (after redirects), or null when the fetch did not
 // yield a page. Category and missing URLs render a placeholder 404 page —
-// fine to swap in (new pages are created by editing them). While the
-// editor's language override is set the fetch pins that language.
+// fine to swap in (new pages are created by editing them). The fetch pins
+// the editor's language override, or — panel closed — the session's chosen
+// language (window.__pageriteLang).
 export async function loadPlain(p) {
   let doc
   let finalUrl = `/${p}`
   let html
   try {
-    const res = await fetch(overrideLang ? `${finalUrl}?lang=${overrideLang}` : finalUrl)
+    const pin = overrideLang || window.__pageriteLang
+    const res = await fetch(pin ? `${finalUrl}?lang=${pin}` : finalUrl)
     const type = res.headers.get('content-type') || ''
     if (!type.includes('text/html')) return null
     if (res.redirected) finalUrl = res.url

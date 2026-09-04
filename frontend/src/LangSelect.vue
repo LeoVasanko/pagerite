@@ -3,7 +3,8 @@
 // flag button opening a clean dropdown, v-modeled on the shared editorLang
 // ('' = the primary language). The lang tab's flag grid is a different
 // control (toggles, not a select) and stays as it is.
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
+import { usePopup } from './dropdown'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -13,8 +14,12 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue'])
 
 const open = ref(false)
+const root = ref(null)
 const toggleBtn = ref(null)
+const pop = ref(null)
 const popStyle = ref({})
+// Closes on outside click / Escape (./dropdown), not on mouseleave.
+usePopup(open, root)
 const current = computed(
   () => props.options.find((o) => o.tag === props.modelValue) ?? props.options[0],
 )
@@ -26,6 +31,17 @@ function toggle() {
     // onto the page area instead of being clipped by it.
     const r = toggleBtn.value.getBoundingClientRect()
     popStyle.value = { top: `${r.bottom + 2}px`, left: `${r.left}px` }
+    // A toggle mounted near the right window edge (the public page
+    // selector sits top-right) opens the popup flush against that edge.
+    nextTick(() => {
+      const p = pop.value?.getBoundingClientRect()
+      if (p && p.right > innerWidth - 4) {
+        popStyle.value = {
+          ...popStyle.value,
+          left: `${Math.max(4, innerWidth - 4 - p.width)}px`,
+        }
+      }
+    })
   }
 }
 
@@ -36,7 +52,7 @@ function select(tag) {
 </script>
 
 <template>
-  <span v-if="options.length > 1" class="lang-select">
+  <span v-if="options.length > 1" ref="root" class="lang-select">
     <button
       ref="toggleBtn"
       type="button"
@@ -47,7 +63,7 @@ function select(tag) {
         : '')"
       @click="toggle"
     ><span v-if="current?.flag" class="flag" v-html="current.flag" /></button>
-    <span v-if="open" class="lang-pop" :style="popStyle" @mouseleave="open = false">
+    <span v-if="open" ref="pop" class="lang-pop" :style="popStyle">
       <button
         v-for="o in options"
         :key="o.code"
@@ -66,20 +82,23 @@ function select(tag) {
   display: flex;
 }
 
-/* The closed state is just the small flag — no button chrome until hovered. */
+/* The closed state is just the small flag — no button chrome at all, on
+   hover either (it sits among borderless emoji-icon buttons); like them it
+   rests dimmed and brightens on hover. */
 .lang-current {
   display: flex;
   align-items: center;
   padding: 2px;
   background: none;
-  border: 1px solid transparent;
+  border: none;
   border-radius: 4px;
   cursor: pointer;
+  opacity: 0.7;
 }
 
 .lang-current:hover,
 .lang-current.open {
-  border-color: var(--line);
+  opacity: 1;
 }
 
 /* The dropdown matches the page's existing popups (.picker-pop look).
@@ -127,11 +146,13 @@ function select(tag) {
   color: var(--muted);
 }
 
-/* Flags render like in the analytics visitor cells. */
+/* em-sized so the chip matches the surrounding text/icon size in each
+   context; the hairline border delineates white-flagged countries (not
+   button chrome). */
 .flag {
   display: inline-flex;
-  width: 18px;
-  height: 12px;
+  width: 1.5em;
+  height: 1em;
   flex: 0 0 auto;
   border-radius: 2px;
   overflow: hidden;
