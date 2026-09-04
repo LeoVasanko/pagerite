@@ -20,7 +20,9 @@ each segment's source span was located at dispatch (``split``), and
 ``join`` swaps in the translations. Markup therefore cannot break — it
 never left the server. A returned segment must still be pure prose itself
 (the model could inject markup INTO a segment); anything else — count
-mismatch, empty segment, markup tokens — rejects the whole result and the
+mismatch, empty segment, markup tokens, a line that would start a new
+block (a ``` or ::: fence would eat the rest of the block it lands in) —
+rejects the whole result and the
 fragment stays pending. Punctuation that is prose on the wire but syntax
 in the splice context (quotes in a title attribute, brackets in an alt
 text, "|" in a table row) is not worth a rejection either: it is swapped
@@ -470,6 +472,22 @@ def split(text: str) -> tuple[list[Span], list[str], list[str]]:
     return spans, segments, contexts
 
 
+#: Block-level Markdown a translation must not introduce: a segment is
+#: spliced INSIDE a block of the fragment, so a line starting a heading,
+#: quote, list, code/container fence or a setext/thematic-break underline
+#: would break the fragment's block structure — a ``` or ::: line eats the
+#: rest of the fence it lands in, closing fence included. pure_prose only
+#: parses inline and lets such lines through as softbreak prose, so join
+#: rejects them here. Blank lines split the host block and are rejected
+#: too (a faithful translation of a single block has none).
+_BLOCK = re.compile(
+    r"^[ \t]*(?:#{1,6}(?:[ \t]|$)|>[ \t]?|(?:[-+*]|\d{1,9}[.)])[ \t]|`{3,}|~{3,}|:{3,}(?:[ \t]|$)"
+    r"|-(?:[ \t]*-){2,}[ \t]*$|=[ =]*$|_(?:[ \t]*_){2,}[ \t]*$)",
+    re.M,
+)
+_BLANK = re.compile(r"\n[ \t]*\n")
+
+
 def pure_prose(text: str) -> bool:
     """True when the text parses as nothing but prose (text and softbreak
     tokens) — the acceptance test for a translated segment: the model may
@@ -632,16 +650,20 @@ def _place_marks(translation: str, weight: int, marks: list[Mark]) -> str | None
 
 def join(original: str, spans: list[Span], texts: list[str]) -> str | None:
     """Splice translated segments back into the original fragment; None on
-    any validation failure (count mismatch, empty or non-prose segment) —
-    the caller drops the result and the fragment stays pending. Segments
-    with marks (a block that crossed as one piece) get their links
-    re-inserted at weight-mapped positions after the prose check.
+    any validation failure (count mismatch, empty, non-prose or
+    block-structure segment) — the caller drops the result and the fragment
+    stays pending. Segments with marks (a block that crossed as one piece)
+    get their links re-inserted at weight-mapped positions after the prose
+    check.
 
     Markdown-significant ASCII punctuation that pure_prose cannot see
     (plain text inline, syntax in the splice context — quoted titles, alt
     and link texts, table rows) is neutralized to Unicode look-alikes
     (``_NEUTRAL``) before splicing and mark placement (the swap is
-    char-for-char, so unit alignment is unaffected)."""
+    char-for-char, so unit alignment is unaffected); lines that would
+    start a new block (a heading, a ``` or ::: fence — they would eat the
+    rest of the block/fence they land in) reject the result outright
+    (``_BLOCK``, ``_BLANK``)."""
     if len(texts) != len(spans):
         return None
     out: list[str] = []
@@ -651,7 +673,12 @@ def join(original: str, spans: list[Span], texts: list[str]) -> str | None:
         # validates exactly what gets spliced — a "＜" the model formed
         # into anything tag-like is markup and rejects the result.
         translation = translation.replace("＜", "<")
-        if not translation.strip() or not pure_prose(translation):
+        if (
+            not translation.strip()
+            or not pure_prose(translation)
+            or _BLOCK.search(translation)
+            or _BLANK.search(translation.strip())
+        ):
             return None
         translation = translation.translate(_NEUTRAL)
         if span.marks:

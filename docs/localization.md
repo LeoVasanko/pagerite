@@ -402,9 +402,14 @@ verbatim source substring — entity-decoded text, backslash escapes — is
 skipped and stays in the original language), and the returned translations
 are swapped in by offset. Markup corruption is therefore impossible by
 construction; the failure modes that remain are a wrong segment count, an
-empty segment, or markup injected INTO a segment (a `<br>` in a title
-translation would splice live HTML) — each returned segment must parse as
-pure prose, or the whole result is dropped and logged, and the (lang, key)
+empty segment, markup injected INTO a segment (a `<br>` in a title
+translation would splice live HTML), or a line that would start a new
+block where the segment lands (a ``` or ::: fence line would eat the rest
+of the block it splices into, closing fence included — segments are
+inline prose, so `pure_prose` alone cannot see this) — each returned
+segment must parse as
+pure prose with no block-starting line or blank line, or the whole result
+is dropped and logged, and the (lang, key)
 pair is skipped for the rest of the server run (generation is
 near-deterministic, so an immediate retry would re-fail; the fragment stays
 pending and gets another chance on restart or `DELETE /_api/translations`).
