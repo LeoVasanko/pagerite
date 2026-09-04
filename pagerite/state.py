@@ -132,6 +132,7 @@ def _render_html(
             data.theme,
             data.favicon,
             data.brand_html,
+            base_url,
             transition=data.transition,
             lang=lang,
             translation=translation,

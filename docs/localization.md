@@ -106,7 +106,9 @@ Region tags normalize to their base subtag (`fi-FI` → `fi`).
   language like content pages, but over the **subtree's** combined
   availability (`subtree_languages`) — they have no chunks of their own;
   the heading, navigation and card text localize from the title map and
-  the target articles' translations.
+  the target articles' translations. Their hreflang alternates are
+  computed exactly like a content page's (a translated title counts as
+  availability, so the language selector is offered there too).
 - Card descriptions and cover picks run on the target article's hybrid
   Markdown where that page is available in the served language, with
   per-card fallback to the original.

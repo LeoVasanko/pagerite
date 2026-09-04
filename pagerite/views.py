@@ -1021,6 +1021,39 @@ def _social_meta(
     }
 
 
+def _language_urls(
+    data: Data,
+    path: str,
+    node: Node,
+    lang: str,
+    original: str,
+    base_url: str,
+) -> tuple[str, list[tuple[str, str]]]:
+    """(canonical, hreflang alternates) for a page (docs/localization.md).
+
+    The canonical names the actually served language — the plain URL for
+    the original (for SEO the non-query URL means the article's language),
+    ?lang= for a translation — regardless of how the language was arrived
+    at (query or header). The alternates list the languages the page is
+    actually available in (``node.langs``; a category label's title counts
+    as its content): x-default first (the plain, autodetecting URL), then
+    every available language — the original again by its plain URL,
+    translations by ?lang=. The public language selector keys off these.
+    ("", []) without a base_url.
+    """
+    if not base_url:
+        return "", []
+    url = f"{base_url}/{path}"
+    canonical = url if lang == original else f"{url}?lang={lang}"
+    alternates = []
+    if data.translate_langs:
+        alternates = [("x-default", url)] + [
+            (tag, url if tag == original else f"{url}?lang={tag}")
+            for tag in sorted({original, *node.langs})
+        ]
+    return canonical, alternates
+
+
 def render_page(
     menu: dict[str, Node],
     data: Data,
@@ -1050,24 +1083,7 @@ def render_page(
     title = _title(path.rpartition("/")[2], node, translation, path)
     main = page_content(menu, data, path, translation, link_lang, lang)
     social = _social_meta(node, path, title, str(main), brand, base_url)
-    # Canonical/hreflang URLs (docs/localization.md): the canonical names
-    # the actually served language — the plain URL for the original (for
-    # SEO the non-query URL means the article's language), ?lang= for a
-    # translation — regardless of how the language was arrived at (query
-    # or header). The alternates list the languages the page is actually
-    # available in: x-default first (the plain, autodetecting URL), then
-    # every available language — the original again by its plain URL,
-    # translations by ?lang=. The public language selector keys off these.
-    canonical = ""
-    alternates = []
-    if base_url:
-        url = f"{base_url}/{path}"
-        canonical = url if lang == original else f"{url}?lang={lang}"
-        if data.translate_langs:
-            alternates = [("x-default", url)] + [
-                (tag, url if tag == original else f"{url}?lang={tag}")
-                for tag in sorted({original, *node.langs})
-            ]
+    canonical, alternates = _language_urls(data, path, node, lang, original, base_url)
     return str(
         _layout(
             *_page_assets(),
@@ -1100,6 +1116,7 @@ def render_category(
     theme: str = "",
     favicon: str = "",
     brand_html: str = "",
+    base_url: str = "",
     transition: str = "cube",
     lang: str = i18n.ORIGINAL_LANGUAGE,
     translation: Translation | None = None,
@@ -1115,12 +1132,16 @@ def render_category(
     With a translation (titles only — the category has no Markdown) the
     heading, navigation and card text localize per target article
     (docs/localization.md); ``link_lang`` replicates the ?lang= override
-    onto the navigation links as on content pages.
+    onto the navigation links as on content pages. The hreflang alternates
+    are computed as on content pages — a translated title makes the
+    language available here too.
     """
     node = resolve(menu, path)[-1]
+    original = i18n.primary_lang(menu, path)
     if translation is None:
-        lang = i18n.primary_lang(menu, path)
+        lang = original
     title = _title(path.rpartition("/")[2], node, translation, path)
+    _, alternates = _language_urls(data, path, node, lang, original, base_url)
     doc = E.article
     with doc:
         doc.h1(title)
@@ -1137,6 +1158,7 @@ def render_category(
             transition,
             favicon,
             lang=lang,
+            alternates=alternates,
         )(
             Title=f"{title} – {brand}" if brand else title,
             Brand=_brand_link(brand, brand_html, link_lang),
