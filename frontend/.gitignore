@@ -37,3 +37,6 @@ __screenshots__/
 
 # Playwright browser downloads (if ever installed locally)
 .pw-browsers/
+
+# npm project config (audit/fund off: the audit endpoint stalls installs)
+!.npmrc
