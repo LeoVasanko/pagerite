@@ -3,18 +3,19 @@
 The visitor-activity WebSocket (``/_ws``, public) and the admin analytics
 stream (``/_api/ws/analytics``) plus the ``/_a`` viewer page. Client IPs are
 enriched in background tasks with reverse DNS (cached PTR lookups) and the
-DB-IP city MMDB (``GeoIP``, decompressed and opened once at startup);
+DB-IP city MMDB (``GeoIP``, decompressed into RAM and opened once at
+startup);
 external referrers get their favicon fetched and stored content-hashed.
 Snapshot broadcasts to connected admin sockets are debounced.
 """
 
 import asyncio
 import gzip
+import io
 import ipaddress
 import logging
 import os
 import re
-import shutil
 import socket
 from datetime import date
 from functools import lru_cache
@@ -103,15 +104,19 @@ def _download_dbip() -> None:
 
 
 def _geoip_db_path() -> Path | None:
-    """Find a DB-IP MMDB in the working directory, preferring an already-decompressed
-    ``.mmdb`` over the matching ``.mmdb.gz``.  Returns None if none is present.
+    """Find a DB-IP MMDB in the working directory: the ``.mmdb.gz`` download
+    is canonical (decompressed into RAM at open); a plain ``.mmdb`` left over
+    from older versions is still usable, and removed once the matching ``.gz``
+    is present so it does not linger on disk.  Returns None if none is present.
     """
+    gz = sorted(_DBIP_DIR.glob("dbip-*.mmdb.gz"))
+    if gz:
+        for stale in _DBIP_DIR.glob("dbip-*.mmdb"):
+            stale.unlink()
+        return gz[0]
     mmdb = sorted(_DBIP_DIR.glob("dbip-*.mmdb"))
     if mmdb:
         return mmdb[0]
-    gz = sorted(_DBIP_DIR.glob("dbip-*.mmdb.gz"))
-    if gz:
-        return gz[0]
     return None
 
 
@@ -124,28 +129,23 @@ class GeoIP:
     def __init__(self) -> None:
         self._reader: object | None = None
 
-    def _decompress(self, source: Path, target: Path) -> None:
-        if target.exists():
-            return
-        tmp = target.with_suffix(target.suffix + ".tmp")
-        with gzip.open(source, "rb") as src, open(tmp, "wb") as dst:
-            shutil.copyfileobj(src, dst)
-        os.replace(tmp, target)
-
     def _load(self) -> None:
         if self._reader is not None:
             return
         source = _geoip_db_path()
         if source is None:
             return
-        if source.suffix == ".gz":
-            target = source.with_suffix("")
-            self._decompress(source, target)
-            source = target
         try:
             import maxminddb
 
-            self._reader = maxminddb.open_database(str(source))
+            if source.suffix == ".gz":
+                # Only the .gz is kept on disk; the database is decompressed
+                # into RAM (MODE_FD makes the pure-Python Reader .read() the
+                # buffer — never mmap — and bypasses the C extension).
+                buf = io.BytesIO(gzip.decompress(source.read_bytes()))
+                self._reader = maxminddb.open_database(buf, maxminddb.MODE_FD)
+            else:
+                self._reader = maxminddb.open_database(str(source))
         except Exception:
             pass
 

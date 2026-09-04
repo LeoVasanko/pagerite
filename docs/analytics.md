@@ -75,8 +75,9 @@ available, is stored as `host`; local/reserved/multicast addresses are
 skipped.  If a DB-IP MMDB file (`dbip-*.mmdb` or `dbip-*.mmdb.gz`) is present
 in the working directory, it is loaded at startup and used to look up
 `country`/`city`.  These lookups run in background tasks after the event is
-stored, so WebSocket message handling is never delayed.  The decompressed
-`dbip-*.mmdb` file is kept in the working directory and ignored by git.  The
+stored, so WebSocket message handling is never delayed.  Only the downloaded
+`.mmdb.gz` is kept on disk (in the working directory, ignored by git); it is
+decompressed into RAM when opened.  The
 CLI flag `--dbip` (`uv run pagerite --dbip`) downloads the latest
 `dbip-city-lite-YYYY-MM.mmdb.gz` from DB-IP at startup (in the app lifespan,
 before the MMDB is opened), skipping the download when the local database is
