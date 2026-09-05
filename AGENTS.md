@@ -25,7 +25,7 @@ Pagerite is a CMS. See `docs` for the full design and implementation details. Ke
   - `markdown.py` — markdown-it-py renderer.
   - `views.py` — shared page layout and rendering; theme/user-font resolution across `THEME_DIRS` / `FONT_DIRS` (cwd, site, platform data roots, then built-in `pagerite/themes/`, see `docs/themes-and-assets.md`).
   - `seed.py` — demo content, written only on first database creation.
-  - `analytics.py` — visit analytics collection (see `docs/analytics.md`).
+  - `analytics.py` — visit analytics collection (see `docs/analytics.md`). UA formatting/bot detection comes from the **uarite** package.
 - `frontend/src/` — Vue editor and public-page JS entries.
   - `main.js` — Vue editor app entry.
   - `analytics-main.js` — analytics page entry (mounts `AnalyticsView` at `/_a`).

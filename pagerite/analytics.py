@@ -60,32 +60,17 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import blake3
 import msgspec
-from ua_parser import parse
+import uarite
 
 
 def _compact_user_agent(ua: str) -> str:
     """Format a User-Agent string into a compact display form.
 
-    Returns the original UA when the parser cannot identify the browser/OS.
+    See ``uarite.uaparse``: crawler name (with category) for bots,
+    ``Browser/major OS`` or the device for real browsers, the raw UA when
+    unrecognized.
     """
-    if not ua or not ua.strip() or ua == "-":
-        return ""
-    r = parse(ua)
-    browser = r.user_agent.family if r.user_agent else None
-    ver = r.user_agent.major if r.user_agent else ""
-    os_name = r.os.family if r.os else None
-    dev = r.device.family if r.device else None
-    if browser in (None, "Other") and os_name in (None, "Other"):
-        return ua
-    if browser and browser != "Other":
-        browser = browser.split()[0]
-    else:
-        browser = ""
-    os_name = os_name if os_name and os_name != "Other" else ""
-    if dev in (None, "Other") or dev == browser:
-        dev = ""
-    parts = [f"{browser}/{ver}" if browser else "", os_name, dev]
-    return " ".join(p for p in parts if p).strip()
+    return uarite.uaparse(ua).pretty
 
 
 class Ping(msgspec.Struct, omit_defaults=True):
@@ -418,17 +403,22 @@ _MIN_VISIT_READ = 5
 _FAVICON_RETRY = timedelta(days=7)
 
 #: UAs of JS-running crawlers, which would register as visitors on their
-#: activity messages.  Anything calling itself a "bot" or "spider" matches;
-#: known crawlers without those tokens (GoogleOther) are listed as extra
-#: alternates.  No source verification: a spoofed bot UA just lands in the
-#: crawler list, and scanners that probe telltale paths are caught by the
-#: abuse rules anyway.
-_BOT_UA = re.compile(r"bot|spider|googleother", re.IGNORECASE)
+#: activity messages.  ``uarite`` knows the common crawlers
+#: and link-preview fetchers (including disguised ones such as
+#: facebookexternalhit and Google-Extended) plus any UA with a
+#: bot/spider/crawler/scanner token.  No source verification: a spoofed
+#: bot UA just lands in the crawler list, and scanners that probe
+#: telltale paths are caught by the abuse rules anyway.
 
 
 def _is_bot_ua(ua: str) -> bool:
-    """True when the UA claims a crawler identity (bot or spider)."""
-    return bool(_BOT_UA.search(ua))
+    """True when the UA is not a regular browser.
+
+    Every real browser registers as ``kind == "browser"``; anything else
+    (recognized crawler/previewer, generic bot token, or an unclassified
+    HTTP client such as httpx) is not a visitor.
+    """
+    return uarite.uaparse(ua).kind != "browser"
 
 
 #: Plain-404 count per IP within ``_ABUSE_404_WINDOW`` that classifies it as

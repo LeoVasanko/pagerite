@@ -63,8 +63,13 @@ Each `Client` record (shared by every event, keyed by hash):
   when a database is available,
 - `city` — city name from the DB-IP MMDB lookup, when available,
 - `ua` — raw `User-Agent` string,
-- `ua_pretty` — compact display form of the UA (browser/OS/device) when
-  parsable, otherwise the raw string,
+- `ua_pretty` — compact display form of the UA from `uarite.uaparse()`:
+  the crawler name for bots, with a category suffix only where a provider
+  runs crawlers of more than one kind (`GPTBot (AI)` vs
+  `OAI-SearchBot (search)`, `Googlebot (search)` vs `Google-Extended (AI)`;
+  single-kind providers stay plain: `Facebook`, `WhatsApp`), `Browser/major OS` on the desktop, the device where that is
+  the relevant information (iPhone reports its iOS version, Android
+  phones their model instead of the OS), otherwise the raw string,
 - `hide` — true for admin clients (`hide` message field): everything this
   client ever did is recorded but excluded from every statistic and from the
   viewer payload.  This is the one flag set at record time — it is a client
@@ -169,7 +174,9 @@ for misses.
   `_CRAWLER_TIMEOUT` (10 s) is a crawler hit — plain bots that only fetch
   documents never register as visits. JS-running crawlers (Googlebot,
   GoogleOther, Applebot, ...) do connect and send messages, but their UA
-  gives them away (`_is_bot_ua`): their messages are ignored at display
+  gives them away (`_is_bot_ua`, backed by `uarite.uaparse` — which
+  also knows the disguised ones: facebookexternalhit, Google-Extended,
+  WhatsApp, ...): their messages are ignored at display
   time, so their GETs never match and land in the crawler list too. Real-
   browser bots whose UA does not match are caught by engagement: a visit
   whose total reported reading time is under 5 seconds (`_MIN_VISIT_READ`;
