@@ -218,6 +218,7 @@ const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], c
                     :ip-display="v.ipDisplay"
                     :ua="v.ua"
                     :ua-raw="v.uaRaw"
+                    :ua-url="v.uaUrl"
                     :country="v.country"
                     :city="v.city"
                     :lang="v.lang"
@@ -253,6 +254,7 @@ const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], c
                     :ip-display="c.ipDisplay"
                     :ua="c.ua"
                     :ua-raw="c.uaRaw"
+                    :ua-url="c.uaUrl"
                     :country="c.country"
                     :city="c.city"
                     :lang="c.lang"
@@ -299,6 +301,8 @@ const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], c
                     :ip-display="a.ipDisplay"
                     :ua="a.ua"
                     :ua-raw="a.uaRaw"
+                    :ua-url="a.uaUrl"
+                    :ua-raws="a.uaRaws"
                     :country="a.country"
                     :city="a.city"
                     :lang="a.lang"
@@ -506,22 +510,6 @@ const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], c
 .visit-table .clickable-list,
 .visit-table .last-seen {
   cursor: pointer;
-  position: relative;
-}
-
-.visit-table :deep(.copy-popup) {
-  position: absolute;
-  bottom: calc(100% + 0.25rem);
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 0.15rem 0.4rem;
-  background: var(--text, CanvasText);
-  color: var(--bg, Canvas);
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-  white-space: nowrap;
-  pointer-events: none;
-  z-index: 10;
 }
 
 .crawler-top-uas {

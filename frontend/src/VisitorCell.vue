@@ -4,15 +4,20 @@
 // Clicking the IP copies the full address to the clipboard.
 // ``variantCount`` overrides the UA line to warn when multiple client
 // fingerprints share the same IP (e.g. a scanner rotating UAs).
+// Clicking the UA line copies the raw UA(s) to the clipboard, one per line
+// (``uaRaws`` carries every variation for multi-client IPs).
 import { computed } from 'vue'
 import * as flagSvgs from 'country-flag-icons/string/3x2'
-import { copyIp, formatLang } from './analytics/format.js'
+import { copyIp, copyList, formatLang } from './analytics/format.js'
+import { langName } from './langs.js'
 
 const props = defineProps({
   ip: { type: String, default: '' },
   ipDisplay: { type: String, default: '—' },
   ua: { type: String, default: '' },
   uaRaw: { type: String, default: '' },
+  uaRaws: { type: String, default: '' },
+  uaUrl: { type: String, default: '' },
   country: { type: String, default: '' },
   city: { type: String, default: '' },
   lang: { type: String, default: '' },
@@ -26,6 +31,7 @@ const hasCity = computed(() => !!(props.city && props.city !== '—'))
 const hasLocale = computed(() => hasCountry.value || hasCity.value)
 const langValue = computed(() => props.langDisplay || formatLang(props.lang))
 const showLang = computed(() => langValue.value && langValue.value !== '—')
+const uaCopy = computed(() => props.uaRaws || props.uaRaw)
 
 function flagSvg(code) {
   return flagSvgs[code?.toUpperCase()] || ''
@@ -58,10 +64,16 @@ function countryName(code) {
       </div>
       <div class="visitor-row">
         <div class="ua-line">
-          <small v-if="variantCount > 1" class="muted variant-hint">{{ variantCount }} client variations</small>
-          <small v-else class="muted" :title="uaRaw">{{ ua || '—' }}</small>
+          <small v-if="variantCount > 1" class="muted variant-hint clickable-ip"
+                 :title="uaCopy"
+                 @click="copyList(uaCopy, $event)">{{ variantCount }} client variations</small>
+          <small v-else class="muted clickable-ip" :title="uaRaw"
+                 @click="copyList(uaCopy, $event)">{{ ua || '—' }}</small><a v-if="uaUrl && variantCount <= 1"
+             class="ua-link icon-btn" :href="uaUrl"
+             target="_blank" rel="noopener noreferrer"
+             @click.stop>🔗</a>
         </div>
-        <div v-if="showLang && variantCount <= 1" class="locale-lang"><small class="muted">{{ langValue }}</small></div>
+        <div v-if="showLang && variantCount <= 1" class="locale-lang"><small class="muted" :title="langName(lang)">{{ langValue }}</small></div>
       </div>
     </div>
   </td>
@@ -119,6 +131,13 @@ function countryName(code) {
 
 .ua-line {
   text-align: left;
+}
+
+.ua-link {
+  text-decoration: none;
+  font-size: 0.75em;
+  margin-left: 0.2em;
+  vertical-align: middle;
 }
 
 .locale-lang {

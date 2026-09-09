@@ -132,16 +132,16 @@ import { reconnectPolicy, socketSlot, watchConnecting } from "./reconnect";
     if (line != null) {
       // Section pen on an anchored h2: opens the page editor at the
       // section's markdown source line (data-line, from the backend).
-      btn.className = "edit-link edit-section";
+      btn.className = "edit-link edit-section icon-btn";
       btn.title = "edit section";
       btn.textContent = "🖊️";
       btn.dataset.editorLine = line;
     } else if (mode === "page") {
-      btn.className = "edit-link edit-page";
+      btn.className = "edit-link edit-page icon-btn";
       btn.title = "edit page";
       btn.textContent = "🖊️";
     } else {
-      btn.className = "edit-link site-edit-link";
+      btn.className = "edit-link site-edit-link icon-btn";
       btn.title = "site settings";
       btn.textContent = "⚙️";
     }
@@ -165,7 +165,7 @@ import { reconnectPolicy, socketSlot, watchConnecting } from "./reconnect";
 
   function makeAuthLink(admin) {
     const a = document.createElement("a");
-    a.className = admin ? "profile-link" : "login-link";
+    a.className = (admin ? "profile-link" : "login-link") + " icon-btn";
     a.href = "/auth/";
     a.title = admin ? "profile" : "log in";
     a.textContent = admin ? "\u{1F510}" : "\u{1F511}";
@@ -211,7 +211,7 @@ import { reconnectPolicy, socketSlot, watchConnecting } from "./reconnect";
         if (canEdit && !onAnalytics) {
           // Analytics viewer is now a normal page at /_a.
           const a = document.createElement("a");
-          a.className = "edit-link analytics-link";
+          a.className = "edit-link analytics-link icon-btn";
           a.href = "/_a";
           a.title = "analytics";
           a.textContent = "📊";

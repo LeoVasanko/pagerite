@@ -25,32 +25,31 @@ export const hostIP = (ip) => {
   }
 }
 
-function showCopiedFeedback(el) {
-  if (!el || typeof document === 'undefined') return
+function showCopiedFeedback(el, event) {
+  if (typeof document === 'undefined') return
   const popup = document.createElement('span')
   popup.textContent = 'Copied!'
   popup.className = 'copy-popup'
+  // Fixed to the viewport at the click point: table cells clip absolute
+  // popups with their overflow: hidden ellipsis styling.
+  const x = event?.clientX ?? 0
+  const y = event?.clientY ?? 0
   popup.style.cssText =
-    'position:absolute;bottom:calc(100% + 0.25rem);left:50%;' +
-    'transform:translateX(-50%);padding:0.15rem 0.4rem;' +
+    `position:fixed;left:${x}px;top:${y}px;` +
+    'transform:translate(-50%, calc(-100% - 0.5rem));padding:0.15rem 0.4rem;' +
     'background:var(--text, CanvasText);color:var(--bg, Canvas);' +
     'border-radius:0.25rem;font-size:0.75rem;white-space:nowrap;' +
-    'pointer-events:none;z-index:10;'
-  el.classList.add('has-copy-popup')
-  el.appendChild(popup)
-  setTimeout(() => {
-    popup.remove()
-    el.classList.remove('has-copy-popup')
-  }, 1200)
+    'pointer-events:none;z-index:100;'
+  document.body.appendChild(popup)
+  setTimeout(() => popup.remove(), 1200)
 }
 
 /** Copy the full IP to the clipboard and show a brief "Copied!" popup. */
 export async function copyIp(ip, event) {
   if (!ip) return
-  const el = event?.currentTarget
   try {
     await navigator.clipboard.writeText(ip)
-    showCopiedFeedback(el)
+    showCopiedFeedback(event?.currentTarget, event)
   } catch {
     /* ignore */
   }
@@ -59,10 +58,9 @@ export async function copyIp(ip, event) {
 /** Copy arbitrary text to the clipboard and show a brief "Copied!" popup. */
 export async function copyList(text, event) {
   if (!text) return
-  const el = event?.currentTarget
   try {
     await navigator.clipboard.writeText(text)
-    showCopiedFeedback(el)
+    showCopiedFeedback(event?.currentTarget, event)
   } catch {
     /* ignore */
   }
@@ -342,7 +340,7 @@ export function countCrawlerUas(crawlers, clients) {
   const counts = {}
   for (const c of crawlers || []) {
     const client = (clients || {})[c.client] || {}
-    const value = client.ua_pretty || client.ua || '(no UA)'
+    const value = client.uarite?.pretty || client.ua || '(no UA)'
     counts[value] = (counts[value] || 0) + 1
   }
   return Object.entries(counts).sort((a, b) => b[1] - a[1])
@@ -421,8 +419,9 @@ export function formatCrawlerRows(crawlers, clients, pageTree, now = Date.now())
         ip: client.ip || '',
         ipDisplay: isHost ? mainDomain(host) : hostIP(client.ip) || client.ip || '—',
         isHost,
-        ua: client.ua_pretty || client.ua || '—',
+        ua: client.uarite?.pretty || client.ua || '—',
         uaRaw: client.ua || '',
+        uaUrl: client.uarite?.url || '',
         lang: client.lang || '—',
         langDisplay: formatLang(client.lang),
         country: client.country || '—',
@@ -505,6 +504,13 @@ export function formatAbuseRows(abuse, clients, pageTree, now = Date.now()) {
       const client = (clients || {})[g.lastClient] || {}
       const host = client.host || ''
       const isHost = !!host
+      const uaRaws = [
+        ...new Set(
+          [...g.clientHashes]
+            .map((h) => (clients || {})[h]?.ua)
+            .filter(Boolean),
+        ),
+      ].join('\n')
       return {
         lastSeen: formatWhen(g.lastStart, now),
         lastSeenIso: formatWhenIso(g.lastStart),
@@ -527,8 +533,10 @@ export function formatAbuseRows(abuse, clients, pageTree, now = Date.now()) {
         ip: client.ip || g.ip,
         ipDisplay: isHost ? mainDomain(host) : hostIP(client.ip || g.ip) || client.ip || g.ip || '—',
         isHost,
-        ua: client.ua_pretty || client.ua || '—',
+        ua: client.uarite?.pretty || client.ua || '—',
         uaRaw: client.ua || '',
+        uaUrl: client.uarite?.url || '',
+        uaRaws,
         lang: client.lang || '—',
         langDisplay: formatLang(client.lang),
         country: client.country || '—',
@@ -582,8 +590,9 @@ export function formatVisitRows(visits, clients, pageTree, now = Date.now()) {
       lang: dash(client.lang),
       country: dash(client.country),
       city: dash(client.city),
-      ua: client.ua_pretty || client.ua || '—',
+      ua: client.uarite?.pretty || client.ua || '—',
       uaRaw: client.ua || '',
+      uaUrl: client.uarite?.url || '',
       utm: utm || '—',
       utmTitle,
     }

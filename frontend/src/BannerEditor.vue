@@ -403,14 +403,6 @@ onUnmounted(() => {
   margin-left: auto;
   padding: 0 0.2rem;
   font-size: 1rem;
-  background: none;
-  border: none;
-  cursor: pointer;
-  opacity: 0.7;
-}
-
-.block-head .icon-btn:hover {
-  opacity: 1;
 }
 
 /* The banner design selector stays compact; the upload button is pushed
