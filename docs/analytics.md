@@ -63,17 +63,26 @@ Each `Client` record (shared by every event, keyed by hash):
   when a database is available,
 - `city` — city name from the DB-IP MMDB lookup, when available,
 - `ua` — raw `User-Agent` string,
-- `ua_pretty` — compact display form of the UA from `uarite.uaparse()`:
-  the crawler name for bots, with a category suffix only where a provider
-  runs crawlers of more than one kind (`GPTBot (AI)` vs
-  `OAI-SearchBot (search)`, `Googlebot (search)` vs `Google-Extended (AI)`;
-  single-kind providers stay plain: `Facebook`, `WhatsApp`), `Browser/major OS` on the desktop, the device where that is
-  the relevant information (iPhone reports its iOS version, Android
-  phones their model instead of the OS), otherwise the raw string,
 - `hide` — true for admin clients (`hide` message field): everything this
   client ever did is recorded but excluded from every statistic and from the
   viewer payload.  This is the one flag set at record time — it is a client
   property, not a classification.
+
+The viewer payload adds one display-time field to each client, never
+persisted (stored records keep the default and old data always follows the
+current uarite version):
+
+- `uarite` — the `uarite.UA` dataclass from parsing the raw UA
+  (`pretty`/`engine`/`os`/`provider`/`kind`/`url`): the crawler name for
+  bots,
+  with a category suffix only where a provider runs crawlers of more than
+  one kind (`GPTBot (AI)` vs `OAI-SearchBot (search)`, `Googlebot (search)`
+  vs `Google-Extended (AI)`; single-kind providers stay plain: `Facebook`,
+  `WhatsApp`), `Browser/major OS` on the desktop, the device where that is
+  the relevant information (iPhone reports its iOS version, Android phones
+  their model instead of the OS), otherwise the raw string; `url` is the
+  crawler's info page when uarite knows one (rendered as a 🔗 link after the
+  pretty UA in the viewer), `kind` drives the bot classification.
 
 A reverse-DNS lookup is attempted for each new client and the result, when
 available, is stored as `host`; local/reserved/multicast addresses are

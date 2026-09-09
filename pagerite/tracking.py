@@ -26,6 +26,7 @@ import httpx
 import msgspec
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
+from uarite import uaparse
 
 from pagerite import analytics
 from pagerite.data import resolve
@@ -443,7 +444,7 @@ async def activity_ws(ws: WebSocket) -> None:
     # already printed there): compact UA plus the browser's language tag.
     lang, _country = analytics._parse_accept_language(accept_language)
     ws.scope.setdefault("state", {})["log_extra"] = " ".join(
-        part for part in (analytics._compact_user_agent(ua), lang) if part
+        part for part in (uaparse(ua).pretty, lang) if part
     )
     await ws.accept()
     try:

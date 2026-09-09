@@ -60,17 +60,17 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import blake3
 import msgspec
-import uarite
+from uarite import UA, uaparse
 
 
-def _compact_user_agent(ua: str) -> str:
-    """Format a User-Agent string into a compact display form.
+def _display_client(client: Client) -> Client:
+    """Client copy with ``uarite`` filled in by the current uarite.
 
-    See ``uarite.uaparse``: crawler name (with category) for bots,
-    ``Browser/major OS`` or the device for real browsers, the raw UA when
-    unrecognized.
+    The parsed UA is a display-time field: stored records always carry the
+    default (None), so it never lands on disk, and old records always
+    follow current uarite rules.
     """
-    return uarite.uaparse(ua).pretty
+    return msgspec.structs.replace(client, uarite=uaparse(client.ua))
 
 
 class Ping(msgspec.Struct, omit_defaults=True):
@@ -157,11 +157,14 @@ class Client(msgspec.Struct, omit_defaults=True):
     city: str = ""
     #: Raw User-Agent header.
     ua: str = ""
-    #: Compact display form of ``ua`` (browser/OS/device) when parsable.
-    ua_pretty: str = ""
     #: True for admin clients (hide=1 ping): everything this client ever did
     #: is excluded from all statistics and from the viewer payload.
     hide: bool = False
+    #: Display-time parsed UA (uarite.UA dataclass: pretty/engine/os/
+    #: provider/kind/url).  Set only on the display-payload copies by
+    #: ``_display_client`` — stored records keep the default, so it is never
+    #: persisted and old data always follows the current uarite version.
+    uarite: UA | None = None
 
 
 # --- Display DTOs -------------------------------------------------------
@@ -418,7 +421,7 @@ def _is_bot_ua(ua: str) -> bool:
     (recognized crawler/previewer, generic bot token, or an unclassified
     HTTP client such as httpx) is not a visitor.
     """
-    return uarite.uaparse(ua).kind != "browser"
+    return uaparse(ua).kind != "browser"
 
 
 #: Plain-404 count per IP within ``_ABUSE_404_WINDOW`` that classifies it as
@@ -550,7 +553,6 @@ class Store:
             self.data.clients[h] = Client(
                 ip=ip,
                 ua=ua,
-                ua_pretty=_compact_user_agent(ua),
                 lang=lang,
                 country=country,
             )
@@ -930,7 +932,7 @@ class Store:
                 and not self._hidden(g.client)
                 and ip_of.get(g.client, "") in abuse_ips
             ],
-            clients={h: c for h, c in data.clients.items() if not c.hide},
+            clients={h: _display_client(c) for h, c in data.clients.items() if not c.hide},
             favicons={
                 origin: f"/_f/{f.file}"
                 for origin, f in data.favicons.items()
