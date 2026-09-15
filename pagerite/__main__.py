@@ -5,12 +5,12 @@ import os
 from pathlib import Path
 
 import msgspec
-from fastapi_vue import server
+from fastapi_vue import env, server
 
 from pagerite.config import Config
 
 DEFAULT_PORT = 8100
-DEVMODE = os.getenv("PAGERITE_DEV") == "1"
+os.environ["FASTAPI_VUE"] = "PAGERITE"
 
 
 def main() -> None:
@@ -54,7 +54,7 @@ def main() -> None:
         listen=args.listen,
         default_port=DEFAULT_PORT,
         server_header=False,
-        reload=Path(__file__).parent if DEVMODE else False,
+        reload=Path(__file__).parent if env.dev else False,
         **run_args,
     )
 

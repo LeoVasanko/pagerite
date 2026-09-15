@@ -1,4 +1,3 @@
-# ruff: noqa: INP001
 """Utilities used at build time and in devserver script. No dependencies."""
 
 import logging
@@ -33,7 +32,7 @@ def _check_node_version(node_path: str) -> None:
     Raises RuntimeError if version is too old or cannot be determined.
     """
     try:
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(
             [node_path, "--version"],
             capture_output=True,
             text=True,
@@ -221,7 +220,7 @@ def build(folder: str = "frontend") -> None:
     def run(cmd: list[str]) -> None:
         display_cmd = [Path(cmd[0]).stem, *cmd[1:]]
         logger.info("### %s", " ".join(display_cmd))
-        subprocess.run(cmd, check=True, cwd=folder)  # noqa: S603
+        subprocess.run(cmd, check=True, cwd=folder)
 
     try:
         run(install_cmd)

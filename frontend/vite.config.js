@@ -5,7 +5,7 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vueDevTools from 'vite-plugin-vue-devtools'
 
-const backendUrl = process.env.PAGERITE_BACKEND_URL || 'http://localhost:3200'
+const backendUrl = process.env.PAGERITE_BACKEND_URL || 'http://localhost:8210'
 
 // Proxy everything except Vite's own dev-time paths and the backend machinery
 // to the FastAPI backend in dev. /_api, /_f, /_themes, /_fonts and /_a are

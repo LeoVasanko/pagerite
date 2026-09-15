@@ -21,6 +21,7 @@ import json
 import os
 import re
 
+from fastapi_vue import env
 from html5tagger import HTML, Document, E, Template
 from platformdirs import site_data_dir, user_data_path
 
@@ -337,7 +338,7 @@ def _layout(
 ) -> Template:
     """Page layout template with standard assets and ES-module scripts.
 
-    In dev (PAGERITE_VITE_URL set) assets are linked from the Vite dev
+    In dev (Vite dev-server URL set) assets are linked from the Vite dev
     server and stylesheets use ``blocking="render"`` so the browser waits
     for them before showing the page, avoiding a flash of unstyled content.
     In production all page assets are inlined into the document: stylesheets
@@ -394,7 +395,7 @@ def _layout(
     # dev-server URLs as meta tags (Vite serves the modules and injects
     # their CSS for hot reloads); production inlines all page assets and
     # carries the on-demand URLs in one JSON script instead.
-    vite_url = os.environ.get("PAGERITE_VITE_URL")
+    vite_url = env.vite_url
     editor_scripts, editor_css = _editor_assets()
     langselect_scripts, langselect_css = _langselect_assets()
     config = {
@@ -1226,7 +1227,7 @@ def _page_assets() -> tuple[list[str], list[str]]:
     by the entry (e.g. overlayscrollbars.css) is extracted by Vite and must
     be linked separately.
     """
-    vite_url = os.environ.get("PAGERITE_VITE_URL")
+    vite_url = env.vite_url
     if vite_url:
         return [f"{vite_url}/src/pagerite.js"], []
     if "page" not in _asset_cache:
@@ -1244,7 +1245,7 @@ def _editor_assets() -> tuple[list[str], str | None]:
     The shared CSS is already linked on the page, so the pen only needs the
     editor-specific stylesheet.
     """
-    vite_url = os.environ.get("PAGERITE_VITE_URL")
+    vite_url = env.vite_url
     if vite_url:
         return [f"{vite_url}/@vite/client", f"{vite_url}/src/main.js"], None
     if "editor" not in _asset_cache:
@@ -1256,7 +1257,7 @@ def _editor_assets() -> tuple[list[str], str | None]:
 
 def _analytics_assets() -> tuple[list[str], list[str]]:
     """Script and stylesheet URLs for the analytics page entry."""
-    vite_url = os.environ.get("PAGERITE_VITE_URL")
+    vite_url = env.vite_url
     if vite_url:
         return [f"{vite_url}/src/analytics-main.js"], []
     if "analytics" not in _asset_cache:
@@ -1270,7 +1271,7 @@ def _analytics_assets() -> tuple[list[str], list[str]]:
 
 def _langselect_assets() -> tuple[list[str], list[str]]:
     """Script and stylesheet URLs for the on-demand public language selector."""
-    vite_url = os.environ.get("PAGERITE_VITE_URL")
+    vite_url = env.vite_url
     if vite_url:
         return [f"{vite_url}/src/langselect-main.js"], []
     if "langselect" not in _asset_cache:

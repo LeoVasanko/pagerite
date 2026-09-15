@@ -22,11 +22,11 @@ from pathlib import Path
 import blake3
 from fastapi import HTTPException, Request
 from fastapi.responses import Response
+from fastapi_vue import env
 from kanta import Kanta
 from zstandard import ZstdCompressor
 
 from pagerite import analytics, i18n, seed, translate, views
-from pagerite.__main__ import DEVMODE
 from pagerite.chunks import store_chunks
 from pagerite.config import load
 from pagerite.data import (
@@ -230,7 +230,7 @@ def _html_response(
     # Absolute social/canonical URLs use the site's public origin; on
     # localhost (varying ports) fall back to the request's own base URL.
     base_url = SITE_URL or str(request.base_url).rstrip("/")
-    if DEVMODE:
+    if env.dev:
         identity = _render_html(kind, path, base_url, lang, link_lang).encode()
         body = _zstd.compress(identity) if zstd else identity
     else:

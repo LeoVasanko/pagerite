@@ -36,11 +36,10 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
-from fastapi_vue import Frontend
+from fastapi_vue import Frontend, env
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from pagerite import api, files, pages, tracking
-from pagerite.__main__ import DEVMODE
 from pagerite.files import file_store
 from pagerite.state import analytics_store, config, kanta
 
@@ -99,7 +98,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator:
 # is not meant to be browsable by the public anyway.
 app = FastAPI(
     title="Pagerite",
-    debug=DEVMODE,
+    debug=env.dev,
     lifespan=lifespan,
     docs_url=None,
     redoc_url=None,

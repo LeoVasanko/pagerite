@@ -1,11 +1,12 @@
 #!/usr/bin/env -S uv run
+# auto-upgrade@fastapi-vue-setup - remove this if you modify this file
 """Run Vite development server for Vue app and FastAPI backend with auto-reload."""
 
 import argparse
 import asyncio
 import os
+import subprocess
 import sys
-from contextlib import suppress
 from pathlib import Path
 
 import tracerite
@@ -47,11 +48,11 @@ async def run_devserver(
     os.environ["PAGERITE_DEV"] = "1"
 
     async with ProcessGroup() as pg:
+        pg.create_task(check_ports_free(viteurl, backurl))
         npm_i = await pg.spawn(*npm_install, cwd=front)
-        await check_ports_free(viteurl, backurl)
-        await pg.spawn(*pagerite, *(extra_args or []))
+        await pg.spawn(*pagerite, *(extra_args or []), vital=True)
         await pg.wait(npm_i, ready(backurl, path=HEALTH))
-        await pg.spawn(*vite, cwd=front)
+        await pg.spawn(*vite, cwd=front, vital=True)
 
 
 def main() -> None:
@@ -74,8 +75,12 @@ def main() -> None:
         help=f"FastAPI (default: localhost:{DEFAULT_DEV_PORT})",
     )
     args, extra_args = parser.parse_known_args()
-    with suppress(KeyboardInterrupt):
+    try:
         asyncio.run(run_devserver(args.listen, args.backend, extra_args))
+    except* KeyboardInterrupt:
+        pass  # user stopped the devserver: normal exit
+    except* subprocess.SubprocessError, RuntimeError:
+        raise SystemExit(1) from None  # logged in devutil already; exit 1
 
 
 HELP_EPILOG = """

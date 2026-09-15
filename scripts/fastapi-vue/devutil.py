@@ -1,111 +1,90 @@
-# ruff: noqa: INP001
 """Utilities meant for devserver script, used only in source repository with dev deps."""
 
+from __future__ import annotations
+
 import asyncio
-import subprocess
 import sys
+from asyncio.subprocess import Process
 from contextlib import suppress
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Self
+from subprocess import CalledProcessError
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-from buildutil import find_dev_tool, find_install_tool, logger
 from fastapi_vue.hostutil import parse_endpoint
 
+from buildutil import find_dev_tool, find_install_tool, logger
+
 if TYPE_CHECKING:
-    from collections.abc import Coroutine
+    from collections.abc import Awaitable
 
 
-class ProcessGroup:
-    """Manage async subprocesses with automatic cleanup, like TaskGroup for processes."""
+class ProcessGroup(asyncio.TaskGroup):
+    """TaskGroup with structured ownership of async subprocesses."""
 
-    def __init__(self) -> None:
-        """Initialize empty process tracking."""
-        self._procs: list[asyncio.subprocess.Process] = []
-        self._cmds: dict[int, str] = {}  # pid -> command name
+    def __init__(self, *, terminate_timeout: float = 10) -> None:
+        """Set the grace period before terminate() escalates to kill()."""
+        super().__init__()
+        self._terminate_timeout = terminate_timeout
+        self._cmds: dict[Process, tuple[str, ...]] = {}
 
     async def spawn(
-        self,
-        *cmd: str,
-        cwd: str | None = None,
-    ) -> asyncio.subprocess.Process:
-        """Spawn a subprocess and track it."""
-        cmd_name = Path(cmd[0]).stem
-        logger.info(">>> %s", " ".join([cmd_name, *cmd[1:]]))
-        proc = await asyncio.create_subprocess_exec(*cmd, cwd=cwd)
-        self._procs.append(proc)
-        self._cmds[proc.pid] = cmd_name
-        return proc
+        self, *cmd: str, cwd: str | None = None, vital: bool = False
+    ) -> Process:
+        """Spawn and own a subprocess. If a vital process exits, the group cancels."""
 
-    async def wait(
-        self,
-        *waitables: "asyncio.subprocess.Process | Coroutine[Any, Any, Any]",
-    ) -> None:
-        """Wait for processes/coroutines to complete, raise SystemExit on failure."""
+        async def run() -> None:
+            name = Path(cmd[0]).stem
+            logger.info(">>> %s", " ".join([name, *cmd[1:]]))
+            try:
+                proc = await asyncio.create_subprocess_exec(*cmd, cwd=cwd)
+                self._cmds[proc] = cmd
+                started.set_result(proc)
+            except Exception as e:  # noqa: BLE001
+                started.set_exception(e)
+                return
 
-        async def wait_proc(proc: asyncio.subprocess.Process) -> None:
-            returncode = await proc.wait()
-            if returncode != 0:
-                cmd_name = self._cmds.get(proc.pid, "unknown")
-                raise subprocess.CalledProcessError(returncode, cmd_name)
-
-        tasks = [
-            wait_proc(w) if isinstance(w, asyncio.subprocess.Process) else w
-            for w in waitables
-        ]
-        try:
-            await asyncio.gather(*tasks)
-        except subprocess.CalledProcessError as e:
-            logger.warning("%s failed with exit status %d", e.cmd, e.returncode)
-            raise SystemExit(1) from None
-
-    async def __aenter__(self) -> Self:
-        """Enter the async context manager."""
-        return self
-
-    async def __aexit__(self, exc_type: type[BaseException] | None, *_: object) -> None:
-        """Wait for one process to exit, terminate others, then wait for all."""
-        await self._cleanup(immediate=exc_type is not None)
-
-    async def _cleanup(self, *, immediate: bool = False) -> None:
-        running = [p for p in self._procs if p.returncode is None]
-        if not running:
-            return
-
-        if not immediate:
-            # Wait for any one process to exit
-            with suppress(asyncio.CancelledError):
-                await asyncio.wait(
-                    [asyncio.create_task(p.wait()) for p in running],
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-
-        # Terminate remaining processes
-        for p in self._procs:
-            if p.returncode is None:
+            try:
+                returncode = await proc.wait()
+            finally:
                 with suppress(ProcessLookupError):
-                    p.terminate()
-
-        # Wait for all to finish (with overall timeout), shielded from cancellation
-        still_running = [p for p in self._procs if p.returncode is None]
-        if still_running:
-            with suppress(asyncio.CancelledError):
+                    proc.terminate()
                 try:
-                    await asyncio.shield(
-                        asyncio.wait_for(
-                            asyncio.gather(*[p.wait() for p in still_running]),
-                            timeout=10,
-                        ),
-                    )
+                    await asyncio.wait_for(proc.wait(), self._terminate_timeout)
                 except TimeoutError:
-                    for p in self._procs:
-                        if p.returncode is None:
-                            with suppress(ProcessLookupError):
-                                p.kill()
-                            await p.wait()
+                    with suppress(ProcessLookupError):
+                        proc.kill()
+                    await proc.wait()
+
+            if vital:
+                logger.warning("Vital process %s exited", name)
+                raise CalledProcessError(returncode, cmd)
+
+        started = asyncio.get_running_loop().create_future()
+        self.create_task(run())
+        return await asyncio.shield(started)
+
+    async def wait(self, *waitables: Process | Awaitable) -> tuple[Any, ...]:
+        """Wait concurrently and return results in argument order."""
+
+        async def task(w: Process | Awaitable) -> Any:
+            if not isinstance(w, Process):
+                return await w
+            if retcode := await w.wait():
+                cmd = self._cmds[w]
+                logger.warning(
+                    "Process %s exited with status %d", Path(cmd[0]).stem, retcode
+                )
+                raise CalledProcessError(retcode, cmd)
+            return retcode
+
+        async with asyncio.TaskGroup() as group:
+            tasks = [group.create_task(task(w)) for w in waitables]
+
+        return tuple(task.result() for task in tasks)
 
 
-async def http_get_server(url: str, timeout: float) -> str | None:  # noqa: ASYNC109
+async def http_get_server(url: str, timeout: float) -> str | None:
     """GET url with plain asyncio streams, return the response Server header.
 
     Returns an empty string when the server responds without a Server header,
@@ -128,31 +107,32 @@ async def http_get_server(url: str, timeout: float) -> str | None:  # noqa: ASYN
                 writer.close()
     except OSError, EOFError, ValueError, TimeoutError:
         return None
-    for line in data.decode("latin-1").split("\r\n"):
+    for line in data.decode(errors="replace").split("\r\n"):
         if line.lower().startswith("server:"):
-            return line.split(":", 1)[1].strip()
+            return line[7:].strip()
     return ""
 
 
 async def check_ports_free(*urls: str) -> None:
-    """Verify URLs are not responding (ports are free). Raise SystemExit if any respond."""
+    """Verify URLs are not responding (ports are free).
 
-    async def check(url: str) -> None:
-        server = await http_get_server(url, timeout=0.1)
+    Meant to run as a task inside a TaskGroup. Logs the conflict and raises
+    RuntimeError (handled like a failed process) if any URL responds.
+    """
+    servers = await asyncio.gather(*(http_get_server(url, timeout=0.1) for url in urls))
+    for url, server in zip(urls, servers, strict=True):
         if server is not None:
-            logger.warning(
+            logger.error(
                 "Conflicting %s already running at %s", server or "server", url
             )
-            raise SystemExit(1)
-
-    await asyncio.gather(*[check(url) for url in urls])
+            raise RuntimeError(url)
 
 
 async def ready(url: str, path: str = "", max_attempts: int = 50) -> None:
     """Wait for the server to be ready by polling an endpoint.
 
     Use empty path to disable the check and make this return immediately.
-    Raises SystemExit(1) if server doesn't start in time.
+    Logs, then raises RuntimeError if the server doesn't start in time.
     """
     if not path:
         return
@@ -162,8 +142,8 @@ async def ready(url: str, path: str = "", max_attempts: int = 50) -> None:
             logger.info("✓ Backend ready!")
             return
         if attempt == max_attempts - 1:
-            logger.warning("Backend didn't start in time")
-            raise SystemExit(1)
+            logger.error("Backend at %s didn't start in time", url)
+            raise RuntimeError(url)
         await asyncio.sleep(0.1)
 
 

@@ -8,11 +8,11 @@
  * - Disables Vite's screen clearing on startup
  *
  * Options:
- *   paths - Array of paths to proxy (default: ["/api"])
+ *   paths - Array of paths to proxy (default: ['/api'])
  */
 
-export default function fastapiVue({ paths = ["/api"] } = {}) {
-  const backendUrl = process.env.PAGERITE_BACKEND_URL || "http://localhost:8210"
+export default function fastapiVue({ paths = ['/api'] } = {}) {
+  const backendUrl = process.env.PAGERITE_BACKEND_URL || 'http://localhost:8210'
 
   // Build proxy configuration for each path
   const proxy = {}
@@ -25,12 +25,12 @@ export default function fastapiVue({ paths = ["/api"] } = {}) {
   }
 
   return {
-    name: "vite-plugin-fastapi-pagerite",
+    name: 'vite-plugin-fastapi-pagerite',
     config: () => ({
       clearScreen: false,
       server: { proxy },
       build: {
-        outDir: "../pagerite/frontend-build",
+        outDir: '../pagerite/frontend-build',
         emptyOutDir: true,
       },
     }),
