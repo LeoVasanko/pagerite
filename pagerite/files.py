@@ -39,10 +39,6 @@ from pagerite.state import (
 
 logger = logging.getLogger(__name__)
 
-# mediapreview logs pyvips noise ("VipsForeignSaveJpegTarget argument strip is
-# deprecated", "threadpool completed with N workers") at INFO; keep warnings.
-logging.getLogger("mediapreview").setLevel(logging.WARNING)
-
 router = APIRouter()
 
 
@@ -159,14 +155,13 @@ def _svg_to_png(body: bytes, maxsize: int) -> bytes | None:
 
 def _avif_to_format(avif: bytes, suffix: str, quality: int) -> bytes:
     """Re-encode the AVIF derivative into a fallback format (WebP/JPEG)
-    via pyvips. JPEG has no alpha, so it is flattened onto white;
-    ``strip`` keeps metadata (EXIF) out of the fallbacks."""
+    via pyvips. JPEG has no alpha, so it is flattened onto white."""
     import pyvips
 
     img = pyvips.Image.new_from_buffer(avif, "")
     if suffix == ".jpg" and img.hasalpha():
         img = img.flatten(background=[255, 255, 255])
-    return img.write_to_buffer(suffix, Q=quality, strip=True)
+    return img.write_to_buffer(suffix, Q=quality, keep="none")
 
 
 def _image_derivatives(
