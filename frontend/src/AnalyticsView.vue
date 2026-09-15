@@ -23,6 +23,7 @@ import {
   formatVisitRows,
 } from './analytics/format.js'
 import TrailLink from './TrailLink.vue'
+import RefererBadge from './RefererBadge.vue'
 import VisitorCell from './VisitorCell.vue'
 import TransitionGraph from './TransitionGraph.vue'
 import VisitorCharts from './VisitorCharts.vue'
@@ -215,8 +216,7 @@ const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], c
               <tbody>
                 <tr v-for="(v, i) in visitRows" :key="i">
                   <td class="trail">
-                    <TrailLink v-if="v.refererStep" :step="v.refererStep" :favicons="favicons" @close="$emit('close')" />
-                    <span v-if="v.utm && v.utm !== '—'" class="utm-tag small muted" :title="v.utmTitle">{{ v.utm }}</span>
+                    <RefererBadge v-if="v.refererBadge" :badge="v.refererBadge" :favicons="favicons" />
                     <span v-if="v.rowFlag" class="flag" v-html="v.rowFlag" :title="v.rowFlagTitle"></span>
                     <TrailLink v-for="(s, si) in v.trail" :key="si" :step="s" :favicons="favicons" :flags="s.langFlags" @close="$emit('close')" />
                   </td>
@@ -253,7 +253,7 @@ const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], c
               <tbody>
                 <tr v-for="(c, i) in crawlerRows" :key="i">
                   <td class="trail">
-                    <TrailLink v-if="c.refererStep" :step="c.refererStep" :favicons="favicons" @close="$emit('close')" />
+                    <RefererBadge v-if="c.refererBadge" :badge="c.refererBadge" :favicons="favicons" />
                     <TrailLink v-for="(s, si) in c.pages" :key="si" :step="s" :count="s.count" @close="$emit('close')" />
                     <span v-for="(f, fi) in c.readFlags" :key="fi" class="flag" v-html="f.flag" :title="f.name"></span>
                   </td>
@@ -480,16 +480,11 @@ const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], c
   color: var(--error, #c00);
 }
 
-.visit-table .utm-tag {
-  display: inline-block;
+/* The referer badge outgrows the 8rem trail-link cap (it carries the UTM
+   summary too); keep the inline-flex layout from the component. */
+.visit-table .trail a.referer-badge {
+  display: inline-flex;
   max-width: 100%;
-  padding: 0.05rem 0.4rem;
-  border: 1px solid var(--line);
-  border-radius: 0.25rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  vertical-align: bottom;
 }
 
 /* Same flag chip as the visitor cells (VisitorCell.vue); the flags here

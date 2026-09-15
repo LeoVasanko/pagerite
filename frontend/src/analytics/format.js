@@ -178,6 +178,32 @@ function stepOf(path, titles) {
 }
 
 /**
+ * Badge data combining a visit's/crawler's external referer origin with the
+ * visit's UTM tags: the origin as the badge link/label (the favicon is
+ * looked up by origin in the component), the known UTM values as a short
+ * inline summary, and a one-fact-per-line tooltip — the full origin URL on
+ * the first line, then every ``utm_*=value`` pair.  Null when there is no
+ * external referer and no UTM tag (a plain direct visit).
+ */
+function refererBadgeOf(referer, titles, utmTags = {}) {
+  const step = stepOf(referer, titles)
+  const external = step?.external ? step : null
+  const known = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content']
+  const utm = known.map((k) => utmTags[k]).filter(Boolean).join(' · ')
+  if (!external && !utm) return null
+  return {
+    href: external?.origin || '',
+    label: external?.slug || '',
+    origin: external?.origin || '',
+    utm,
+    title: [
+      ...(external ? [external.origin] : []),
+      ...Object.entries(utmTags).map(([k, value]) => `${k}=${value}`),
+    ].join('\n'),
+  }
+}
+
+/**
  * Human-readable relative timestamp.  Adapted from cista-storage: uses
  * ``Intl.RelativeTimeFormat`` for short intervals and a compact date for
  * anything older than a week.
@@ -369,9 +395,10 @@ export function mainDomain(host, limit = 24) {
 /**
  * Group raw crawler hits by client hash and format each group as a row showing
  * every internal page that crawler visited.  Rows are sorted by most recent hit
- * first, with total hits as a tie-breaker.  The group's ``refererStep`` is the
- * latest external referer seen for the crawler — spiders often advertise
- * their own site there — rendered with its favicon like visit referers.
+ * first, with total hits as a tie-breaker.  The group's ``refererBadge`` is
+ * the latest external referer seen for the crawler — spiders often advertise
+ * their own site there — rendered as a badge with its favicon like visit
+ * referers.
  * ``clients`` maps client hashes to client records.
  */
 export function formatCrawlerRows(crawlers, clients, pageTree, now = Date.now(), site = { multilingual: false, primaryLang: '' }) {
@@ -420,7 +447,7 @@ export function formatCrawlerRows(crawlers, clients, pageTree, now = Date.now(),
         lastSeen: formatWhen(g.lastStart, now),
         lastSeenIso: formatWhenIso(g.lastStart),
         lastSeenLocal: formatWhenLocal(g.lastStart),
-        refererStep: stepOf(g.referer, titles),
+        refererBadge: refererBadgeOf(g.referer, titles),
         pages: [...g.pages.entries()]
           .sort((a, b) => b[1].count - a[1].count)
           .map(([path, info]) => ({ ...stepOf(path, titles), count: info.count, status: info.status })),
@@ -559,9 +586,10 @@ export function formatAbuseRows(abuse, clients, pageTree, now = Date.now()) {
 
 /**
  * Format raw visit records as rows for a technical table.  Returns objects
- * with display strings; missing values become "—".  ``trail`` starts with the
- * external referer (when present), then the entry page and any further internal
- * pages or external exit origins; consecutive views of the same page (e.g. a
+ * with display strings; missing values become "—".  The external referer
+ * (when present) and the UTM tags ride along as ``refererBadge``; ``trail``
+ * holds the entry page and any further internal pages or external exit
+ * origins; consecutive views of the same page (e.g. a
  * language switch re-view) merge into one step that keeps the
  * consecutive-distinct rendered languages, summed read time, and the latest
  * status.  On multilingual sites the rendered languages surface as flag
@@ -599,12 +627,6 @@ export function formatVisitRows(visits, clients, pageTree, now = Date.now(), sit
       }
     }
     const distinctLangs = new Set(trail.flatMap((s) => s.langs))
-    const utmKeys = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content']
-    const utmValues = utmKeys.map((k) => (v.utm || {})[k]).filter(Boolean)
-    const utm = utmValues.length ? utmValues.join(' · ') : ''
-    const utmTitle = Object.entries(v.utm || {})
-      .map(([k, value]) => `${k}=${value}`)
-      .join(', ')
     const dash = (s) => (s || '—')
     const host = client.host || ''
     const isHost = !!host
@@ -614,8 +636,7 @@ export function formatVisitRows(visits, clients, pageTree, now = Date.now(), sit
       lastSeenLocal: formatWhenLocal(v.start),
       langDisplay: formatLang(client.lang),
       trail,
-      refererStep: stepOf(v.referer, titles),
-      referer: dash(v.referer),
+      refererBadge: refererBadgeOf(v.referer, titles, v.utm),
       ip: client.ip || '',
       ipDisplay: isHost ? mainDomain(host) : hostIP(client.ip) || client.ip || '—',
       isHost,
@@ -625,8 +646,6 @@ export function formatVisitRows(visits, clients, pageTree, now = Date.now(), sit
       ua: client.uarite?.pretty || client.ua || '—',
       uaRaw: client.ua || '',
       uaUrl: client.uarite?.url || '',
-      utm: utm || '—',
-      utmTitle,
     }
     if (site.multilingual && distinctLangs.size) {
       if (distinctLangs.size === 1) {

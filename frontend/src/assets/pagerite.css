@@ -26,6 +26,14 @@
   /* Selection fill for page text and the CodeMirror editors; themes
      override when the accent tint clashes with accent-colored text. */
   --selection-bg: color-mix(var(--accent) 30%, transparent);
+  /* Referer-badge chip in the analytics viewer: a fixed neutral palette,
+     deliberately NOT themed — the chip sits behind transparent favicons, so
+     black-on-transparent and white-on-transparent glyphs must both stay
+     legible on every theme (dark greys kill black glyphs, pure white kills
+     white ones); its text likewise stays dark on any theme. */
+  --badge-bg: #c9d1d9;
+  --badge-text: #1f2328;
+  --badge-muted: #59636e;
   /* Code highlighting palette, consumed by pygments.css: complete light and
      dark sets (background included), resolved by light-dark() from the
      used color-scheme. A theme picks a set simply by declaring
