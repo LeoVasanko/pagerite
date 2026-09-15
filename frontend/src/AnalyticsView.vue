@@ -160,9 +160,15 @@ watch(range, (r) => {
 
 const clients = computed(() => data.value?.clients || {})
 const favicons = computed(() => data.value?.favicons || {})
-const visitRows = computed(() => formatVisitRows(visits.value, clients.value, pageTree.value, now.value))
+// Site language context from the payload: drives the discreet rendered-
+// language markers in the visit/crawler rows (multilingual sites only).
+const site = computed(() => ({
+  multilingual: !!data.value?.multilingual,
+  primaryLang: data.value?.primary_lang || '',
+}))
+const visitRows = computed(() => formatVisitRows(visits.value, clients.value, pageTree.value, now.value, site.value))
 const crawlers = computed(() => rangeData.value?.crawlers || [])
-const crawlerRows = computed(() => formatCrawlerRows(crawlers.value, clients.value, pageTree.value, now.value))
+const crawlerRows = computed(() => formatCrawlerRows(crawlers.value, clients.value, pageTree.value, now.value, site.value))
 const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], clients.value, pageTree.value, now.value))
 
 </script>
@@ -211,7 +217,8 @@ const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], c
                   <td class="trail">
                     <TrailLink v-if="v.refererStep" :step="v.refererStep" :favicons="favicons" @close="$emit('close')" />
                     <span v-if="v.utm && v.utm !== '—'" class="utm-tag small muted" :title="v.utmTitle">{{ v.utm }}</span>
-                    <TrailLink v-for="(s, si) in v.trail" :key="si" :step="s" :favicons="favicons" @close="$emit('close')" />
+                    <span v-if="v.rowFlag" class="flag" v-html="v.rowFlag" :title="v.rowFlagTitle"></span>
+                    <TrailLink v-for="(s, si) in v.trail" :key="si" :step="s" :favicons="favicons" :flags="s.langFlags" @close="$emit('close')" />
                   </td>
                   <VisitorCell
                     :ip="v.ip"
@@ -248,6 +255,7 @@ const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], c
                   <td class="trail">
                     <TrailLink v-if="c.refererStep" :step="c.refererStep" :favicons="favicons" @close="$emit('close')" />
                     <TrailLink v-for="(s, si) in c.pages" :key="si" :step="s" :count="s.count" @close="$emit('close')" />
+                    <span v-for="(f, fi) in c.readFlags" :key="fi" class="flag" v-html="f.flag" :title="f.name"></span>
                   </td>
                   <VisitorCell
                     :ip="c.ip"
@@ -482,6 +490,25 @@ const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], c
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: bottom;
+}
+
+/* Same flag chip as the visitor cells (VisitorCell.vue); the flags here
+   mark the language the page was read in. */
+.visit-table .flag {
+  display: inline-flex;
+  width: 18px;
+  height: 12px;
+  border-radius: 2px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2) inset;
+  vertical-align: middle;
+}
+
+.visit-table .flag :deep(svg) {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 .visit-table .clickable-list {

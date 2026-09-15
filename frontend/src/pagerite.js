@@ -637,6 +637,8 @@ import { reconnectPolicy, socketSlot, watchConnecting } from "./reconnect";
     if (to) msg.to = to;
     const secs = Math.round(read / 1000);
     if (secs > 0) msg.read = secs;
+    const lang = document.documentElement.lang;
+    if (lang) msg.lang = lang;
     if (!msg.to && !msg.read) return;
     report(msg);
   }
@@ -815,6 +817,10 @@ import { reconnectPolicy, socketSlot, watchConnecting } from "./reconnect";
     const y = scrollY; // a language switch is not a navigation: keep scroll
     await load(currentPath, false);
     scrollTo(0, y);
+    // Log the switch as a trail event in the new language (load() updated
+    // <html lang>): the ping matches the switch's GET server-side, so it is
+    // not misclassified as a crawler hit.
+    ping({ to: currentPath });
   });
 
   // --- Fetch navigation ------------------------------------------------

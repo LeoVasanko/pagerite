@@ -28,7 +28,7 @@ from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 from uarite import uaparse
 
-from pagerite import analytics
+from pagerite import analytics, i18n
 from pagerite.data import resolve
 from pagerite.files import _hash_name, file_store
 from pagerite.state import SITE_URL, _html_response, analytics_store, data
@@ -334,7 +334,7 @@ async def _broadcast_analytics() -> None:
     """Send the current analytics snapshot to every connected WS client."""
     if not _analytics_ws_clients:
         return
-    payload = analytics_store.display_json(_in_menu)
+    payload = _display_json()
     closed = set()
     for ws in _analytics_ws_clients:
         try:
@@ -370,12 +370,29 @@ def _in_menu(path: str) -> bool:
     return resolve(data.menu, path.strip("/")) is not None
 
 
-def _record_get(request: Request, *, status: int = 200) -> None:
+def _display_json() -> str:
+    """The current analytics snapshot as JSON for the admin stream.
+
+    Adds the site's language context: ``multilingual`` (translation
+    languages configured) lets the viewer suppress language UI on
+    single-language sites, ``primary_lang`` (the front page's) lets it skip
+    the primary-language default case.
+    """
+    return analytics_store.display_json(
+        _in_menu,
+        multilingual=bool(data.translate_langs),
+        primary_lang=i18n.primary_lang(data.menu, ""),
+    )
+
+
+def _record_get(request: Request, *, status: int = 200, lang: str = "") -> None:
     """Record the document GET as one raw access-log line in analytics.
 
     Nothing is classified here — the true HTTP status, the full request path
-    (query included), an external referer origin and the preload flag are
-    stored, and visitor/crawler/abuse classification happens at display time
+    (query included), an external referer origin, the preload flag and the
+    rendered content language (``lang``, "" for non-localized responses such
+    as 404 probes and reserved paths) are stored, and
+    visitor/crawler/abuse classification happens at display time
     (see analytics.Store.display).  Idle-time preloads from pagerite.js
     (``x-pagerite-preload`` header) are recorded with ``pre=True``: never
     counted, but a navigation later served from the in-memory page cache is
@@ -403,6 +420,7 @@ def _record_get(request: Request, *, status: int = 200) -> None:
         referer=referer,
         accept_language=request.headers.get("accept-language", ""),
         pre=bool(request.headers.get("x-pagerite-preload")),
+        lang=lang,
     )
     if client_hash is not None:
         _schedule_client_enrichment([client_hash])
@@ -462,6 +480,7 @@ async def activity_ws(ws: WebSocket) -> None:
                 accept_language,
                 hide=msg.hide,
                 read=msg.read,
+                lang=msg.lang,
             )
             if new_client is not None:
                 _schedule_client_enrichment([new_client])
@@ -478,7 +497,7 @@ async def analytics_websocket(ws: WebSocket) -> None:
     endpoint. Powers the analytics viewer rendered at /_a.
     """
     await ws.accept()
-    await ws.send_text(analytics_store.display_json(_in_menu))
+    await ws.send_text(_display_json())
     _analytics_ws_clients.add(ws)
     try:
         while True:

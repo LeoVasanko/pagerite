@@ -2,6 +2,7 @@
  * Formatters and aggregators for summary sections: totals and the recent
  * visit trail.
  */
+import { flagFor, langName } from '../langs.js'
 
 /**
  * IPv4 unchanged, IPv6 returns the /64 network prefix in compact form.
@@ -373,7 +374,7 @@ export function mainDomain(host, limit = 24) {
  * their own site there — rendered with its favicon like visit referers.
  * ``clients`` maps client hashes to client records.
  */
-export function formatCrawlerRows(crawlers, clients, pageTree, now = Date.now()) {
+export function formatCrawlerRows(crawlers, clients, pageTree, now = Date.now(), site = { multilingual: false, primaryLang: '' }) {
   const titles = buildTitleMap(pageTree)
   const groups = new Map()
   for (const c of crawlers || []) {
@@ -384,10 +385,12 @@ export function formatCrawlerRows(crawlers, clients, pageTree, now = Date.now())
       lastStart: 0,
       referer: '',
       pages: new Map(),
+      langs: new Set(),
     }
     const start = new Date(c.start).getTime()
     if (start > g.lastStart) g.lastStart = start
     if (c.referer) g.referer = c.referer
+    if (c.lang) g.langs.add(c.lang)
     if (c.entry?.startsWith('/')) {
       const existing = g.pages.get(c.entry) || { count: 0, status: c.status || 200 }
       existing.count += 1
@@ -408,6 +411,11 @@ export function formatCrawlerRows(crawlers, clients, pageTree, now = Date.now())
       const client = g.client || {}
       const host = client.host || ''
       const isHost = !!host
+      // Rendered languages read, shown only when they say something the
+      // primary language alone would not (multilingual sites only).
+      const langs = [...g.langs].sort()
+      const showLangs =
+        site.multilingual && (langs.length > 1 || (langs[0] && langs[0] !== site.primaryLang))
       return {
         lastSeen: formatWhen(g.lastStart, now),
         lastSeenIso: formatWhenIso(g.lastStart),
@@ -416,6 +424,9 @@ export function formatCrawlerRows(crawlers, clients, pageTree, now = Date.now())
         pages: [...g.pages.entries()]
           .sort((a, b) => b[1].count - a[1].count)
           .map(([path, info]) => ({ ...stepOf(path, titles), count: info.count, status: info.status })),
+        readFlags: showLangs
+          ? langs.map((l) => ({ flag: flagFor(l), name: langName(l) })).filter((f) => f.flag)
+          : [],
         ip: client.ip || '',
         ipDisplay: isHost ? mainDomain(host) : hostIP(client.ip) || client.ip || '—',
         isHost,
@@ -550,23 +561,44 @@ export function formatAbuseRows(abuse, clients, pageTree, now = Date.now()) {
  * Format raw visit records as rows for a technical table.  Returns objects
  * with display strings; missing values become "—".  ``trail`` starts with the
  * external referer (when present), then the entry page and any further internal
- * pages or external exit origins. Only the 20 most recent visits are shown.
- * ``clients`` maps client hashes to client records.
+ * pages or external exit origins; consecutive views of the same page (e.g. a
+ * language switch re-view) merge into one step that keeps the
+ * consecutive-distinct rendered languages, summed read time, and the latest
+ * status.  On multilingual sites the rendered languages surface as flag
+ * icons: a visit read entirely in one non-primary language gets ``rowFlag``,
+ * and a visit spanning languages gets per-step ``langFlags`` markers where
+ * the language begins or changes.  Only the 20 most recent visits are shown.
+ * ``clients`` maps client hashes to client records; ``site`` carries the
+ * payload's multilingual/primary-language context.
  */
-export function formatVisitRows(visits, clients, pageTree, now = Date.now()) {
+export function formatVisitRows(visits, clients, pageTree, now = Date.now(), site = { multilingual: false, primaryLang: '' }) {
   const titles = buildTitleMap(pageTree)
   return [...(visits || [])].reverse().slice(0, 20).map((v) => {
     const client = (clients || {})[v.client] || {}
-    const trail = Object.values(v.trail || {})
+    const steps = Object.values(v.trail || {})
       .map((item) => {
         const step = stepOf(item.to, titles)
         if (step) {
           if (item.read) step.readSeconds = item.read
           if (item.status) step.status = item.status
+          if (item.lang) step.lang = item.lang
         }
         return step
       })
       .filter(Boolean)
+    const trail = []
+    for (const step of steps) {
+      const prev = trail[trail.length - 1]
+      if (prev && prev.path === step.path) {
+        if (step.lang && step.lang !== prev.langs[prev.langs.length - 1]) prev.langs.push(step.lang)
+        if (step.readSeconds) prev.readSeconds = (prev.readSeconds || 0) + step.readSeconds
+        if (step.status) prev.status = step.status
+      } else {
+        step.langs = step.lang ? [step.lang] : []
+        trail.push(step)
+      }
+    }
+    const distinctLangs = new Set(trail.flatMap((s) => s.langs))
     const utmKeys = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content']
     const utmValues = utmKeys.map((k) => (v.utm || {})[k]).filter(Boolean)
     const utm = utmValues.length ? utmValues.join(' · ') : ''
@@ -576,7 +608,7 @@ export function formatVisitRows(visits, clients, pageTree, now = Date.now()) {
     const dash = (s) => (s || '—')
     const host = client.host || ''
     const isHost = !!host
-    return {
+    const row = {
       lastSeen: formatWhen(v.start, now),
       lastSeenIso: formatWhenIso(v.start),
       lastSeenLocal: formatWhenLocal(v.start),
@@ -596,5 +628,27 @@ export function formatVisitRows(visits, clients, pageTree, now = Date.now()) {
       utm: utm || '—',
       utmTitle,
     }
+    if (site.multilingual && distinctLangs.size) {
+      if (distinctLangs.size === 1) {
+        const [tag] = distinctLangs
+        const flag = flagFor(tag)
+        if (flag && tag !== site.primaryLang) {
+          row.rowFlag = flag
+          row.rowFlagTitle = langName(tag)
+        }
+      } else {
+        // Flag the steps where the rendered language begins or changes;
+        // lang-less steps keep the comparison chain going, they never flag.
+        let lastLang = null
+        for (const step of trail) {
+          if (!step.langs.length) continue
+          if (!lastLang || step.langs[step.langs.length - 1] !== lastLang) {
+            step.langFlags = step.langs.map(flagFor).filter(Boolean)
+          }
+          lastLang = step.langs[step.langs.length - 1]
+        }
+      }
+    }
+    return row
   })
 }

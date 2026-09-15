@@ -152,7 +152,8 @@ async def show_page(request: Request, path: str) -> Response:
     if node is not None and node.published and node.chunks is not None:
         # Language selection (docs/localization.md): ?lang= wins when a
         # translation exists, else header logic. Analytics keep the raw
-        # Accept-Language header regardless of the selection.
+        # Accept-Language header regardless of the selection, and record
+        # the resolved language as the GET's rendered language.
         query_lang = request.query_params.get("lang")
         lang = i18n.select_language(
             query_lang,
@@ -175,7 +176,7 @@ async def show_page(request: Request, path: str) -> Response:
         if request.headers.get("if-none-match") == etag:
             return Response(status_code=304)
         if _is_trackable_path(path):
-            _record_get(request)
+            _record_get(request, lang=lang)
         return _html_response(
             request,
             "page",
@@ -205,7 +206,7 @@ async def show_page(request: Request, path: str) -> Response:
         )
         link_lang = i18n.base_tag(query_lang or "")
         if _is_trackable_path(path):
-            _record_get(request, status=404)
+            _record_get(request, status=404, lang=lang)
         return _html_response(
             request,
             "category",

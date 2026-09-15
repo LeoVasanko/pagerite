@@ -2,8 +2,9 @@
 
 Raw recording, display-time classification.  Every document GET is appended
 to ``Analytics.gets`` as a raw access-log line (path with query string, true
-HTTP status, external referer origin, preload flag) and every pagerite.js
-activity message from the /_ws WebSocket is appended to ``Analytics.msgs``
+HTTP status, external referer origin, preload flag, rendered content
+language) and every pagerite.js activity message from the /_ws WebSocket is
+appended to ``Analytics.msgs``
 (navigations ``fr`` -> ``to`` and active reading-time updates).  Nothing is
 classified when it is recorded: whether a client turns out to be a reader,
 a crawler or a scanner is decided by ``Store.display()`` from the raw
@@ -92,6 +93,9 @@ class Ping(msgspec.Struct, omit_defaults=True):
     read: int = 0
     #: Admin client: record but hide everything from the statistics.
     hide: bool = False
+    #: Rendered language of the page the activity happened on (the page's
+    #: ``<html lang>``, sent by pagerite.js).
+    lang: str = ""
 
 
 class Get(msgspec.Struct, omit_defaults=True):
@@ -115,6 +119,9 @@ class Get(msgspec.Struct, omit_defaults=True):
     #: never counted as a view/crawler/abuse hit; recorded only so a later
     #: cache-served navigation can be attributed this GET's status.
     pre: bool = False
+    #: Rendered content language of the served document; "" for
+    #: non-localized responses (404 probes, reserved paths).
+    lang: str = ""
 
 
 class Msg(msgspec.Struct, omit_defaults=True):
@@ -135,6 +142,9 @@ class Msg(msgspec.Struct, omit_defaults=True):
     to: str = ""
     #: Active reading time (seconds) spent on ``fr`` since the last report.
     read: int = 0
+    #: Rendered language reported by the client for the page the activity
+    #: happened on.
+    lang: str = ""
 
 
 class Client(msgspec.Struct, omit_defaults=True):
@@ -191,6 +201,8 @@ class TrailItem(msgspec.Struct, omit_defaults=True):
 
     ``read`` accumulates active reading time (seconds) across the whole
     visit; ``status`` is the most recent HTTP status seen for the target.
+    A page seen in two rendered languages within one visit (a mid-article
+    language switch) gets one item per language.
     """
 
     to: str
@@ -198,6 +210,10 @@ class TrailItem(msgspec.Struct, omit_defaults=True):
     read: int = 0
     #: Most recent HTTP status of the response (200 or 404).
     status: int = 200
+    #: Rendered language of the target: the client's report, for the entry
+    #: page falling back to its GET's rendered language; "" when unknown
+    #: (old clients or data from before language recording).
+    lang: str = ""
 
 
 class Visit(msgspec.Struct, omit_defaults=True):
@@ -206,8 +222,9 @@ class Visit(msgspec.Struct, omit_defaults=True):
     ``trail`` holds the entry page and everything seen afterwards, keyed by
     the timestamp of first sight (insertion order = first-seen order);
     re-visiting an already seen target updates its item instead of
-    appending.  Client metadata is held in ``Analytics.clients`` keyed by
-    ``client``.
+    appending — unless the client reports a different rendered language for
+    it, which appends a distinct item (a mid-article language switch).
+    Client metadata is held in ``Analytics.clients`` keyed by ``client``.
     """
 
     start: datetime
@@ -241,6 +258,8 @@ class CrawlerHit(msgspec.Struct, omit_defaults=True):
     query: str = ""
     #: HTTP status of the served response (200 or 404 for content pages).
     status: int = 200
+    #: Rendered content language of the served document (from the GET).
+    lang: str = ""
 
 
 class AbuseHit(msgspec.Struct, omit_defaults=True):
@@ -319,6 +338,12 @@ class Display(msgspec.Struct, omit_defaults=True):
     views: dict[str, dict[str, int]] = {}
     #: New visits per 5-minute bucket: bucket ISO -> count (sparse).
     site_visits: dict[str, int] = {}
+    #: Site context: true when translation languages are configured, so the
+    #: viewer can suppress language UI on single-language sites.
+    multilingual: bool = False
+    #: The site's primary language (the front page's), so the viewer can
+    #: skip the primary-language default case.
+    primary_lang: str = ""
 
 
 def _bucket(now: datetime) -> str:
@@ -594,22 +619,25 @@ class Store:
         referer: str = "",
         accept_language: str = "",
         pre: bool = False,
+        lang: str = "",
     ) -> bytes | None:
         """Append one document GET to the raw log.
 
         ``path`` is the full request path, query string included; ``status``
         the true HTTP status of the response; ``referer`` the raw Referer
         header (reduced here to an external https origin, "" when internal
-        or absent); ``pre`` marks idle-time preloads from pagerite.js.
+        or absent); ``pre`` marks idle-time preloads from pagerite.js;
+        ``lang`` the rendered content language of the served document (""
+        for non-localized responses such as 404 probes and reserved paths).
 
         Returns the client hash when the client record was just created (so
         the caller can schedule async enrichment), else None.
         """
-        lang, country = _parse_accept_language(accept_language)
-        client_hash = _client_hash(ip, ua, lang)
+        client_lang, country = _parse_accept_language(accept_language)
+        client_hash = _client_hash(ip, ua, client_lang)
         new = client_hash not in self.data.clients
         if new:
-            self._ensure_client(ip, ua, lang, country=country)
+            self._ensure_client(ip, ua, client_lang, country=country)
         self.data.gets.append(
             Get(
                 t=datetime.now(UTC),
@@ -618,6 +646,7 @@ class Store:
                 status=status,
                 ref=_origin(referer) or "",
                 pre=pre,
+                lang=lang,
             )
         )
         self._save()
@@ -632,6 +661,7 @@ class Store:
         accept_language: str = "",
         hide: bool = False,
         read: int = 0,
+        lang: str = "",
     ) -> bytes | None:
         """Append one client activity message (``Ping`` from pagerite.js) to
         the raw log.
@@ -642,16 +672,18 @@ class Store:
         stored raw and filtered at display time, so future rule changes lose
         nothing.  ``hide`` flags the client record as an admin; the message
         itself is recorded normally and hidden at display time like
-        everything else the client ever did.
+        everything else the client ever did.  ``lang`` is the rendered
+        language reported by the client for the page the activity happened
+        on.
 
         Returns the client hash when the client record was just created (so
         the caller can schedule async enrichment), else None.
         """
-        lang, country = _parse_accept_language(accept_language)
-        client_hash = _client_hash(ip, ua, lang)
+        client_lang, country = _parse_accept_language(accept_language)
+        client_hash = _client_hash(ip, ua, client_lang)
         new = client_hash not in self.data.clients
         if new:
-            self._ensure_client(ip, ua, lang, country=country)
+            self._ensure_client(ip, ua, client_lang, country=country)
         if hide:
             self.data.clients[client_hash].hide = True
         fr = (_internal_path(fr) or "") if fr else ""
@@ -663,7 +695,14 @@ class Store:
                 target = _external_target(to) or ""
         if target or read > 0:
             self.data.msgs.append(
-                Msg(t=datetime.now(UTC), client=client_hash, fr=fr, to=target, read=read)
+                Msg(
+                    t=datetime.now(UTC),
+                    client=client_hash,
+                    fr=fr,
+                    to=target,
+                    read=read,
+                    lang=lang,
+                )
             )
         if target or read > 0 or hide:
             self._save()
@@ -700,7 +739,13 @@ class Store:
         self.data.favicons[origin] = Favicon(file=file, fetched=datetime.now(UTC))
         self._save()
 
-    def display(self, in_menu: Callable[[str], bool] | None = None) -> Display:
+    def display(
+        self,
+        in_menu: Callable[[str], bool] | None = None,
+        *,
+        multilingual: bool = False,
+        primary_lang: str = "",
+    ) -> Display:
         """Build the viewer payload from the raw events.
 
         All classification happens here, so the stored data is independent
@@ -722,10 +767,17 @@ class Store:
         - visits: the remaining messages, grouped per client with a new
           visit after ``_SESSION_GAP`` of inactivity.  Trail statuses come
           from the client's GETs (preloads included — a cache-served
-          navigation's only GET is its preload); the entry referer and UTM
-          tags from the GET that loaded the entry page.
+          navigation's only GET is its preload); trail languages come from
+          the client's messages (the entry item falling back to its GET's
+          rendered language), and a page re-visited in a different rendered
+          language becomes a distinct trail step.  The entry referer and
+          UTM tags come from the GET that loaded the entry page.
 
         Hidden (admin) clients are excluded from every list and aggregate.
+        ``multilingual`` and ``primary_lang`` are site context (translation
+        languages configured, the front page's primary language) copied
+        onto the payload so the viewer can suppress language UI on
+        single-language sites and skip the primary-language default case.
         """
         in_menu = in_menu or (lambda path: False)
         data = self.data
@@ -836,7 +888,11 @@ class Store:
                                 g.path.split("?", 1)[1] if "?" in g.path else ""
                             )
                         visit.trail[m.t] = TrailItem(
-                            to=m.to, status=status_at(h, m.to, m.t)
+                            to=m.to,
+                            status=status_at(h, m.to, m.t),
+                            # The client's report wins; the entry GET fills
+                            # in for old clients that don't send lang.
+                            lang=m.lang or (g.lang if g is not None else ""),
                         )
                         visits.append(visit)
                     else:
@@ -844,18 +900,40 @@ class Store:
                         visit.navs[m.t] = Nav(fr=fr, to=m.to)
                         status = status_at(h, m.to, m.t)
                         # First-seen only: repeat pages and repeated exits
-                        # update the existing trail item instead of appending.
+                        # update the existing trail item instead of
+                        # appending — but a repeat in a different rendered
+                        # language (a mid-article language switch) becomes
+                        # a distinct step.
                         for item in visit.trail.values():
                             if item.to == m.to:
-                                item.status = status
+                                if m.lang and item.lang and m.lang != item.lang:
+                                    visit.trail[m.t] = TrailItem(
+                                        to=m.to, status=status, lang=m.lang
+                                    )
+                                else:
+                                    item.status = status
+                                    if not item.lang:
+                                        item.lang = m.lang
                                 break
                         else:
-                            visit.trail[m.t] = TrailItem(to=m.to, status=status)
+                            visit.trail[m.t] = TrailItem(
+                                to=m.to, status=status, lang=m.lang
+                            )
                 if m.read > 0 and m.fr and visit is not None:
+                    # A page appears in the trail once per language seen:
+                    # land the seconds on the matching-language step when
+                    # the client reports one, else on the first-seen item.
+                    read_item: TrailItem | None = None
                     for item in visit.trail.values():
-                        if item.to == m.fr:
-                            item.read += m.read
+                        if item.to != m.fr:
+                            continue
+                        if read_item is None:
+                            read_item = item
+                        if m.lang and item.lang == m.lang:
+                            read_item = item
                             break
+                    if read_item is not None:
+                        read_item.read += m.read
                 last_t = m.t
 
         # --- crawler hits: document GETs no message matched
@@ -889,6 +967,7 @@ class Store:
                     referer=g.ref,
                     query=query,
                     status=g.status,
+                    lang=g.lang,
                 )
             )
 
@@ -912,6 +991,7 @@ class Store:
                         referer=visit.referer if first else "",
                         query=query if first else "",
                         status=item.status,
+                        lang=item.lang,
                     )
                 )
                 first = False
@@ -938,6 +1018,8 @@ class Store:
                 for origin, f in data.favicons.items()
                 if f.file
             },
+            multilingual=multilingual,
+            primary_lang=primary_lang,
         )
         for visit in kept:
             bucket = _bucket(visit.start)
@@ -959,6 +1041,14 @@ class Store:
                 nbuckets[nb] = nbuckets.get(nb, 0) + 1
         return display
 
-    def display_json(self, in_menu: Callable[[str], bool] | None = None) -> str:
+    def display_json(
+        self,
+        in_menu: Callable[[str], bool] | None = None,
+        *,
+        multilingual: bool = False,
+        primary_lang: str = "",
+    ) -> str:
         """The ``display()`` payload as a JSON string for the WebSocket."""
-        return msgspec.json.encode(self.display(in_menu)).decode()
+        return msgspec.json.encode(
+            self.display(in_menu, multilingual=multilingual, primary_lang=primary_lang)
+        ).decode()

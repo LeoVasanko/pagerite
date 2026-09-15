@@ -38,6 +38,9 @@ Each `Get` record (one per served document):
   (`x-pagerite-preload` header): never counted as a view, crawler hit or
   abuse — recorded only so a navigation later served from the in-memory page
   cache (which issues no GET at all) can be attributed this GET's status,
+- `lang` — rendered content language of the served document (the resolved
+  language of a localized page), `""` for non-localized responses (404
+  probes, reserved paths),
 - `client` — 6-byte blake3 hash referencing `Analytics.clients`.
 
 304 revalidation responses return before recording and are not logged.
@@ -51,7 +54,9 @@ Each `Msg` record (one per pagerite.js activity message over `/_ws`):
 - `to` — navigation target (validated at record time: internal slug path or
   external https URL; anything else is dropped — sanitation, not
   classification),
-- `read` — active seconds spent on `fr` since the previous report.
+- `read` — active seconds spent on `fr` since the previous report,
+- `lang` — rendered language reported by the client for the page the
+  activity happened on (the page's `<html lang>`; `""` from old clients).
 
 Each `Client` record (shared by every event, keyed by hash):
 
@@ -104,7 +109,9 @@ The client (`pagerite.js`) keeps a WebSocket connection to `/_ws` for the
 whole browsing session and sends activity messages over it — JSON text
 frames matching the server's `Ping` msgspec struct with the fields `fr`
 (source path), `to` (navigation target), `read` (active seconds on `fr`
-since the last report) and `hide`; falsy fields are omitted. One channel
+since the last report), `lang` (the rendered language of the page the
+activity happened on — its `<html lang>`) and `hide`; falsy fields are
+omitted. One channel
 follows the session, so the activity of a visit stays tied together, and
 while the user is active the accumulated reading time is flushed every few
 seconds: the times are incremental, so a disconnection simply leaves the
@@ -173,10 +180,16 @@ for misses.
   (`_SESSION_GAP`). A fresh page load with an already-open visit (second
   tab) extends it, logging a `(direct)` transition. The visit's trail holds
   first-seen targets in order; `read` updates accumulate active seconds on
-  the trail item matching `fr`. Each trail item's HTTP status comes from
+  the trail item matching `fr` (preferring the item whose language matches
+  the report, so seconds after a language switch land on the new-language
+  step). Each trail item's HTTP status comes from
   the client's latest GET for that path — preloads included, which is what
   allows 404 pages to render red in the viewer even when the navigation
-  itself was served from the page cache. The entry page's referer and
+  itself was served from the page cache. Each trail item also carries the
+  rendered language: the client's report, for the entry page falling back
+  to its GET's rendered language (old clients don't send one); a page
+  re-visited in a different language becomes a distinct trail step instead
+  of merging into the existing item. The entry page's referer and
   `utm_*` tags come from the GET that loaded it (within 10 s before the
   first message).
 - **Crawler hits**: a document GET no activity message matched within
@@ -232,6 +245,10 @@ to tell misses from real pages at a glance.
 The `Display` payload contains the derived `visits`, `crawlers` and `abuse`
 rows (structs `Visit`/`Nav`/`TrailItem`, `CrawlerHit`, `AbuseHit` — display
 DTOs only, never persisted), the visible `clients`, the fetched `favicons`,
+the site language context (`multilingual` — translation languages are
+configured, so the viewer can suppress language UI on single-language
+sites — and `primary_lang` — the front page's primary language, so the
+viewer can skip the primary-language default case),
 and the aggregates below.
 
 Each derived `Visit`:
@@ -243,8 +260,9 @@ Each derived `Visit`:
 - `trail` — the entry page and everything seen afterwards, keyed by the
   timestamp of first sight (insertion order = first-seen order). Each item
   holds `to` (page path or external exit URL), the accumulated active
-  reading time in seconds (`read`) and the most recent HTTP status seen
-  for the target (`status`),
+  reading time in seconds (`read`), the most recent HTTP status seen
+  for the target (`status`) and the rendered language (`lang`; a page
+  seen in two languages within one visit gets one item per language),
 - `navs` — every navigation (`fr`, `to`), keyed by its timestamp, repeats
   included. The aggregates are computed from this log,
 - `utm` — `utm_*` query parameters from the landing URL, as a dict.
@@ -257,7 +275,8 @@ Each derived `CrawlerHit`:
 - `referer` — external https origin of the request, `""` for direct/none,
 - `query` — raw query string of the request,
 - `status` — HTTP status of the served response (200 for a real page, 404
-  for a category placeholder or missing page).
+  for a category placeholder or missing page),
+- `lang` — rendered content language of the served document (from the GET).
 
 Each derived `AbuseHit`:
 

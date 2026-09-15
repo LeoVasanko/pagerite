@@ -6,6 +6,7 @@ const props = defineProps({
   step: { type: Object, required: true },
   count: { type: Number, default: 0 },
   favicons: { type: Object, default: null },
+  flags: { type: Array, default: () => [] },
 })
 
 defineEmits(['close'])
@@ -38,6 +39,7 @@ const title = computed(() => {
     <small v-if="count > 1" class="muted">{{ formatCount(count) }}×</small>
     <img v-if="favicon" class="favicon" :src="favicon" alt="" />
     <span>{{ step.slug }}</span>
+    <span v-for="(f, fi) in flags" :key="fi" class="flag" v-html="f"></span>
   </a>
 </template>
 
@@ -47,5 +49,24 @@ const title = computed(() => {
   height: 1em;
   margin-right: 0.25em;
   vertical-align: -0.1em;
+}
+
+/* Same flag chip as the visitor cells (VisitorCell.vue). */
+.flag {
+  display: inline-flex;
+  width: 18px;
+  height: 12px;
+  margin-left: 0.25em;
+  border-radius: 2px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2) inset;
+  vertical-align: middle;
+}
+
+.flag :deep(svg) {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 </style>
