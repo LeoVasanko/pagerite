@@ -56,6 +56,10 @@ DB_PATH = os.getenv("PAGERITE_DB", str(SITE_DIR / "content.kantadb"))
 
 # Visit analytics go to their own JSON file, not the kanta database.
 ANALYTICS_PATH = Path(os.getenv("PAGERITE_ANALYTICS", str(SITE_DIR / "analytics.json")))
+# The per-hostname data directory may not exist yet on first run; kanta
+# creates the database file but not its parent directory.
+Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+ANALYTICS_PATH.parent.mkdir(parents=True, exist_ok=True)
 analytics_store = analytics.Store(ANALYTICS_PATH)
 
 # Content-addressed file store (uploads, seed assets, fetched favicons):
