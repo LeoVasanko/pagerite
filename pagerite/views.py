@@ -792,8 +792,9 @@ def page_content(
 
     A page with published children (a category page) lists them as cards
     after the markdown content — unless the content has a ``{cards}`` tag,
-    which places card stacks itself (bare: the children; with paths:
-    those pages / ``path/*`` their children), one row per tag. With a translation, its Markdown goes
+    which places card rows itself (bare: the children; with paths:
+    those pages, ``path/*`` their children, ``path/**`` all descendants),
+    one row per tag. With a translation, its Markdown goes
     through the same render pipeline; missing pieces (markdown=None, absent
     title entries) fall back to the original. ``lang`` feeds the cards'
     per-target localization.
@@ -815,7 +816,7 @@ def page_content(
         )
     # The title is injected into the markdown (as # title when it has no
     # h1 of its own), so title and content render as one article.
-    # A {cards} tag places the card stacks itself (possibly several);
+    # A {cards} tag places the card rows itself (possibly several);
     # without one the children are appended after the content as before.
     has_cards_tag = _CARDS_TAG_RE.search(content) is not None
     directives = None
@@ -846,6 +847,20 @@ def page_content(
     return HTML(str(doc))
 
 
+def _represent(node: Node, path: str) -> tuple[str, Node] | None:
+    """The (path, node) a card for this menu item points at: the item
+    itself when it has a page, else its first published leaf page,
+    recursively — the same logic as nav links (first_leaf)."""
+    if node.chunks:
+        return path, node
+    for slug, child in sorted_nodes(node.children):
+        if child.published:
+            cpath = f"{path}/{slug}" if path else slug
+            if r := _represent(child, cpath):
+                return r
+    return None
+
+
 def _cards(
     doc,
     menu: dict[str, Node],
@@ -856,49 +871,34 @@ def _cards(
     link_lang: str = "",
     lang: str = "",
 ) -> None:
-    """Card stacks of the node's published children (nothing when childless).
+    """Cards of the node's published children (nothing when childless).
 
-    One column per direct child, all in a single full-width row (the .wide
-    breakout): the columns grow to fill the page and shrink rather than
-    wrap. A column holds the child's whole subtree flattened in menu order
-    — nesting levels are not split out — starting with the first page that
-    has actual content (the child itself when it does, its first leaf
-    otherwise, recursively). Each card is one <a> showing the page's share
+    One card per direct child, all in a single full-width row (the .wide
+    breakout): the cards grow to fill the page and shrink rather than
+    wrap. A child without a page of its own is represented by its first
+    leaf page (_represent, the nav-link logic). Each card is one <a>
+    showing the page's share
     image (the same heuristics as og:image) as the cover and its title;
     image-less cards get a gradient cover and also show the description.
     Only phrasing-level elements (spans) go inside the <a>: as a formatting
     element it would be cloned by the HTML parser around any block-level
     child, splitting one card into several links.
     """
-    items = [(s, c) for s, c in sorted_nodes(node.children) if c.published]
+    items = [
+        r
+        for s, c in sorted_nodes(node.children)
+        if c.published
+        for r in [_represent(c, f"{path}/{s}" if path else s)]
+        if r
+    ]
     if not items:
         return
     with doc.div(class_="cards wide"):
-        for slug, child in items:
-            cpath = f"{path}/{slug}" if path else slug
-            _card_stack(doc, data, cpath, child, translation, link_lang, lang)
+        for cpath, cnode in items:
+            _card(doc, data, cnode, cpath, translation, link_lang, lang)
 
 
-def _card_stack(
-    doc,
-    data: Data,
-    path: str,
-    node: Node,
-    translation: Translation | None = None,
-    link_lang: str = "",
-    lang: str = "",
-) -> None:
-    """One stack column: the subtree of ``node`` flattened in menu order
-    (see _cards)."""
-    entries = list(_walk(node, path))
-    if not entries:
-        return
-    with doc.div(class_="stack"):
-        for epath, enode in entries:
-            _card(doc, data, enode, epath, translation, link_lang, lang)
-
-
-#: A lone {cards} or {cards: ...} line in the markdown: card stacks placed
+#: A lone {cards} or {cards: ...} line in the markdown: card rows placed
 #: by the author. Any such tag suppresses the automatic end-of-page cards.
 _CARDS_TAG_RE = re.compile(r"^\{cards(?::[^{}\n]*)?\}[ \t]*$", re.M)
 
@@ -917,47 +917,61 @@ def _cards_tag(
     _cards, so author-placed cards look like category cards).
 
     A bare ``{cards}`` lists the page's own published children — what
-    page_content appends when the tag is absent. Arguments are
-    space-separated page paths: a path contributes its subtree (one stack,
-    flattened like a category child), and ``path/*`` its published
-    children (one stack each). Unresolvable paths are skipped; a tag that
-    ends up with nothing renders as nothing.
+    page_content appends when the tag is absent — or, on the front page,
+    the other top-level pages (the front page is a top-level item itself,
+    not the parent of the others). Arguments are space-separated page
+    paths: a plain path renders that page alone (never its children),
+    ``path/*`` its published children and ``path/**`` all published
+    descendant pages. One card per item; a page-less item is represented
+    by its first leaf page (_represent). Unresolvable paths are skipped;
+    a tag that ends up with nothing renders as nothing.
     """
     items: list[tuple[str, Node]] = []
     specs = args.split()
+
+    def children(base: str, parent: Node):
+        for s, c in sorted_nodes(parent.children):
+            if c.published:
+                if r := _represent(c, f"{base}/{s}" if base else s):
+                    items.append(r)
+
     if not specs:
-        items = [
-            (f"{path}/{s}" if path else s, c)
-            for s, c in sorted_nodes(node.children)
-            if c.published
-        ]
+        if path:
+            children(path, node)
+        else:
+            for s, c in sorted_nodes(menu):
+                if c.published and s:
+                    if r := _represent(c, s):
+                        items.append(r)
     else:
         for spec in specs:
             spec = spec.strip("/")
-            if spec.endswith("/*"):
+            if spec.endswith("/**"):
+                base = spec[:-3].rstrip("/")
+                if chain := resolve(menu, base):
+                    for s, c in sorted_nodes(chain[-1].children):
+                        if c.published:
+                            items.extend(_walk(c, f"{base}/{s}" if base else s))
+            elif spec.endswith("/*"):
                 base = spec[:-2].rstrip("/")
-                chain = resolve(menu, base)
-                if chain:
-                    items.extend(
-                        (f"{base}/{s}" if base else s, c)
-                        for s, c in sorted_nodes(chain[-1].children)
-                        if c.published
-                    )
+                if chain := resolve(menu, base):
+                    children(base, chain[-1])
             elif chain := resolve(menu, spec):
-                items.append((spec, chain[-1]))
+                if r := _represent(chain[-1], spec):
+                    items.append(r)
     if not items:
         return ""
     doc = E.div(class_="cards wide")
     with doc:
         for cpath, cnode in items:
-            _card_stack(doc, data, cpath, cnode, translation, link_lang, lang)
+            _card(doc, data, cnode, cpath, translation, link_lang, lang)
     return str(doc)
 
 
 def _walk(node: Node, path: str):
     """Published content pages of a subtree, pre-order in menu order: the
-    node itself first when it has content (the stack's landing card), then
-    its descendants (content-less nodes contribute only their subtree)."""
+    node itself first when it has content, then its descendants
+    (content-less nodes contribute only their subtree)."""
     if node.chunks:
         yield path, node
     for slug, child in sorted_nodes(node.children):
@@ -974,7 +988,7 @@ def _card(
     link_lang: str = "",
     lang: str = "",
 ) -> None:
-    """One card in a stack: cover + title, plus the description when the
+    """One card: cover + title, plus the description when the
     page has no image (its card shows a gradient cover instead).
 
     The card text localizes per target article where that page is

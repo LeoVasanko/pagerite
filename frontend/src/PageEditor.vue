@@ -736,17 +736,15 @@ function previewIntoArticle(html, multicol) {
   if (!article) return
   // The server render owns the article completely — the injected title h1,
   // the column layout (.multicol on the article, the .colseg/.cols
-  // segments) — so the whole article content swaps as one. Only the edit
-  // pen and the category cards survive: detach them before innerHTML wipes
-  // them. pagerite.js re-places the pen into the first visible h1 on
-  // pagerite:preview.
+  // segments), the card stacks ({cards} tags expanded, or the children's
+  // cards appended when the page has no tag) — so the whole article
+  // content swaps as one. Only the edit pen survives: detach it before
+  // innerHTML wipes it. pagerite.js re-places the pen into the first
+  // visible h1 on pagerite:preview.
   article.classList.toggle('multicol', multicol)
   const pen = article.querySelector('button.edit-link')
   if (pen) pen.remove()
-  const cards = article.querySelector(':scope > .cards')
-  if (cards) cards.remove()
   article.innerHTML = html
-  if (cards) article.append(cards)
   runScripts(article)
   dispatchEvent(new CustomEvent('pagerite:preview'))
 }

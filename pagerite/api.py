@@ -19,6 +19,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from html5tagger import E
 from pydantic import BaseModel
 
 from pagerite import i18n, views
@@ -495,6 +496,11 @@ async def editor_ws(ws: WebSocket) -> None:
                     markdown = msg.get("markdown", "")
                     chain = resolve(data.menu, path)
                     node = chain[-1] if chain else None
+                    # Expand {cards} like page_content does, so the preview
+                    # shows real cards, not the literal tag. No translation
+                    # context: the preview has no lang of its own, so cards
+                    # render in their originals.
+                    has_cards_tag = views._CARDS_TAG_RE.search(markdown) is not None
                     rendered = render(
                         markdown,
                         path,
@@ -511,12 +517,30 @@ async def editor_ws(ws: WebSocket) -> None:
                             if node
                             else None
                         ),
+                        directives=(
+                            {
+                                "cards": lambda args, _env: views._cards_tag(
+                                    data.menu, data, node, path, args
+                                )
+                            }
+                            if node is not None and has_cards_tag
+                            else None
+                        ),
                     )
+                    html = rendered.html
+                    if node is not None and not has_cards_tag:
+                        # Without a {cards} tag page_content appends the
+                        # children's cards after the content — the preview
+                        # replaces the whole article, so include them here.
+                        doc = E.div
+                        with doc:
+                            views._cards(doc, data.menu, data, node, path)
+                        html += str(doc)
                     await ws.send_json(
                         {
                             "type": "html",
                             "path": path,
-                            "html": rendered.html,
+                            "html": html,
                             # Column-layout flag: the preview toggles the
                             # article's .multicol class and swaps in the
                             # segmented (.colseg/.cols) article html.

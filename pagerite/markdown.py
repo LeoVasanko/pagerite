@@ -59,7 +59,7 @@ classes, e.g. `![alt](photo.avif "Caption"){.right}`.
 
 A lone `{name}` or `{name: args}` line is a block directive, expanded by
 the caller through render(directives=...) — `{dates}` (built in) expands
-to the article's dateline, `{cards}` / `{cards: path ...}` to card stacks
+to the article's dateline, `{cards}` / `{cards: path ...}` to card rows
 of other pages (views.py). Unresolved tags render as the literal source.
 """
 
@@ -522,7 +522,7 @@ def _directives(state) -> None:
     The expansion is not markdown.py's business: _directive_rule delegates
     to the resolvers render() put in env["directives"], falling back to the
     literal source when the tag is unknown in the context (e.g. the editor
-    preview without page data). The ``cards`` directive gets .wide so it
+    preview of a page that does not exist yet). The ``cards`` directive gets .wide so it
     stands alone as a full-width block outside the column segments (the
     card markup never flows in columns). Runs on the render instance only —
     the verbatim parser keeps the plain paragraph so segments/chunks see
@@ -754,7 +754,8 @@ def render(
     ``{name}`` or ``{name: args}`` line — are expanded by the resolvers
     passed as ``directives`` (name → (args, env) → HTML or None), with
     ``dates`` built in when ``created`` is given; unresolved tags render as
-    the literal source (e.g. in the editor preview without page data).
+    the literal source (e.g. in the editor preview of a not-yet-created
+    page).
     Position is the author's choice — the dateline typically goes
     right after the article's h1.
     """

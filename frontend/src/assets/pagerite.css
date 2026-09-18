@@ -481,19 +481,20 @@ main {
   container-type: inline-size;
 }
 
-/* Child-entry card stacks: a category page (and the content-less category
-   404) lists its published children after the markdown content — one column
-   per child, the child's whole subtree flattened into the column in menu
-   order (see _cards in views.py). The row bleeds to full page width
-   (div.wide): the columns first grow to fill it, then shrink rather than
-   wrap. Every card has the same fixed 16/10 shape, covered entirely by the
+/* Child-entry cards: a category page (and the content-less category
+   404) lists its published children after the markdown content — one
+   card per child (a child without a page of its own is represented by
+   its first leaf page; see _cards in views.py). The row bleeds to full
+   page width (div.wide): the cards first grow to fill it, then shrink
+   rather than wrap. Every card has the same fixed 16/10 shape, covered
+   entirely by the
    page's share image (og:image heuristics, as a background — a gradient
    placeholder when it has none) with the title overlaid on a translucent
    band at the bottom. The card is one <a> holding only phrasing-level
    spans; the spans lay out as blocks. */
 .cards {
   display: flex;
-  /* Stacks stop growing at their cap; center the row in the bleed then. */
+  /* Cards stop growing at their cap; center the row in the bleed then. */
   justify-content: center;
   gap: 1.25rem;
   margin-top: 2.5rem;
@@ -502,18 +503,7 @@ main {
   padding-inline: 1.25rem;
 }
 
-.cards .stack {
-  /* Grow to fill the row (up to the cap — full-width rows would make huge
-     cards), shrink (not wrap) when there are too many. */
-  flex: 1 1 0;
-  max-width: 24rem;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
-
-/* Phones: the columns stack vertically instead of shrinking to slivers.
+/* Phones: the cards stack vertically instead of shrinking to slivers.
    Text-only cards (gradient cover + description) then fit their content —
    the fixed 16/10 shape only makes sense for image covers. */
 @media (max-width: 48rem) {
@@ -527,12 +517,16 @@ main {
 }
 
 .card {
+  /* Grow to fill the row (up to the cap — full-width rows would make huge
+     cards), shrink (not wrap) when there are too many. */
+  flex: 1 1 0;
+  max-width: 24rem;
   position: relative;
   display: flex;
   flex-direction: column;
   aspect-ratio: 16 / 10;
   /* Allow shrinking below the text's min-content width: without this the
-     text cards hold their stack wider than the image-only stacks. */
+     text cards hold their row wider than the image-only cards. */
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--line);
