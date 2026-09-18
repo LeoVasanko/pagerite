@@ -123,19 +123,13 @@ const viewChart = computed(() => buildChart(withTypical(allViews.value), now.val
               class="yaxis-label">{{ axisLabel(c.chart.unit, c.ylabel) }}</text>
         <text v-for="t in c.chart.xticks" :key="'x' + t.x" :x="t.x" :y="CHART_H + MARGIN_B - 8"
               text-anchor="middle" class="xlab">{{ t.label }}</text>
-        <!-- Legend, top right inside the plot: current data in accent (week
-             curve or day bars) and the typical history curve in muted. -->
+        <!-- Legend, top right inside the plot: current data in accent
+             (week label, or "Last 24 hours" on the day view) and the
+             typical history curve in muted. -->
         <g v-if="c.legend && c.chart.typical">
-          <template v-if="c.chart.bars">
-            <rect :x="CHART_W - 118" y="5" width="20" height="9" class="bar" />
-            <text :x="CHART_W - 92" y="10" dominant-baseline="middle"
-                  class="leglab">Last 24 hours</text>
-          </template>
-          <template v-else>
-            <line :x1="CHART_W - 118" :x2="CHART_W - 98" y1="10" y2="10" class="line" />
-            <text :x="CHART_W - 92" y="10" dominant-baseline="middle"
-                  class="leglab">{{ c.chart.series[0].label }}</text>
-          </template>
+          <line :x1="CHART_W - 118" :x2="CHART_W - 98" y1="10" y2="10" class="line" />
+          <text :x="CHART_W - 92" y="10" dominant-baseline="middle"
+                class="leglab">{{ c.chart.bars ? 'Last 24 hours' : c.chart.series[0].label }}</text>
           <line :x1="CHART_W - 118" :x2="CHART_W - 98" y1="25" y2="25"
                 class="line past" style="opacity: 0.6" />
           <text :x="CHART_W - 92" y="25" dominant-baseline="middle"
@@ -202,12 +196,12 @@ const viewChart = computed(() => buildChart(withTypical(allViews.value), now.val
 
 .chart .area {
   fill: var(--accent);
-  opacity: 0.15;
+  opacity: 0.6;
 }
 
 .chart .bar {
   fill: var(--accent);
-  opacity: 0.15;
+  opacity: 0.6;
 }
 
 .chart .line {
