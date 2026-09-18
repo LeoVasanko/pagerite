@@ -791,7 +791,9 @@ def page_content(
     """Render the contents of the #main element for a page.
 
     A page with published children (a category page) lists them as cards
-    after the markdown content. With a translation, its Markdown goes
+    after the markdown content — unless the content has a ``{cards}`` tag,
+    which places card stacks itself (bare: the children; with paths:
+    those pages / ``path/*`` their children), one row per tag. With a translation, its Markdown goes
     through the same render pipeline; missing pieces (markdown=None, absent
     title entries) fall back to the original. ``lang`` feeds the cards'
     per-target localization.
@@ -813,8 +815,24 @@ def page_content(
         )
     # The title is injected into the markdown (as # title when it has no
     # h1 of its own), so title and content render as one article.
+    # A {cards} tag places the card stacks itself (possibly several);
+    # without one the children are appended after the content as before.
+    has_cards_tag = _CARDS_TAG_RE.search(content) is not None
+    directives = None
+    if has_cards_tag:
+        directives = {
+            "cards": lambda args, _env: _cards_tag(
+                menu, data, node, path, args, translation, link_lang, lang
+            )
+        }
     rendered = render(
-        content, path, node.created, node.modified, title=title, anchors_from=anchors_from
+        content,
+        path,
+        node.created,
+        node.modified,
+        title=title,
+        anchors_from=anchors_from,
+        directives=directives,
     )
     # Long articles get .multicol: the article column cap lifts (see the
     # #content grid in pagerite.css) and the .cols segments lay out in at
@@ -823,7 +841,8 @@ def page_content(
     doc = E.article(class_="multicol") if rendered.multicol else E.article
     with doc:
         doc(HTML(rendered.html))
-        _cards(doc, menu, data, node, path, translation, link_lang, lang)
+        if not has_cards_tag:
+            _cards(doc, menu, data, node, path, translation, link_lang, lang)
     return HTML(str(doc))
 
 
@@ -857,12 +876,82 @@ def _cards(
     with doc.div(class_="cards wide"):
         for slug, child in items:
             cpath = f"{path}/{slug}" if path else slug
-            entries = list(_walk(child, cpath))
-            if not entries:
-                continue
-            with doc.div(class_="stack"):
-                for epath, enode in entries:
-                    _card(doc, data, enode, epath, translation, link_lang, lang)
+            _card_stack(doc, data, cpath, child, translation, link_lang, lang)
+
+
+def _card_stack(
+    doc,
+    data: Data,
+    path: str,
+    node: Node,
+    translation: Translation | None = None,
+    link_lang: str = "",
+    lang: str = "",
+) -> None:
+    """One stack column: the subtree of ``node`` flattened in menu order
+    (see _cards)."""
+    entries = list(_walk(node, path))
+    if not entries:
+        return
+    with doc.div(class_="stack"):
+        for epath, enode in entries:
+            _card(doc, data, enode, epath, translation, link_lang, lang)
+
+
+#: A lone {cards} or {cards: ...} line in the markdown: card stacks placed
+#: by the author. Any such tag suppresses the automatic end-of-page cards.
+_CARDS_TAG_RE = re.compile(r"^\{cards(?::[^{}\n]*)?\}[ \t]*$", re.M)
+
+
+def _cards_tag(
+    menu: dict[str, Node],
+    data: Data,
+    node: Node,
+    path: str,
+    args: str,
+    translation: Translation | None = None,
+    link_lang: str = "",
+    lang: str = "",
+) -> str:
+    """Expand a ``{cards}`` directive to a card row (the same markup as
+    _cards, so author-placed cards look like category cards).
+
+    A bare ``{cards}`` lists the page's own published children — what
+    page_content appends when the tag is absent. Arguments are
+    space-separated page paths: a path contributes its subtree (one stack,
+    flattened like a category child), and ``path/*`` its published
+    children (one stack each). Unresolvable paths are skipped; a tag that
+    ends up with nothing renders as nothing.
+    """
+    items: list[tuple[str, Node]] = []
+    specs = args.split()
+    if not specs:
+        items = [
+            (f"{path}/{s}" if path else s, c)
+            for s, c in sorted_nodes(node.children)
+            if c.published
+        ]
+    else:
+        for spec in specs:
+            spec = spec.strip("/")
+            if spec.endswith("/*"):
+                base = spec[:-2].rstrip("/")
+                chain = resolve(menu, base)
+                if chain:
+                    items.extend(
+                        (f"{base}/{s}" if base else s, c)
+                        for s, c in sorted_nodes(chain[-1].children)
+                        if c.published
+                    )
+            elif chain := resolve(menu, spec):
+                items.append((spec, chain[-1]))
+    if not items:
+        return ""
+    doc = E.div(class_="cards wide")
+    with doc:
+        for cpath, cnode in items:
+            _card_stack(doc, data, cpath, cnode, translation, link_lang, lang)
+    return str(doc)
 
 
 def _walk(node: Node, path: str):
@@ -898,7 +987,15 @@ def _card(
         md = node_markdown(data, node) or ""
         if lang and lang in node.langs:
             md = i18n.hybrid_markdown(data, node, path, lang)
-        html = render(md, path, node.created, node.modified).html
+        html = render(
+            md,
+            path,
+            node.created,
+            node.modified,
+            # Card heuristics only mine the prose: nested {cards} rows
+            # would just be noise in the description extraction.
+            directives={"cards": lambda _args, _env: ""},
+        ).html
         image, _ = _media(html)
         if not image:
             description = _description(html, 150)

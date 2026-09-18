@@ -56,9 +56,15 @@ becomes a block `<figure>` — with `<figcaption>` when it has a title.
 Images inline with other content stay plain inline `<img>`, as does raw
 `<img>` HTML written by the author. Positioning is done with attribute
 classes, e.g. `![alt](photo.avif "Caption"){.right}`.
+
+A lone `{name}` or `{name: args}` line is a block directive, expanded by
+the caller through render(directives=...) — `{dates}` (built in) expands
+to the article's dateline, `{cards}` / `{cards: path ...}` to card stacks
+of other pages (views.py). Unresolved tags render as the literal source.
 """
 
 import re
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import NamedTuple
 
@@ -505,6 +511,64 @@ def anchor_ids(text: str, title: str | None = None) -> list[str]:
     ]
 
 
+#: A lone {...} paragraph: a block directive like {dates} or
+#: {cards: docs/* news} — name, then optional ":"-separated argument text.
+_DIRECTIVE_RE = re.compile(r"\{([a-z][a-z0-9_-]*)(?::([^{}\n]*))?\}")
+
+
+def _directives(state) -> None:
+    """Turn lone ``{name}`` / ``{name: args}`` paragraphs into directive tokens.
+
+    The expansion is not markdown.py's business: _directive_rule delegates
+    to the resolvers render() put in env["directives"], falling back to the
+    literal source when the tag is unknown in the context (e.g. the editor
+    preview without page data). The ``cards`` directive gets .wide so it
+    stands alone as a full-width block outside the column segments (the
+    card markup never flows in columns). Runs on the render instance only —
+    the verbatim parser keeps the plain paragraph so segments/chunks see
+    the placeholder source.
+    """
+    tokens = state.tokens
+    out = []
+    i = 0
+    while i < len(tokens):
+        if (
+            i + 2 < len(tokens)
+            and tokens[i].type == "paragraph_open"
+            and tokens[i + 1].type == "inline"
+            and tokens[i + 2].type == "paragraph_close"
+        ):
+            inline = tokens[i + 1]
+            children = inline.children or []
+            if len(children) == 1 and children[0].type == "text":
+                m = _DIRECTIVE_RE.fullmatch(children[0].content.strip())
+                if m:
+                    token = Token("directive", "", 0)
+                    token.level = tokens[i].level
+                    token.map = tokens[i].map
+                    token.content = m.group(0)
+                    token.meta = {"name": m.group(1), "args": (m.group(2) or "").strip()}
+                    if m.group(1) == "cards":
+                        token.attrSet("class", "wide")
+                    out.append(token)
+                    i += 3
+                    continue
+        out.append(tokens[i])
+        i += 1
+    state.tokens = out
+
+
+def _directive_rule(self: RendererHTML, tokens, idx: int, options, env: dict) -> str:
+    """Render a directive token via env["directives"][name](args, env);
+    unresolved tags render as the literal source paragraph."""
+    token = tokens[idx]
+    resolver = (env.get("directives") or {}).get(token.meta["name"])
+    html = resolver(token.meta["args"], env) if resolver else None
+    if html is None:
+        return f"<p>{escapeHtml(token.content)}</p>\n"
+    return html + "\n"
+
+
 def make_md(*, verbatim: bool = False) -> MarkdownIt:
     """A fully configured parser. The module-level ``md`` (below) is the
     render instance; ``verbatim=True`` builds the segmentation instance for
@@ -539,6 +603,7 @@ def make_md(*, verbatim: bool = False) -> MarkdownIt:
     )
     parser.add_render_rule("image", _image_rule)
     parser.add_render_rule("fence", _fence_rule)
+    parser.add_render_rule("directive", _directive_rule)
     # GFM alerts (`> [!NOTE]` etc.), built into markdown-it-py's blockquote rule.
     parser.options["alerts"] = True
     # Block attrs must be stripped before the typographer curlifies their quotes.
@@ -548,6 +613,8 @@ def make_md(*, verbatim: bool = False) -> MarkdownIt:
     parser.core.ruler.push("tag_task_checkboxes", _tag_task_checkboxes)
     parser.core.ruler.push("shorten_autolinks", _shorten_autolinks)
     parser.core.ruler.push("heading_ids", _heading_ids)
+    if not verbatim:
+        parser.core.ruler.push("directives", _directives)
     return parser
 
 
@@ -661,6 +728,7 @@ def render(
     modified: datetime | None = None,
     title: str | None = None,
     anchors_from: tuple[str, str] | None = None,
+    directives: dict[str, Callable[[str, dict], str | None]] | None = None,
 ) -> Rendered:
     """Render Markdown text to the article body's HTML and layout flags.
 
@@ -682,11 +750,18 @@ def render(
     classes.
 
     A ``{dates}`` line expands to the article's published/updated dateline
-    (needs ``created``/``modified``; left as-is in contexts without them,
-    e.g. the editor preview). Position is the author's choice — typically
+    (needs ``created``/``modified``). Block directives in general — a lone
+    ``{name}`` or ``{name: args}`` line — are expanded by the resolvers
+    passed as ``directives`` (name → (args, env) → HTML or None), with
+    ``dates`` built in when ``created`` is given; unresolved tags render as
+    the literal source (e.g. in the editor preview without page data).
+    Position is the author's choice — the dateline typically goes
     right after the article's h1.
     """
-    env = {"page_path": page_path, "line_offset": 0}
+    directives = dict(directives or {})
+    if created is not None:
+        directives.setdefault("dates", lambda _args, _env: _dateline(created, modified))
+    env = {"page_path": page_path, "line_offset": 0, "directives": directives}
     if anchors_from is not None:
         env["anchor_ids"] = anchor_ids(*anchors_from)
     if title and not has_h1(text):
@@ -732,8 +807,6 @@ def render(
             html = marked
         parts.append(f'<div class="colseg{cols}">{html}</div>')
     html = "".join(parts)
-    if created is not None and "<p>{dates}</p>" in html:
-        html = html.replace("<p>{dates}</p>", _dateline(created, modified))
     return Rendered(html, total > MULTICOL_TEXT)
 
 
