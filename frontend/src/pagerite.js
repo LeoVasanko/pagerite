@@ -6,6 +6,7 @@
 // support from the article itself and are re-applied after each swap.
 import { OverlayScrollbars } from "overlayscrollbars";
 import "overlayscrollbars/overlayscrollbars.css";
+import { profile, apiJson, fetchJson } from "paskia";
 import { reconnectPolicy, socketSlot, watchConnecting } from "./reconnect";
 
 (() => {
@@ -101,10 +102,11 @@ import { reconnectPolicy, socketSlot, watchConnecting } from "./reconnect";
   // 401/403 here, and a 200 means the permission is present.
   //
   // When Paskia SSO is in use (probed via /auth/api/settings), the banner
-  // corner gets a plain link to /auth/ — 🔑 log in for anonymous visitors,
-  // 🔐 profile when logged in. Normal navigation: Paskia does not support
-  // being iframed, and history.back() returns to the page as-is (the
-  // pageshow handler below re-probes auth to refresh the pens).
+  // corner gets an auth button — 🔑 log in for anonymous visitors,
+  // 🔐 profile when logged in. The click opens paskia-js's profile() dialog
+  // (an iframe overlay; Paskia does not support being iframed by others, but
+  // serves this dialog itself), which handles the login flow too. On close we
+  // re-probe auth: login/logout inside the dialog changes the session.
   let ssoAvailable = false;
   let isAdmin = false;
   let authReady = false;
@@ -163,13 +165,21 @@ import { reconnectPolicy, socketSlot, watchConnecting } from "./reconnect";
     }
   }
 
-  function makeAuthLink(admin) {
-    const a = document.createElement("a");
-    a.className = (admin ? "profile-link" : "login-link") + " icon-btn";
-    a.href = "/auth/";
-    a.title = admin ? "profile" : "log in";
-    a.textContent = admin ? "\u{1F510}" : "\u{1F511}";
-    return a;
+  function makeAuthButton(admin) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = (admin ? "profile-link" : "login-link") + " icon-btn";
+    btn.title = admin ? "profile" : "log in";
+    btn.textContent = admin ? "\u{1F510}" : "\u{1F511}";
+    btn.addEventListener("click", async () => {
+      // Resolves when the dialog closes ("login"/"logout"/"back"); whatever
+      // happened, the session may have changed — re-probe and re-render.
+      try {
+        await profile();
+      } catch { /* dialog closed without completing */ }
+      setupAuth();
+    });
+    return btn;
   }
 
   // The banner top-right corner container: the language selector (first
@@ -218,7 +228,7 @@ import { reconnectPolicy, socketSlot, watchConnecting } from "./reconnect";
           pens.append(a);
           pens.append(makePen("site"));
         }
-        if (ssoAvailable) pens.append(makeAuthLink(isAdmin));
+        if (ssoAvailable) pens.append(makeAuthButton(isAdmin));
         if (!pens.firstElementChild) pens.remove();
       }
       if (canEdit && !onAnalytics) injectPagePen();
@@ -239,20 +249,24 @@ import { reconnectPolicy, socketSlot, watchConnecting } from "./reconnect";
       css: assets["pagerite:editor-css"],
     };
 
-    // Detect whether Paskia SSO is available on this site.
+    // Detect whether Paskia SSO is available on this site, and whether the
+    // current session has pagerite:admin. fetchJson (paskia-js) is plain
+    // fetch with JSON handling and an error on non-OK — it never opens the
+    // login dialog (that is apiFetch/apiJson's job), so these probes are
+    // safe to run for anonymous visitors.
     try {
-      const ssoRes = await fetch("/auth/api/settings");
-      ssoAvailable = ssoRes.ok;
+      await fetchJson("/auth/api/settings");
+      ssoAvailable = true;
     } catch {
       ssoAvailable = false;
     }
 
-    // Check whether the current session has pagerite:admin.
     isAdmin = false;
     try {
-      isAdmin = (await fetch("/_api/settings")).status === 200;
+      await fetchJson("/_api/settings");
+      isAdmin = true;
     } catch {
-      // No auth proxy / dev.
+      // Anonymous, no pagerite:admin, or no auth proxy / dev.
     }
 
     if (isAdmin) {
@@ -1063,6 +1077,10 @@ import { reconnectPolicy, socketSlot, watchConnecting } from "./reconnect";
   // Checkboxes in the rendered article are live: toggling them edits the
   // Markdown source. If the page editor is open, its CodeMirror document is
   // updated directly; otherwise the server copy is toggled and saved.
+  // apiJson (paskia-js): a 401/403 from an expired session opens the login
+  // dialog and the toggle retries after auth — ticking a box is an explicit
+  // edit attempt. Any failure reverts the checkbox, including the user
+  // cancelling that dialog (AuthCancelledError).
   async function toggleTask(checkbox, index) {
     const editor = window.__pageritePageEditor;
     const pagePath = editor ? editor.path() : currentPath;
@@ -1071,16 +1089,7 @@ import { reconnectPolicy, socketSlot, watchConnecting } from "./reconnect";
     try {
       const body = { path, index };
       if (editor) body.markdown = editor.getMarkdown();
-      const res = await fetch("/_api/toggle-task", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const detail = await res.json().catch(() => ({}));
-        throw new Error(detail.detail || res.statusText);
-      }
-      const { markdown } = await res.json();
+      const { markdown } = await apiJson("/_api/toggle-task", { method: "POST", body });
       if (editor) editor.setMarkdown(markdown);
     } catch {
       checkbox.checked = originalChecked;

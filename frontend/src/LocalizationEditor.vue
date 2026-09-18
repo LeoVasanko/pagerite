@@ -17,6 +17,7 @@ import { computed, onActivated, onMounted, onUnmounted, ref } from 'vue'
 import { LANG_GROUPS, TRANSLATABLE, flagFor, langName } from './langs'
 import { copyList } from './analytics/format.js'
 import { dropPageCache } from './swapdoc'
+import { apiFetch, apiJson } from 'paskia'
 
 defineProps({ pagePath: { type: String, default: '' } })
 // close/path-change are wired by EditorShell; this tab never emits them.
@@ -65,7 +66,7 @@ function onEditorShown() {
 onMounted(async () => {
   addEventListener('pagerite:editor-shown', onEditorShown)
   try {
-    const s = await (await fetch('/_api/settings')).json()
+    const s = await apiJson('/_api/settings')
     selected.value = new Set(s.translate_langs || [])
     keyUrls.value = Object.entries(s.translate_keys || {})
       .map(([key, name]) => ({ key, name, url: wsUrl(key) }))
@@ -80,8 +81,8 @@ async function toggle(code) {
   else next.add(code)
   selected.value = next
   try {
-    const s = await (await fetch('/_api/settings')).json()
-    const res = await fetch('/_api/settings', {
+    const s = await apiJson('/_api/settings')
+    const res = await apiFetch('/_api/settings', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ ...s, translate_langs: [...next] }),
@@ -105,7 +106,7 @@ async function refresh() {
   if (refreshing.value) return
   refreshing.value = true
   try {
-    const res = await fetch('/_api/translations', { method: 'DELETE' })
+    const res = await apiFetch('/_api/translations', { method: 'DELETE' })
     saveError.value = res.ok ? '' : '⚠️ translations could not be refreshed'
     if (res.ok) dropPageCache()
   } catch {
@@ -122,8 +123,8 @@ async function refresh() {
 // confirmation.
 async function saveKeys() {
   try {
-    const s = await (await fetch('/_api/settings')).json()
-    const res = await fetch('/_api/settings', {
+    const s = await apiJson('/_api/settings')
+    const res = await apiFetch('/_api/settings', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({

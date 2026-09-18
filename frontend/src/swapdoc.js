@@ -3,6 +3,8 @@
 // Used by BannerEditor (banner design changes), SiteEditor (theme changes)
 // and StructureEditor (tree navigation).
 
+import { apiFetch } from 'paskia'
+
 // Drop the public page runtime's in-memory prefetch cache. Editors call this
 // whenever a site-wide or page change invalidates the cached HTML of other
 // pages (theme, headings, structure, banner, etc.). The cache is rebuilt by
@@ -139,7 +141,7 @@ export async function loadPlain(p) {
   let html
   try {
     const pin = overrideLang || window.__pageriteLang
-    const res = await fetch(pin ? `${finalUrl}?lang=${pin}` : finalUrl)
+    const res = await apiFetch(pin ? `${finalUrl}?lang=${pin}` : finalUrl)
     const type = res.headers.get('content-type') || ''
     if (!type.includes('text/html')) return null
     if (res.redirected) finalUrl = res.url

@@ -5,6 +5,7 @@
 // visit/crawler tables. Read-only.
 // See docs/analytics.md for the data format.
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { apiJson } from 'paskia'
 import {
   RANGES,
   rangeWindow,
@@ -115,8 +116,7 @@ onMounted(async () => {
   // The site tree for the transition map (all pages in menu order). Not
   // fatal: without it the map just narrows to pages seen in transitions.
   try {
-    const res = await fetch('/_api/pages')
-    if (res.ok) pageTree.value = await res.json()
+    pageTree.value = await apiJson('/_api/pages')
   } catch { /* map just narrows to pages seen in transitions */ }
 })
 

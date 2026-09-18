@@ -801,11 +801,11 @@ article h2 .edit-section {
   opacity: 0.35;
 }
 
-/* Login/profile links injected by pagerite.js when Paskia SSO is in use.
+/* Login/profile buttons injected by pagerite.js when Paskia SSO is in use.
    They live inside the .editor-pens flex container in the banner's top-right
    corner and inherit its reset; keep only their text-shadow tweak. */
-.editor-pens a.login-link,
-.editor-pens a.profile-link {
+.editor-pens .login-link,
+.editor-pens .profile-link {
   text-shadow: 0 0 0.1em black;
 }
 

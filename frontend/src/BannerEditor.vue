@@ -11,6 +11,7 @@ import { cmHighlight, cmTheme } from './cmtheme'
 import ConnNote from './ConnNote.vue'
 import { reconnectPolicy, socketSlot, watchConnecting } from './reconnect'
 import { dropPageCache, loadPlain, runScripts } from './swapdoc'
+import { apiFetch, apiJson } from 'paskia'
 
 const props = defineProps({
   pagePath: { type: String, default: '' },
@@ -131,7 +132,7 @@ function onEditorShown() {
 
 async function loadSettings() {
   try {
-    const s = await (await fetch('/_api/settings')).json()
+    const s = await apiJson('/_api/settings')
     theme.value = s.theme || ''
     bannerDesigns.value = s.banner_designs || []
   } catch { /* keep default */ }
@@ -202,7 +203,7 @@ async function uploadBannerMedia(file) {
   // Banner media goes to the shared content store, like article images.
   if (!file || !/^(image|video)\//.test(file.type)) return
   const name = file.name.replace(/[^\w.-]/g, '-')
-  const res = await fetch(`/_api/files/${encodeURIComponent(name)}`, { method: 'PUT', body: file })
+  const res = await apiFetch(`/_api/files/${encodeURIComponent(name)}`, { method: 'PUT', body: file })
   if (!res.ok) return
   const { path: stored } = await res.json()
   const tag = file.type.startsWith('video/')

@@ -27,6 +27,7 @@
 // was loaded in.
 import { computed, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { usePopup } from './dropdown'
+import { apiFetch } from 'paskia'
 import { EditorView, basicSetup } from 'codemirror'
 import { Compartment, EditorState } from '@codemirror/state'
 import { keymap } from '@codemirror/view'
@@ -192,7 +193,7 @@ function save() {
     }
     // Empty text means delete — an explicit choice made here, in the page
     // editor; the save APIs (REST PUT / WS save) never delete on empty.
-    return fetch(`/_api/pages/${path.value}`, { method: 'DELETE' }).then((res) => {
+    return apiFetch(`/_api/pages/${path.value}`, { method: 'DELETE' }).then((res) => {
       saveError.value = res.ok ? '' : '⚠️ changes could not be saved'
       if (res.ok) stashes.delete(stashKey(path.value, lang.value))
     })
@@ -242,7 +243,7 @@ function close() {
 async function uploadImage(file) {
   if (!file) return
   const name = file.name.replace(/[^\w.-]/g, '-')
-  const res = await fetch(`/_api/files/${encodeURIComponent(name)}`, { method: 'PUT', body: file })
+  const res = await apiFetch(`/_api/files/${encodeURIComponent(name)}`, { method: 'PUT', body: file })
   if (res.ok) {
     const { path: stored } = await res.json()
     const alt = name.replace(/\.[^.]+$/, '')

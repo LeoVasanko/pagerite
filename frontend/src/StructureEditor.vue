@@ -22,6 +22,7 @@ import { slugify } from './slugify'
 import { flagFor, langName, langSort } from './langs'
 import { editorLang, pagePrimary } from './editorLang'
 import { dropPageCache, loadPlain } from './swapdoc'
+import { apiFetch, apiJson } from 'paskia'
 
 const props = defineProps({
   pagePath: { type: String, default: '' },
@@ -171,7 +172,7 @@ async function commitPending() {
   const loc = locatePending(tree.value, '')
   const parentPath = loc?.parentPath ?? ''
   const newPath = parentPath ? `${parentPath}/${slug}` : slug
-  const res = await fetch(`/_api/pages/${newPath}`, {
+  const res = await apiFetch(`/_api/pages/${newPath}`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -220,7 +221,7 @@ function findNode(nodes, p) {
 async function refreshPages() {
   try {
     const q = lang.value ? `?lang=${lang.value}` : ''
-    tree.value = await (await fetch(`/_api/pages${q}`)).json()
+    tree.value = await apiJson(`/_api/pages${q}`)
     // The tree carries each node's resolved primary language: publish the
     // current page's (the shell pins the preview by it on '' selection).
     pagePrimary.value = findNode(tree.value, path.value)?.primary || 'en'
@@ -235,7 +236,7 @@ async function errorDetail(res) {
 }
 
 async function postStructure(op) {
-  const res = await fetch('/_api/structure', {
+  const res = await apiFetch('/_api/structure', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(op),
@@ -308,7 +309,7 @@ async function commitSlug(node, ev) {
 
 // Deletion is immediate, no confirmation.
 async function removePage(node) {
-  const res = await fetch(`/_api/pages/${node.path}`, { method: 'DELETE' })
+  const res = await apiFetch(`/_api/pages/${node.path}`, { method: 'DELETE' })
   if (res.ok) {
     saveError.value = ''
     refreshPages()
@@ -346,7 +347,7 @@ onMounted(() => {
   refreshPages()
   addEventListener('pagerite:editor-shown', onEditorShown)
   // The language strip: site primary + configured targets.
-  fetch('/_api/settings').then((r) => r.json()).then((s) => {
+  apiJson('/_api/settings').then((s) => {
     primaryLang.value = s.primary_lang || 'en'
     siteLangs.value = s.translate_langs || []
   }).catch(() => { /* no strip */ })

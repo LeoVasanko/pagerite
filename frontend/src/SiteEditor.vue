@@ -11,6 +11,7 @@ import { css } from '@codemirror/lang-css'
 import { html } from '@codemirror/lang-html'
 import { cmHighlight, cmTheme } from './cmtheme'
 import { dropPageCache, loadPlain, runScripts } from './swapdoc'
+import { apiFetch, apiJson } from 'paskia'
 
 const props = defineProps({
   pagePath: { type: String, default: '' },
@@ -73,7 +74,7 @@ function themeLabel(t) {
 
 async function loadSettings() {
   try {
-    const s = await (await fetch('/_api/settings')).json()
+    const s = await apiJson('/_api/settings')
     brand.value = s.brand
     brandHtml.value = s.brand_html || ''
     setBrandDocument(brandHtml.value)
@@ -123,7 +124,7 @@ function applyFavicon(url) {
 
 async function uploadFavicon(file) {
   if (!file || !file.type.startsWith('image/')) return
-  const res = await fetch('/_api/settings/favicon', {
+  const res = await apiFetch('/_api/settings/favicon', {
     method: 'PUT',
     headers: { 'x-filename': file.name.replace(/[^\w.-]/g, '-') },
     body: file,
@@ -198,7 +199,7 @@ function onBrandHtmlInput() {
 async function uploadBrandMedia(file) {
   if (!file || !/^(image|video)\//.test(file.type)) return
   const name = file.name.replace(/[^\w.-]/g, '-')
-  const res = await fetch(`/_api/files/${encodeURIComponent(name)}`, { method: 'PUT', body: file })
+  const res = await apiFetch(`/_api/files/${encodeURIComponent(name)}`, { method: 'PUT', body: file })
   if (!res.ok) return
   const { path: stored } = await res.json()
   const tag = file.type.startsWith('video/')
@@ -245,7 +246,7 @@ function onEditorShown() {
 }
 
 async function saveSettings(opts = {}) {
-  const res = await fetch('/_api/settings', {
+  const res = await apiFetch('/_api/settings', {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -275,7 +276,7 @@ async function onThemeChange() {
   const url = `/_themes/${theme.value}/theme.css`
   if (theme.value) {
     if (el?.tagName === 'STYLE') {
-      el.textContent = await (await fetch(url)).text()
+      el.textContent = await (await apiFetch(url)).text()
     } else if (el) {
       el.href = url
     } else if (import.meta.env.DEV) {
@@ -296,7 +297,7 @@ async function onThemeChange() {
       // Prod: inline <style>, fetched from the backend-served URL.
       el = document.createElement('style')
       el.id = 'pagerite-theme'
-      el.textContent = await (await fetch(url)).text()
+      el.textContent = await (await apiFetch(url)).text()
       const before = document.getElementById('pagerite-base')?.nextSibling
         ?? document.getElementById('pagerite-banner')
         ?? document.getElementById('pagerite-user')
@@ -318,7 +319,7 @@ async function onTransitionChange() {
   let el = document.getElementById('pagerite-transition')
   const url = `/_themes/${transition.value}/transition.css`
   if (el?.tagName === 'STYLE') {
-    el.textContent = await (await fetch(url)).text()
+    el.textContent = await (await apiFetch(url)).text()
   } else if (el) {
     el.href = url
   } else {
@@ -330,7 +331,7 @@ async function onTransitionChange() {
       el.href = url
     } else {
       el = document.createElement('style')
-      el.textContent = await (await fetch(url)).text()
+      el.textContent = await (await apiFetch(url)).text()
     }
     el.id = 'pagerite-transition'
     const before = document.getElementById('pagerite-banner')?.nextSibling

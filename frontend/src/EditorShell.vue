@@ -10,6 +10,7 @@ import StructureEditor from './StructureEditor.vue'
 import LocalizationEditor from './LocalizationEditor.vue'
 import { editorLang, pagePrimary } from './editorLang'
 import { loadPlain, setLangOverride } from './swapdoc'
+import { apiJson } from 'paskia'
 
 const props = defineProps({
   pagePath: { type: String, default: '' },
@@ -105,7 +106,7 @@ onMounted(() => {
   // unknown; the page/structure tabs refine pagePrimary per page as they
   // learn it (their knowledge is strictly better).
   openShell()
-  fetch('/_api/settings').then((r) => r.json()).then((s) => {
+  apiJson('/_api/settings').then((s) => {
     if (!pagePrimary.value) pagePrimary.value = s.primary_lang || 'en'
   }).catch(() => { /* keep the fallback */ })
 })
