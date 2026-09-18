@@ -362,13 +362,25 @@ Axes always start at 0 and end at a multiple of a 1-2-5 major step (max 5
 labeled intervals, minor lines at fifths when integral; the minimum y-axis
 range is 10 so tiny values such as a single visit are not stretched to a
 fractional scale).
-The week range is aligned to Monday 00:00 UTC and overlays up to 8 previous
-weeks in the muted color at decreasing opacity (the current week keeps the
-accent color and is
-truncated at the current bucket, never drawing fake zeroes for the future);
-a compact legend inside the top right of the visits chart marks the current
-ISO week in accent and the overlaid past weeks as "Week M" or "Week M–N" on
-a muted specimen. Its x labels are weekday names centered at midday UTC, without
+The week range is aligned to Monday 00:00 UTC (the current week keeps the
+accent color and is truncated at the current bucket, never drawing fake
+zeroes for the future). Both the week and day views overlay a **"typical"
+history curve** in the muted color (`analytics/seasonal.js`, a port of
+`seasonal.py`): the whole recorded history is densified to 5-minute bins,
+smoothed with the same Gaussian as the week view, then folded onto a weekly
+grid with exponential decay over age — a 7-day half-life for the average
+time-of-day pattern and a 42-day half-life for per-weekday deviations from
+it, the deviation shrunk by the effective number of weeks behind each bin
+(`n_eff / (n_eff + 3)`) so the estimate falls back to the common daily
+pattern when history is short. History is capped at the most recent 180
+days, beyond which even the slow kernel's weight is negligible (~5%). The
+week view draws the full Monday-first
+estimate as "Typical week" (future included); the day view cuts the rolling
+24-hour window's bins from the same estimate and labels them by the weekday
+("Typical Saturday"). A compact legend inside the top right of the visits
+chart marks the current data in accent (ISO week label, or a bar specimen
+for "Last 24 hours") and the typical curve on a muted specimen. The week
+view's x labels are weekday names centered at midday UTC, without
 vertical grid
 lines (day boundaries would be misleading in the viewer's timezone). The
 month view labels days the same lineless way — day numbers at noon UTC,

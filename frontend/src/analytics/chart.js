@@ -181,16 +181,21 @@ export function spline(pts) {
 export function buildChart(input, now = Date.now()) {
   if (!input || !input.series.length) return null
   if (input.unit === '5min') return buildDayChart(input, now)
-  const { series, t0, t1, rate, binMinutes, unitMinutes, unit } = input
+  const { series, t0, t1, rate, binMinutes, unitMinutes, unit, typical } = input
   // Values are per-unit rates (hour on the week view, day on month+); the
   // y max is derived from the *smoothed* curves so random single-bucket
   // spikes don't blow up the scale. Smoothing works on raw counts (its edge
   // detector thresholds are count-based), the result is scaled back to rates.
   const smoothed = series.map((s) =>
     smooth(s.points.map((p) => p.count), binMinutes, unitMinutes).map((v) => v * rate))
-  // Scale from the current/primary series only; older overlay weeks are drawn
-  // with the same scale and allowed to overflow if they are busier.
-  const highest = Math.max(0, ...smoothed[0])
+  // The "typical week" seasonal estimate is already smooth: one value per
+  // bin spanning the full week (future included), drawn in the muted color.
+  const typicalRates = typical
+    ? [...typical.values].map((v) => v * rate)
+    : null
+  // Scale from the current series plus the typical curve; both are smooth,
+  // and neither should be clipped in normal traffic.
+  const highest = Math.max(0, ...smoothed[0], ...(typicalRates || []))
   const { max, step, minor } = yScale(highest)
   const x = (t) => ((t - t0) / (t1 - t0)) * CHART_W
   const y = (v) => PAD_TOP + (1 - Math.max(0, v) / max) * (CHART_H - PAD_TOP)
@@ -205,6 +210,12 @@ export function buildChart(input, now = Date.now()) {
       area: s.area ? `${line}L${last.x},${CHART_H}L${first.x},${CHART_H}Z` : null,
     }
   })
+  let typicalLine = null
+  if (typicalRates) {
+    const binMs = (t1 - t0) / typicalRates.length
+    const pts = typicalRates.map((v, i) => ({ x: x(t0 + i * binMs), y: y(v) }))
+    typicalLine = { line: spline(pts), label: typical.label }
+  }
   // Major (labeled) and minor (hairline) y grid ticks.
   const majors = []
   const minors = []
@@ -256,16 +267,19 @@ export function buildChart(input, now = Date.now()) {
       x: x(t), label: fmtTick(t, t1 - t0), line: true,
     }))
   }
-  return { max, majors, minors, series: drawn, xticks, unit }
+  return { max, majors, minors, series: drawn, typical: typicalLine, xticks, unit }
 }
 
 /**
  * Day view: 5-minute bars for the last 24 hours. Bars are drawn at raw
  * counts; the skyline uses a projected full-bucket value for the still-open
  * final bucket. The y scale is derived from the projected skyline maximum.
+ * The optional "typical day" curve (per-bin counts aligned to the window's
+ * bins, cut from the typical-week estimate) overlays the bars as a smooth
+ * muted line and also feeds the y scale.
  */
 export function buildDayChart(input, now = Date.now()) {
-  const { series, t0, t1 } = input
+  const { series, t0, t1, typical } = input
   const points = series[0]?.points || []
   const n = points.length
   if (!n) return null
@@ -285,7 +299,7 @@ export function buildDayChart(input, now = Date.now()) {
     const share = elapsed / bucketMs
     return p.count + prevRaw * (1 - share)
   })
-  const highest = Math.max(0, ...projected)
+  const highest = Math.max(0, ...projected, ...(typical ? typical.values : []))
   const { max, step, minor } = yScale(highest)
   const y = (v) => PAD_TOP + (1 - Math.max(0, v) / max) * (CHART_H - PAD_TOP)
 
@@ -313,6 +327,15 @@ export function buildDayChart(input, now = Date.now()) {
     }
   }
 
+  let typicalLine = null
+  if (typical) {
+    const pts = points.map((p, i) => ({
+      x: (i + 0.5) * bucketWidth,
+      y: y(typical.values[i] || 0),
+    }))
+    typicalLine = { line: spline(pts), label: typical.label }
+  }
+
   const majors = []
   const minors = []
   const nMajor = Math.round(max / step)
@@ -338,7 +361,7 @@ export function buildDayChart(input, now = Date.now()) {
       line: false,
     })
   }
-  return { bars, skyline: skyline.trim(), max, majors, minors, xticks, unit: '5min', series: [] }
+  return { bars, skyline: skyline.trim(), typical: typicalLine, max, majors, minors, xticks, unit: '5min', series: [] }
 }
 
 /** X ticks for year/all: Monday boundaries up to a quarter, UTC month

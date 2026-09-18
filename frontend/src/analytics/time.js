@@ -3,8 +3,8 @@
  *
  * Raw data comes as sparse 5-minute buckets; the range picks the x window
  * and a coarser bucket size to keep point counts sane. The week range is
- * aligned to Monday 00:00 UTC and overlays previous weeks' curves (fading
- * with age), so weekly patterns compare directly.
+ * aligned to Monday 00:00 UTC; a "typical week" seasonal estimate
+ * (seasonal.js) is overlaid on the week and day views by the chart builder.
  */
 
 export const MIN5 = 5 * 60e3
@@ -51,60 +51,24 @@ export function sumRange(raw, t0, t1) {
 }
 
 /**
- * One series per overlaid week: [this week, 1 week ago, ...], at native
- * 5-minute resolution, up to 8 weeks back (and only weeks that overlap the
- * recorded data at all). Each older week's timestamps are shifted forward
- * onto the current week's axis so all curves overlay inside the plot.
- * The current week is truncated at the current bucket
- * — no fake zeroes drawn for the future. Counts are rates per hour
+ * The current week at native 5-minute resolution, truncated at the current
+ * bucket — no fake zeroes drawn for the future. Counts are rates per hour
  * (bucket count * 12): a lone visit in a 5-minute bucket reads as "12/h".
  * The coarser ranges use per-day rates instead (unitMinutes = 24*60).
+ * Previous weeks are no longer overlaid; the "typical week" seasonal
+ * estimate (seasonal.js) takes their place as the history reference.
  */
 export function weeklySeries(buckets) {
   const raw = rawTimes(buckets)
-  const times = Object.keys(raw).map(Number)
   const now = Date.now()
   const thisMonday = mondayUTC(now)
-  if (!times.length) {
-    const points = []
-    const end = Math.min(thisMonday + WEEK, Math.floor(now / MIN5) * MIN5 + MIN5)
-    for (let t = thisMonday; t < end; t += MIN5) {
-      points.push({ t, count: 0 })
-    }
-    return {
-      series: [{ points, label: `Week ${isoWeek(thisMonday)}`, opacity: 1, area: true }],
-      t0: thisMonday,
-      t1: thisMonday + WEEK,
-      rate: HOUR / MIN5,
-      binMinutes: 5,
-      unitMinutes: 60,
-      unit: 'hour',
-    }
-  }
-  const oldest = Math.min(...times)
-  // Weeks back as far as the data reaches: difference in Monday indices.
-  const available = (thisMonday - mondayUTC(oldest)) / WEEK + 1
-  const count = Math.min(available, 8)
-  const out = []
-  for (let back = 0; back < count; back++) {
-    const start = thisMonday - back * WEEK
-    const end = back === 0
-      ? Math.min(start + WEEK, Math.floor(now / MIN5) * MIN5 + MIN5)
-      : start + WEEK
-    const points = []
-    for (let t = start; t < end; t += MIN5) {
-      points.push({ t: t + back * WEEK, count: raw[t] || 0 })
-    }
-    out.push({
-      points,
-      label: `Week ${isoWeek(start)}`,
-      opacity: Math.max(0.15, 1 - back * 0.25),
-      past: back > 0,
-      area: back === 0,
-    })
+  const points = []
+  const end = Math.min(thisMonday + WEEK, Math.floor(now / MIN5) * MIN5 + MIN5)
+  for (let t = thisMonday; t < end; t += MIN5) {
+    points.push({ t, count: raw[t] || 0 })
   }
   return {
-    series: out,
+    series: [{ points, label: `Week ${isoWeek(thisMonday)}`, opacity: 1, area: true }],
     t0: thisMonday,
     t1: thisMonday + WEEK,
     rate: HOUR / MIN5,

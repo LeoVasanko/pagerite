@@ -4,6 +4,7 @@
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { makeSeries } from './analytics/time.js'
+import { typicalWeek, weekBinIndex } from './analytics/seasonal.js'
 import {
   CHART_H,
   CHART_W,
@@ -35,9 +36,6 @@ const allViews = computed(() => {
   return all
 })
 
-const visitSeries = computed(() => makeSeries(props.data?.site_visits, props.range))
-const viewSeries = computed(() => makeSeries(allViews.value, props.range))
-
 function freqLabel(unit) {
   return unit === '5min' ? '5 min' : unit === 'hour' ? 'hourly' : 'daily'
 }
@@ -45,12 +43,6 @@ function freqLabel(unit) {
 /** Vertical axis caption: "visits / 5 min" on the day view, else "hourly visits" style. */
 function axisLabel(unit, ylabel) {
   return unit === '5min' ? `${ylabel} / 5 min` : `${freqLabel(unit)} ${ylabel}`
-}
-
-/** Legend label for the overlaid past weeks: "Week M" or "Week M–N". */
-function pastLabel(series) {
-  const oldest = series.at(-1).label.slice(5) // strip "Week "
-  return series.length > 2 ? `Week ${oldest}–${series[1].label.slice(5)}` : `Week ${oldest}`
 }
 
 const now = ref(Date.now())
@@ -62,8 +54,29 @@ onUnmounted(() => {
   if (refreshInterval) clearInterval(refreshInterval)
 })
 
-const visitChart = computed(() => buildChart(visitSeries.value, now.value))
-const viewChart = computed(() => buildChart(viewSeries.value, now.value))
+/**
+ * Series for the current range plus, on the day and week views, the
+ * seasonal "typical week" history curve (all history up to now, already
+ * smoothed). Week view: the full Monday-first week. Day view: the rolling
+ * window's bins looked up from the same estimate, labeled by the weekday.
+ */
+function withTypical(buckets) {
+  const input = makeSeries(buckets, props.range)
+  if (props.range !== 'day' && props.range !== 'week') return input
+  const estimate = typicalWeek(buckets, now.value)
+  if (!estimate) return input
+  if (props.range === 'week') {
+    return { ...input, typical: { values: [...estimate], label: 'Typical week' } }
+  }
+  const values = input.series[0].points.map((p) => estimate[weekBinIndex(p.t)])
+  const weekday = new Date(now.value).toLocaleDateString(undefined, {
+    weekday: 'long', timeZone: 'UTC',
+  })
+  return { ...input, typical: { values, label: `Typical ${weekday}` } }
+}
+
+const visitChart = computed(() => buildChart(withTypical(props.data?.site_visits), now.value))
+const viewChart = computed(() => buildChart(withTypical(allViews.value), now.value))
 </script>
 
 <template>
@@ -75,8 +88,7 @@ const viewChart = computed(() => buildChart(viewSeries.value, now.value))
       <svg class="chart" :viewBox="`${-MARGIN_L} 0 ${VIEW_W} ${VIEW_H}`"
            :style="{ maxWidth: `${VIEW_W}px`, marginLeft: CHART_MARGIN }"
            role="img" :aria-label="axisLabel(c.chart.unit, c.ylabel)">
-        <!-- Clip the plot curves to the chart area: past-week overlays can
-             run far above the autoscaled y range, and the svg itself is
+        <!-- Clip the plot curves to the chart area; the svg itself is
              overflow: visible for the axis labels. -->
         <clipPath :id="`plot-${c.ylabel}`">
           <rect x="0" y="0" :width="CHART_W" :height="CHART_H" />
@@ -88,17 +100,17 @@ const viewChart = computed(() => buildChart(viewSeries.value, now.value))
                 class="minor vertical" />
         </template>
         <g :clip-path="`url(#plot-${c.ylabel})`">
+          <!-- The muted "typical" history curve under the current data. -->
+          <path v-if="c.chart.typical" :d="c.chart.typical.line" class="line past" />
           <template v-if="c.chart.bars">
             <rect v-for="(b, i) in c.chart.bars" :key="'b' + i"
                   :x="b.x" :y="b.y" :width="b.width" :height="b.height" class="bar" />
             <path :d="c.chart.skyline" class="line" />
           </template>
           <template v-else>
-            <!-- Oldest overlay weeks first so the current week paints on top. -->
-            <template v-for="(s, i) in [...c.chart.series].reverse()" :key="i">
+            <template v-for="(s, i) in c.chart.series" :key="i">
               <path v-if="s.area" :d="s.area" class="area" />
-              <path :d="s.line" class="line" :class="{ past: s.past }"
-                    :style="{ opacity: s.opacity }" />
+              <path :d="s.line" class="line" />
             </template>
           </template>
         </g>
@@ -111,16 +123,23 @@ const viewChart = computed(() => buildChart(viewSeries.value, now.value))
               class="yaxis-label">{{ axisLabel(c.chart.unit, c.ylabel) }}</text>
         <text v-for="t in c.chart.xticks" :key="'x' + t.x" :x="t.x" :y="CHART_H + MARGIN_B - 8"
               text-anchor="middle" class="xlab">{{ t.label }}</text>
-        <!-- Week overlay legend, top right inside the plot: current week in
-             accent, one muted specimen for the whole past range. -->
-        <g v-if="c.legend && c.chart.series.length > 1">
-          <line :x1="CHART_W - 98" :x2="CHART_W - 78" y1="10" y2="10" class="line" />
-          <text :x="CHART_W - 72" y="10" dominant-baseline="middle"
-                class="leglab">{{ c.chart.series[0].label }}</text>
-          <line :x1="CHART_W - 98" :x2="CHART_W - 78" y1="25" y2="25"
+        <!-- Legend, top right inside the plot: current data in accent (week
+             curve or day bars) and the typical history curve in muted. -->
+        <g v-if="c.legend && c.chart.typical">
+          <template v-if="c.chart.bars">
+            <rect :x="CHART_W - 118" y="5" width="20" height="9" class="bar" />
+            <text :x="CHART_W - 92" y="10" dominant-baseline="middle"
+                  class="leglab">Last 24 hours</text>
+          </template>
+          <template v-else>
+            <line :x1="CHART_W - 118" :x2="CHART_W - 98" y1="10" y2="10" class="line" />
+            <text :x="CHART_W - 92" y="10" dominant-baseline="middle"
+                  class="leglab">{{ c.chart.series[0].label }}</text>
+          </template>
+          <line :x1="CHART_W - 118" :x2="CHART_W - 98" y1="25" y2="25"
                 class="line past" style="opacity: 0.6" />
-          <text :x="CHART_W - 72" y="25" dominant-baseline="middle"
-                class="leglab">{{ pastLabel(c.chart.series) }}</text>
+          <text :x="CHART_W - 92" y="25" dominant-baseline="middle"
+                class="leglab">{{ c.chart.typical.label }}</text>
         </g>
       </svg>
     </template>

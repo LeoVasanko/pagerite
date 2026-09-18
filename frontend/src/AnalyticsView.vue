@@ -134,7 +134,8 @@ onUnmounted(() => {
 const window = computed(() => rangeWindow(range.value))
 
 // All non-chart stats follow the selected range; the charts keep their own
-// range-specific x windows (week overlays previous weeks aligned to Monday).
+// range-specific x windows (week aligned to Monday, overlaid with the
+// seasonal "typical week" curve).
 const rangeData = computed(() => {
   if (!data.value) return null
   const { t0, t1 } = window.value
