@@ -628,7 +628,7 @@ import { reconnectPolicy, socketSlot, watchConnecting } from "./reconnect";
     wsQueue.push(msg);
   }
 
-  function ping({ to, fr = currentPath, read = 0 } = {}) {
+  function ping({ to, fr = currentPath, read = 0, lang } = {}) {
     // Reading-time updates from the analytics page itself are not tracked
     // (/_a is admin machinery; the server would reject the path anyway).
     if (!to && currentPath === "/_a") return;
@@ -637,7 +637,10 @@ import { reconnectPolicy, socketSlot, watchConnecting } from "./reconnect";
     if (to) msg.to = to;
     const secs = Math.round(read / 1000);
     if (secs > 0) msg.read = secs;
-    const lang = document.documentElement.lang;
+    // The rendered language: normally the live <html lang>, but a language
+    // switch passes it explicitly — the swap that updates <html> runs inside
+    // the view-transition callback, after the switch ping goes out.
+    lang = lang || document.documentElement.lang;
     if (lang) msg.lang = lang;
     if (!msg.to && !msg.read) return;
     report(msg);
@@ -818,9 +821,10 @@ import { reconnectPolicy, socketSlot, watchConnecting } from "./reconnect";
     await load(currentPath, false);
     scrollTo(0, y);
     // Log the switch as a trail event in the new language (load() updated
-    // <html lang>): the ping matches the switch's GET server-side, so it is
-    // not misclassified as a crawler hit.
-    ping({ to: currentPath });
+    // <html lang>, but possibly inside a still-pending view transition, so
+    // pass the tag explicitly): the ping matches the switch's GET
+    // server-side, so it is not misclassified as a crawler hit.
+    ping({ to: currentPath, lang: tag });
   });
 
   // --- Fetch navigation ------------------------------------------------

@@ -110,8 +110,10 @@ whole browsing session and sends activity messages over it — JSON text
 frames matching the server's `Ping` msgspec struct with the fields `fr`
 (source path), `to` (navigation target), `read` (active seconds on `fr`
 since the last report), `lang` (the rendered language of the page the
-activity happened on — its `<html lang>`) and `hide`; falsy fields are
-omitted. One channel
+activity happened on — its `<html lang>`, except the language-switch
+navigation ping, which passes the picked tag explicitly because the view
+transition applies the new `<html lang>` only after the ping goes out) and
+`hide`; falsy fields are omitted. One channel
 follows the session, so the activity of a visit stays tied together, and
 while the user is active the accumulated reading time is flushed every few
 seconds: the times are incremental, so a disconnection simply leaves the

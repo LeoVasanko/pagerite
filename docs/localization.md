@@ -33,14 +33,9 @@ Deliberately simple — **q-values are ignored**:
 - Selection rule (`select_language` in `pagerite/i18n.py`):
   1. If `?lang=<tag>` is present, use it (if a translation exists; otherwise
      fall through to header logic).
-  2. If the article's original language appears anywhere in the header list,
-     use the **original**. Rationale: an AI translation is strictly worse
-     than the original for anyone who has that language configured at all
-     (e.g. `fi-FI, fi, en-US, en` gets English, not machine-translated
-     Finnish).
-  3. Otherwise walk the header list in order and use the first language for
-     which a translation exists.
-  4. Fall back to the original.
+  2. Otherwise walk the header list in order and use the first language that
+     can be served — the original, or one with an available translation.
+  3. Fall back to the original.
 
 Region tags normalize to their base subtag (`fi-FI` → `fi`).
 

@@ -87,21 +87,16 @@ def select_language(
 
     1. ``?lang=`` wins when a translation exists for it (otherwise falls
        through to the header logic).
-    2. The original language anywhere in the header list wins — an AI
-       translation is strictly worse than the original for anyone who has
-       English configured at all.
-    3. Otherwise the first header language with an available translation.
-    4. Fall back to the original.
+    2. Otherwise the first header language that can be served — the
+       original, or one with an available translation.
+    3. Fall back to the original.
     """
     if query_lang:
         tag = base_tag(query_lang)
         if tag == original or (tag and is_available(tag)):
             return tag
-    langs = parse_accept_language(accept_language or "")
-    if original in langs:
-        return original
-    for lang in langs:
-        if lang != original and is_available(lang):
+    for lang in parse_accept_language(accept_language or ""):
+        if lang == original or is_available(lang):
             return lang
     return original
 
