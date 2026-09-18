@@ -35,10 +35,6 @@ from pagerite.state import SITE_URL, _html_response, analytics_store, data
 
 logger = logging.getLogger(__name__)
 
-# httpx logs every request at INFO (e.g. the favicon fetches below); our own
-# one-line summary in _schedule_favicon_fetch replaces that noise.
-logging.getLogger("httpx").setLevel(logging.WARNING)
-
 router = APIRouter()
 
 # Live WebSocket clients for the analytics stream.

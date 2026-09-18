@@ -1,3 +1,4 @@
+# ruff: noqa: INP001
 """Utilities meant for devserver script, used only in source repository with dev deps."""
 
 from __future__ import annotations
@@ -11,9 +12,8 @@ from subprocess import CalledProcessError
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-from fastapi_vue.hostutil import parse_endpoint
-
 from buildutil import find_dev_tool, find_install_tool, logger
+from fastapi_vue.hostutil import parse_endpoint
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
@@ -67,7 +67,7 @@ class ProcessGroup(asyncio.TaskGroup):
     async def wait(self, *waitables: Process | Awaitable) -> tuple[Any, ...]:
         """Wait concurrently and return results in argument order."""
 
-        async def task(w: Process | Awaitable) -> Any:
+        async def task(w: Process | Awaitable) -> Any:  # noqa: ANN401
             if not isinstance(w, Process):
                 return await w
             if retcode := await w.wait():
@@ -84,7 +84,7 @@ class ProcessGroup(asyncio.TaskGroup):
         return tuple(task.result() for task in tasks)
 
 
-async def http_get_server(url: str, timeout: float) -> str | None:
+async def http_get_server(url: str, timeout: float) -> str | None:  # noqa: ASYNC109
     """GET url with plain asyncio streams, return the response Server header.
 
     Returns an empty string when the server responds without a Server header,

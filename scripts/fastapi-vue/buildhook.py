@@ -1,3 +1,4 @@
+# ruff: noqa: INP001
 """Hatch build hook for building Vue frontend during package build."""
 
 import sys

@@ -55,6 +55,16 @@ def main() -> None:
         default_port=DEFAULT_PORT,
         server_header=False,
         reload=Path(__file__).parent if env.dev else False,
+        # Partial log config, merged over uvicorn's default by fastapi-vue:
+        # root prints at WARNING in production / INFO in dev. Keep our own
+        # loggers audible in production, and silence httpx's per-request INFO
+        # (tracking._schedule_favicon_fetch logs its own one-line summary).
+        log_config={
+            "loggers": {
+                "pagerite": {"level": "INFO"},
+                "httpx": {"level": "WARNING"},
+            }
+        },
         **run_args,
     )
 
