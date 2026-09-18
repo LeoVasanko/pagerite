@@ -257,11 +257,14 @@ const countLabel = (n) =>
   filter: drop-shadow(0 0 2.5px var(--accent));
 }
 .tmap .txnode {
-  fill: var(--text);
-  stroke: none;
+  /* External source/exit pills: plain white on every theme, with a hairline
+     so the pill stays visible on a white page. */
+  fill: #fff;
+  stroke: var(--line, rgba(128, 128, 128, 0.4));
+  stroke-width: 1;
 }
-.tmap .txnode-source { fill: var(--text); }
-.tmap .txnode-exit { fill: var(--text); }
+.tmap .txnode-source { fill: #fff; }
+.tmap .txnode-exit { fill: #fff; }
 /* Branch lanes: one wide concentric arc per path prefix, running behind
    the node pills around the fan's circle center; parent levels sit one
    indent (radius step) outward. Each lane's label follows a short guide
@@ -289,15 +292,18 @@ const countLabel = (n) =>
   stroke: none;
 }
 /* Text sizes are viewBox units: they shrink along with the graph on
-   narrow panels. Overlong labels are clipped at the pill border. */
+   narrow panels. Overlong labels are clipped at the pill border.  The text
+   is always black, on accent (internal pills) and white (external pills)
+   alike — black stands out from any accent color, so the coloring stays
+   stable across themes and light/dark modes. */
 .tmap .tnodeslug {
-  fill: var(--bg, Canvas);
+  fill: #000;
   font-size: 19px;
   text-anchor: start;
 }
 .tmap a { cursor: pointer; }
 .tmap .tnodecount {
-  fill: var(--bg, Canvas);
+  fill: #000;
   opacity: 0.75;
   font-size: 15px;
   text-anchor: middle;
