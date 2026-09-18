@@ -180,22 +180,45 @@ function stepOf(path, titles) {
 /**
  * Badge data combining a visit's/crawler's external referer origin with the
  * visit's UTM tags: the origin as the badge link/label (the favicon is
- * looked up by origin in the component), the known UTM values as a short
- * inline summary, and a one-fact-per-line tooltip — the full origin URL on
- * the first line, then every ``utm_*=value`` pair.  Null when there is no
- * external referer and no UTM tag (a plain direct visit).
+ * looked up by origin in the component), a compact UTM summary (the few
+ * most informative values) as ``utm`` with the full ``utm_*=value`` list
+ * as ``utmCopy`` for click-to-copy, and a one-fact-per-line tooltip — the
+ * full origin URL on the first line, then every ``utm_*=value`` pair.
+ * Null when there is no external referer and no UTM tag (a plain direct
+ * visit).
  */
 function refererBadgeOf(referer, titles, utmTags = {}) {
   const step = stepOf(referer, titles)
   const external = step?.external ? step : null
-  const known = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content']
-  const utm = known.map((k) => utmTags[k]).filter(Boolean).join(' · ')
+  // Compact UTM summary, in display order source, campaign, content, term:
+  // source only when no referer is known (it just repeats where the visitor
+  // came from), content only as a stand-in when there is no term.  The
+  // remaining tags (medium and any nonstandard utm_*) fill in only when
+  // fewer than three of these more useful items exist — and never when a
+  // term is present (the term alone says enough).  The tooltip keeps
+  // every tag, one pair per line.
+  const useful = []
+  if (utmTags.utm_source && !referer) useful.push(utmTags.utm_source)
+  if (utmTags.utm_campaign) useful.push(utmTags.utm_campaign)
+  if (utmTags.utm_content && !utmTags.utm_term) useful.push(utmTags.utm_content)
+  if (utmTags.utm_term) useful.push(utmTags.utm_term)
+  const rest = useful.length < 3 && !utmTags.utm_term
+    ? Object.keys(utmTags)
+        .filter((k) => !['utm_source', 'utm_campaign', 'utm_content', 'utm_term'].includes(k))
+        .map((k) => utmTags[k])
+        .filter(Boolean)
+    : []
+  const utm = [...useful, ...rest].join(' · ')
   if (!external && !utm) return null
+  const utmCopy = Object.entries(utmTags)
+    .map(([k, value]) => `${k}=${value}`)
+    .join('\n')
   return {
     href: external?.origin || '',
     label: external?.slug || '',
     origin: external?.origin || '',
     utm,
+    utmCopy,
     title: [
       ...(external ? [external.origin] : []),
       ...Object.entries(utmTags).map(([k, value]) => `${k}=${value}`),

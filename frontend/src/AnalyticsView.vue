@@ -482,10 +482,19 @@ const abuseRows = computed(() => formatAbuseRows(rangeData.value?.abuse || [], c
 }
 
 /* The referer badge outgrows the 8rem trail-link cap (it carries the UTM
-   summary too); keep the inline-flex layout from the component. */
-.visit-table .trail a.referer-badge {
+   summary too); keep the inline-flex layout from the component.  The
+   generic trail-link rule above would otherwise clip the badge (overflow:
+   hidden, hiding the absolutely positioned favicon) and cap its inner
+   link — the link is display: contents, so its parts lay out as badge
+   flex items. */
+.visit-table .trail .referer-badge {
   display: inline-flex;
   max-width: 100%;
+  overflow: visible;
+}
+
+.visit-table .trail .referer-badge a.badge-link {
+  display: contents;
 }
 
 /* Same flag chip as the visitor cells (VisitorCell.vue); the flags here
