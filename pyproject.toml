@@ -25,11 +25,11 @@ dependencies = [
     "markdown-it-py>=4.2.0",
     "maxminddb>=3.1.1",
     "mdit-py-plugins>=0.6.1",
-    "mediapreview[standard]>=0.2.5",
+    "mediapreview[standard]>=0.2.6",
     "platformdirs>=4.11.5",
     "pygments>=2.20.0",
     "python-slugify>=8.0.4",
-    "uarite>=0.1.2",
+    "uarite>=0.2.2",
     "zstandard>=0.25.0",
 ]
 
