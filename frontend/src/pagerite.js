@@ -843,13 +843,16 @@ import { reconnectPolicy, socketSlot, watchConnecting } from "./reconnect";
 
   // --- Fetch navigation ------------------------------------------------
   async function load(url, push = true, back = false) {
-    // Navigating with the editor open closes it; unsaved edits are lost
-    // (the region swap discards the previewed changes anyway). Cache must be
-    // bypassed for this navigation because the editor may have invalidated
-    // the prefetched copies of other pages.
+    // Navigating with the editor open keeps it open: the shell retargets to
+    // the new page once the swap lands (below). The exception is /_a
+    // (analytics), where the panel does not apply — close it there, with
+    // navigating: true so the close does not re-swap/re-title the page it
+    // was previewing (this navigation is already swapping). The cache is
+    // bypassed while editing because the editor may have invalidated the
+    // prefetched copies of other pages.
     const editing = document.body.classList.contains("editing");
-    if (editing) {
-      editorModule?.then((m) => m.closeEditor());
+    if (editing && new URL(url, location.href).pathname === "/_a") {
+      await editorModule?.then((m) => m.closeEditor({ navigating: true }));
     }
     teardownAnalytics();
     let doc;
@@ -936,7 +939,11 @@ import { reconnectPolicy, socketSlot, watchConnecting } from "./reconnect";
       // own lang="en" dir="ltr", so it is unaffected).
       document.documentElement.lang = doc.documentElement.lang;
       document.documentElement.dir = doc.documentElement.dir;
-      document.title = doc.title;
+      // The editor keeps its own title while open (the retargeted tab
+      // re-applies it); only inherit the server title when not editing.
+      if (!document.body.classList.contains("editing")) {
+        document.title = doc.title;
+      }
       // Banners may contain scripts (canvas etc.), content pages may too.
       runScripts(document.getElementById("page-banner"));
       runScripts(document.getElementById("main"));

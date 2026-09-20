@@ -125,7 +125,11 @@ function showEditor() {
   dispatchEvent(new CustomEvent('pagerite:editor-shown'))
 }
 
-export function closeEditor() {
+// navigating: the close is part of a fetch-navigation (to /_a) — the shell
+// must not re-swap the page it was previewing back in, and the navigation
+// itself sets the new title, so both the unpin re-render and the title
+// restore are skipped.
+export function closeEditor({ navigating = false } = {}) {
   if (!visible) return
   visible = false
   stopTrackingPanel()
@@ -136,7 +140,8 @@ export function closeEditor() {
   host.firstElementChild?.classList.add('closing')
   const h = host
   setTimeout(() => { h.style.display = 'none' }, 250)
-  dispatchEvent(new CustomEvent('pagerite:editor-hidden'))
+  dispatchEvent(new CustomEvent('pagerite:editor-hidden', { detail: { navigating } }))
+  if (navigating) return
   // The editor may have dropped the prefetch cache; warm it again for the
   // now-final page so navigation stays instant.
   dispatchEvent(new CustomEvent('pagerite:preload-pages'))

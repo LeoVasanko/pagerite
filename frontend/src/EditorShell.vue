@@ -44,11 +44,13 @@ function openShell() {
     editorLang.value = session
   pinPreviewLang()
 }
-function unpinPreviewLang() {
+function unpinPreviewLang(ev) {
   if (!pinned) return
   pinned = false
   setLangOverride(null)
-  loadPlain(currentPath.value)
+  // A close caused by navigation (to /_a) must not re-render the page the
+  // editor was on: the navigation itself is swapping in the target page.
+  if (!ev?.detail?.navigating) loadPlain(currentPath.value)
 }
 watch(editorLang, () => { if (pinned) pinPreviewLang() })
 // The page's primary may be (re)learned while pinned on it (doc accept,
