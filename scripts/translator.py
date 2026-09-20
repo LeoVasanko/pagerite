@@ -371,7 +371,10 @@ def main():
     if not args.url.startswith(("ws://", "wss://")):
         p.error("url must start with ws:// or wss://")
 
-    asyncio.run(serve(args.url, SeedX()))
+    try:
+        asyncio.run(serve(args.url, SeedX()))
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
 
 
 if __name__ == "__main__":
