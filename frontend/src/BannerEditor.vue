@@ -1,6 +1,8 @@
 <script setup>
 // Banner editor tab: per-page banner HTML and banner design, previewed into
-// the real #page-banner region. Close and tab switching live in EditorShell.
+// the real #page-banner region, plus the page's card image (Node.image,
+// inherited by the subtree — the effective one previews, dimmed when
+// inherited). Close and tab switching live in EditorShell.
 import { computed, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { EditorView, basicSetup } from 'codemirror'
 import { Compartment, EditorState } from '@codemirror/state'
@@ -23,6 +25,7 @@ const path = ref('')
 const banner = ref('')
 const saveError = ref('')
 const fileInput = ref(null)
+const imageInput = ref(null)
 const bannerEl = ref(null)
 
 let ws = null
@@ -62,6 +65,91 @@ const bannerDesignInherited = ref('')
 // One-shot callback run on the next save ack (set by onBannerDesignChange,
 // whose re-render must not race the save it triggers).
 let refreshOnSave = null
+
+// --- Card image (Node.image, '' = inherit, like the banner design) ------
+// The node's own setting, the effective image after inheritance ("" =
+// none) and which node supplied an inherited one ("" = the front page,
+// "" also when own/none — mirrors bannerFrom).
+const image = ref('')
+const imageResolved = ref('')
+const imageSource = ref('')
+// The image the server would mine from the article itself — the card
+// previews fall back to it when no node image resolves (mirrors og:image).
+const imageMined = ref('')
+// Whether the page has children (from the doc message): an own share
+// image is inherited by the whole section.
+const hasChildren = ref(false)
+// The block label states which image is currently in use.
+const imageLabel = computed(() => {
+  if (image.value) {
+    return hasChildren.value
+      ? `card image: set for this article — used in /${path.value}/*`
+      : 'card image: set for this article'
+  }
+  if (imageResolved.value) {
+    const where = imageSource.value === '' ? 'the front page' : `/${imageSource.value}`
+    return `card image: inherited from ${where}`
+  }
+  if (imageMined.value) return 'card image: from the article'
+  return 'card image: none'
+})
+// The page title and description (from the doc message) feed the mock card
+// previews; empty shows placeholder bars / text instead.
+const pageTitle = ref('')
+const pageDesc = ref('')
+// The image the Twitter cards preview with: the resolved node card image,
+// else the mined article image (what og:image would use). image_resolved is
+// a bare store hash; image_mined is already a src path.
+const cardImage = computed(() =>
+  imageResolved.value ? `/_f/${imageResolved.value}` : imageMined.value,
+)
+// Card-mode override (Node.large, per-article, NOT inherited):
+// null = automatic, false = small, true = large.
+const large = ref(null)
+// Approximation of the server's automatic pick for the "automatic"
+// marker: the real check probes image dimensions (>= 600px wide,
+// landscape-ish AR) server-side, unavailable here — presence of an
+// effective image stands in for "large".
+const autoLarge = computed(() => !!cardImage.value)
+const effectiveLarge = computed(() => large.value ?? autoLarge.value)
+
+function toggleCard(forced) {
+  // Clicking the already-selected card deselects back to automatic.
+  const msg = {
+    type: 'save',
+    path: normPath(path.value),
+    large: large.value === forced ? null : forced,
+  }
+  large.value = msg.large
+  pendingSave = msg
+  send(msg)
+  // twitter:card is part of the page head: re-render on ack.
+  refreshOnSave = rerender
+}
+function saveImage(hash) {
+  const msg = { type: 'save', path: normPath(path.value), image: hash }
+  pendingSave = msg
+  send(msg)
+  // The card image feeds the card previews, card covers and social meta:
+  // on ack re-open the doc (fresh image/image_resolved/image_source — the
+  // banner itself saves in real time, so nothing is lost) and re-render.
+  refreshOnSave = () => {
+    openPath(normPath(path.value))
+    rerender()
+  }
+}
+
+async function uploadCardImage(ev) {
+  // Card images go to the shared content store, like banner media.
+  const file = ev.target.files[0]
+  ev.target.value = '' // allow re-picking the same file
+  if (!file || !file.type.startsWith('image/')) return
+  const name = file.name.replace(/[^\w.-]/g, '-')
+  const res = await apiFetch(`/_api/files/${encodeURIComponent(name)}`, { method: 'PUT', body: file })
+  if (!res.ok) return
+  const { path: stored } = await res.json() // "/_f/<hash>[.ext]"
+  saveImage(stored.split('/').pop().split('.')[0])
+}
 
 // The inherit option names the design actually in effect and its source.
 const inheritLabel = computed(() => {
@@ -234,6 +322,14 @@ function onMessage(ev) {
     bannerDesignFrom.value = msg.banner_design_from ?? null
     bannerDesignInherited.value = msg.banner_design_inherited ?? ''
     bannerFrom.value = msg.banner_from ?? null
+    image.value = msg.image ?? ''
+    imageResolved.value = msg.image_resolved ?? ''
+    imageMined.value = msg.image_mined ?? ''
+    imageSource.value = msg.image_source ?? ''
+    hasChildren.value = msg.has_children ?? false
+    large.value = msg.large ?? null
+    pageTitle.value = msg.title ?? ''
+    pageDesc.value = msg.description ?? ''
     if (banner.value.trim()) previewBanner()
   } else if (msg.type === 'saved') {
     saveError.value = ''
@@ -339,7 +435,66 @@ onUnmounted(() => {
     <div v-if="saveError">{{ saveError }}</div>
     <ConnNote :text="connNote" />
 
-    <section class="block" @paste="onBannerPaste">
+    <section class="block card-image">
+      <div class="block-head">
+        <span class="block-label">{{ imageLabel }}</span>
+        <button
+          v-if="image"
+          type="button"
+          class="icon-btn del"
+          title="clear the card image (back to inherit)"
+          @click="saveImage('')"
+        >❌</button>
+        <button
+          type="button"
+          class="icon-btn"
+          title="upload card image (og:image / card covers) — the subtree inherits it"
+          @click="imageInput.click()"
+        >🖼︎</button>
+        <input
+          ref="imageInput"
+          type="file"
+          accept="image/*"
+          hidden
+          @change="uploadCardImage"
+        />
+      </div>
+      <!-- The site's own cards double as the card-mode selector: rendered
+           with the real .card styles from pagerite.css (theme variables
+           and all — they ARE the site's look). Clicking one forces that
+           mode (Node.large), clicking the selected one returns to
+           automatic. The description only exists in the small format,
+           like the backend's _card. -->
+      <div class="site-previews">
+        <button
+          type="button"
+          class="card compact preview"
+          :class="{ selected: large === false, auto: large === null && !effectiveLarge }"
+          title="small card — click to force it, click again for automatic"
+          @click="toggleCard(false)"
+        >
+          <span class="top">
+            <img v-if="cardImage" class="cover" :src="cardImage" alt="" />
+            <span class="title">{{ pageTitle || 'page title' }}</span>
+          </span>
+          <span class="bottom">
+            <span v-if="pageDesc" class="desc">{{ pageDesc }}</span>
+          </span>
+        </button>
+        <button
+          type="button"
+          class="card preview"
+          :class="{ selected: large === true, auto: large === null && effectiveLarge }"
+          title="large card — click to force it, click again for automatic"
+          @click="toggleCard(true)"
+        >
+          <span class="cover" :style="cardImage ? `background-image: url('${cardImage}')` : null" />
+          <span class="title">{{ pageTitle || 'page title' }}</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="block banner-block" @paste="onBannerPaste">
       <div class="block-head">
         <select
           v-model="bannerDesign"
@@ -356,7 +511,7 @@ onUnmounted(() => {
           class="icon-btn"
           title="upload banner image/video (replaces existing media) — pasting works too"
           @click="fileInput.click()"
-        >🖼️</button>
+        >🖼︎</button>
         <input
           ref="fileInput"
           type="file"
@@ -385,8 +540,59 @@ onUnmounted(() => {
   gap: 0.4rem;
   padding: 0.5rem 1rem;
   background: var(--surface);
+}
+
+.banner-block {
   flex: 1;
   min-height: 0;
+}
+
+/* The card-image section: a real preview of the effective image (the
+   node's own or the inherited one, dimmed then), with upload/clear in the
+   head row like the banner media button. */
+.card-image {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--line);
+}
+
+.block-label {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+/* The site's own card previews: real .card markup/styles from pagerite.css,
+   scaled down via font-size (the card internals are all em, so the layout
+   proportions match the real cards exactly). They double as the card-mode
+   selector: thin outlines only (no border changes, so selecting never
+   shifts the layout) — solid accent for a forced mode, dashed muted for
+   the mode "automatic" currently resolves to (approximated from image
+   presence). */
+.site-previews {
+  display: flex;
+  gap: 0.8rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  margin-top: 0.8rem;
+}
+
+.site-previews .card.preview {
+  font: inherit;
+  font-size: 0.67rem;
+  width: 24em;
+  max-width: 100%;
+  padding: 0;
+  text-align: start;
+  cursor: pointer;
+}
+
+.site-previews .card.preview.selected {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.site-previews .card.preview.auto:not(.selected) {
+  outline: 1px dashed var(--muted);
+  outline-offset: 2px;
 }
 
 .block-head {
@@ -401,9 +607,14 @@ onUnmounted(() => {
 }
 
 .block-head .icon-btn {
-  margin-left: auto;
   padding: 0 0.2rem;
   font-size: 1rem;
+}
+
+/* The first icon button pushes itself (and any siblings after it, like
+   the card-image clear button) to the end of the row. */
+.block-head .icon-btn:first-of-type {
+  margin-left: auto;
 }
 
 /* The banner design selector stays compact; the upload button is pushed

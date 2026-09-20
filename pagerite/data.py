@@ -63,6 +63,16 @@ class Node(msgspec.Struct, omit_defaults=True):
     #: "" = explicitly no design, None = inherit (nearest ancestor, front
     #: page last, then the active theme's own design).
     banner_design: str | None = None
+    #: Content-addressed card image name (served at "/_f/{name}") for
+    #: og:image/twitter:image and card covers. "" inherits the nearest
+    #: ancestor's image, the front page last; unset everywhere falls back
+    #: to mining the rendered article.
+    image: str = ""
+    #: Card-mode override (site cards + twitter:card): None = pick
+    #: automatically from the card image's dimensions, False forces a
+    #: small card, True a large one. Per-article only — NOT inherited
+    #: down the tree (unlike image).
+    large: bool | None = None
     published: bool = True
     children: dict[str, "Node"] = {}
     created: datetime = msgspec.field(

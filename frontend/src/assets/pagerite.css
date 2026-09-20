@@ -287,7 +287,7 @@ body {
 
 #nav span {
   color: var(--muted);
-  font-size: 0.95rem;
+  font-size: 0.95em;
 }
 
 #nav .current {
@@ -485,16 +485,25 @@ main {
    404) lists its published children after the markdown content — one
    card per child (a child without a page of its own is represented by
    its first leaf page; see _cards in views.py). The row bleeds to full
-   page width (div.wide): the cards first grow to fill it, then shrink
-   rather than wrap. Every card has the same fixed 16/10 shape, covered
-   entirely by the
-   page's share image (og:image heuristics, as a background — a gradient
-   placeholder when it has none) with the title overlaid on a translucent
-   band at the bottom. The card is one <a> holding only phrasing-level
-   spans; the spans lay out as blocks. */
+   page width (div.wide); every card has the same fixed 16/10 shape,
+   scaling only with the available width. Cards come in two modes
+   following the child's twitter:card selection (_card_large — the
+   per-article override, else the card image's dimensions): large cards
+   are covered entirely by the page's card image (og:image heuristics, as
+   a background — a gradient placeholder when it has none) with the title
+   overlaid on a translucent band at the bottom; small cards (.card.compact)
+   split at the golden ratio: a square cover in the top part with the
+   title beside it, the article description below. The card is one <a>
+   holding only phrasing-level spans; the
+   spans lay out as blocks. */
+/* Equal-width columns (grid, not flex: no differential shrink, no
+   cross-axis stretch — every card keeps the fixed 16/10 shape, scaling
+   only with the available width). Cards stop growing at their cap; the
+   row centers in the bleed then. */
 .cards {
-  display: flex;
-  /* Cards stop growing at their cap; center the row in the bleed then. */
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 24em);
   justify-content: center;
   gap: 1.25rem;
   margin-top: 2.5rem;
@@ -503,39 +512,36 @@ main {
   padding-inline: 1.25rem;
 }
 
-/* Phones: the cards stack vertically instead of shrinking to slivers.
-   Text-only cards (gradient cover + description) then fit their content —
-   the fixed 16/10 shape only makes sense for image covers. */
+/* Phones: the cards stack vertically instead of shrinking to slivers. */
 @media (max-width: 48rem) {
   .cards {
-    flex-direction: column;
-  }
-
-  .card:has(.desc) {
-    aspect-ratio: auto;
+    grid-auto-flow: row;
+    grid-auto-columns: unset;
+    grid-template-columns: minmax(0, 24em);
   }
 }
 
 .card {
-  /* Grow to fill the row (up to the cap — full-width rows would make huge
-     cards), shrink (not wrap) when there are too many. */
-  flex: 1 1 0;
-  max-width: 24rem;
+  /* Fill the (equal-width) grid column; the height comes only from the
+     fixed aspect ratio (align-self: start — the row must not stretch it).
+     Overflowing content is clipped. */
+  width: 100%;
+  align-self: start;
   position: relative;
   display: flex;
   flex-direction: column;
   aspect-ratio: 16 / 10;
-  /* Allow shrinking below the text's min-content width: without this the
-     text cards hold their row wider than the image-only cards. */
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 0.5rem;
-  background: var(--surface);
+  border-radius: 0.5em;
+  /* Lifted from the page background (a touch of the text color) so cards
+     read as distinct surfaces. */
+  background: color-mix(var(--surface) 88%, var(--text));
   color: var(--text);
   text-decoration: none;
   transition: transform 0.2s, box-shadow 0.2s;
-  box-shadow: 0 0 0.1rem black;
+  box-shadow: 0 0 0.1em black;
 }
 
 .card:hover {
@@ -555,16 +561,22 @@ main {
 
 .card .title {
   position: relative;
-  display: block;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
   margin-top: auto;
-  padding: 0.75rem 1.25rem 0.9rem;
-  background: color-mix(var(--bg) 40%, transparent);
+  padding: 0.75em 1.25em 0.9em;
+  background: color-mix(var(--bg) 65%, transparent);
   /* Pinned: the article a:hover accent must not leak through the card. */
   color: var(--text);
   font-family: var(--font-heading);
-  font-size: 1.25rem;
+  font-size: 1.25em;
   font-weight: 900;
   line-height: 1.25;
+  /* Hyphenation needs the card's lang (the target article's language). */
+  hyphens: auto;
 }
 
 /* Image-less cards carry the description under the title, extending the
@@ -575,19 +587,112 @@ main {
 
 .card .desc {
   position: relative;
-  display: block;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
   overflow: hidden;
-  /* Four lines exactly: the text itself is truncated server-side (_cards),
-     this is just the safety net. max-height spans the lines plus the
-     vertical padding (border-box), so nothing bleeds past the clip. */
+  /* Four lines exactly, with an ellipsis on overflow: the text itself is
+     truncated server-side (_cards), this is just the safety net. */
   line-height: 1.4;
-  max-height: calc(4 * 1.4em + 1.3rem);
-  padding: 0.4rem 1.25rem 0.9rem;
-  background: color-mix(var(--bg) 30%, transparent);
+  padding: 0.4em 1.25em 0.9em;
+  background: color-mix(var(--bg) 55%, transparent);
   color: var(--muted);
-  font-size: 0.95rem;
+  font-size: 0.95em;
   text-align: start;
-  hyphens: none;
+  hyphens: auto;
+}
+
+/* Small cards (_card_large false; the twitter "summary" style): externally
+   the same 16/10 shape as the large card, split horizontally in two
+   sub-grids at the golden ratio — the top part (the image, its full
+   height, with the title beside it at the bottom) takes φ, the bottom
+   part (the description — which only the small format carries — above
+   spare space) takes 1, so the image's bottom edge sits at ~62% of the
+   card instead of centering wherever the differing title/description
+   sizes land it. The title and description carry the translucent band
+   (the same band color as the large cards' title) as their own
+   backgrounds. Imageless cards are just the gradient with the title
+   spanning the full width. */
+.card.compact {
+  display: grid;
+  /* minmax(0, …): the parts never grow past the card — overlong text is
+     line-clamped (title/description) instead of pushing the layout. */
+  grid-template-rows: minmax(0, 1.618fr) minmax(0, 1fr);
+  background: linear-gradient(
+    135deg,
+    color-mix(var(--surface) 88%, var(--text)),
+    var(--bg)
+  );
+}
+
+/* Top part: spare space above the title row. The image column is as wide
+   as the top part is tall — the card is 16/10 and the top is φ/(φ+1) of
+   its height, i.e. ~38.6% of its width — so a square image at that width
+   fills the whole top part. */
+.card.compact .top {
+  display: grid;
+  grid-template-columns: 38.6% 1fr;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+}
+
+/* The image fills its whole grid area (column 1, both rows); cover crops
+   rather than letterboxes. */
+.card.compact img.cover {
+  position: static;
+  grid-column: 1;
+  grid-row: 1 / 3;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  object-fit: cover;
+  background: none;
+}
+
+.card.compact .title {
+  /* Full width: the translucent band runs behind the image to the left
+     edge (the image paints over it, z-index 2), the text indented past
+     the image column. */
+  grid-column: 1 / -1;
+  grid-row: 2;
+  z-index: 1;
+  margin: 0;
+  padding: 0.4em 0.6em 0 calc(38.6% + 0.6em);
+  background: color-mix(var(--bg) 65%, transparent);
+}
+
+/* No image: no indentation, the text starts at the left edge. */
+.card.compact .top:not(:has(img.cover)) .title {
+  padding-left: 0.6em;
+}
+
+/* No description: the title supplies the band's bottom padding. */
+.card.compact:not(:has(.desc)) .title {
+  padding-bottom: 0.4em;
+}
+
+/* Bottom part: the description above spare space. */
+.card.compact .bottom {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.card.compact .desc {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  z-index: 1;
+  margin: 0;
+  padding: 0.4em 0.6em;
+  background: color-mix(var(--bg) 65%, transparent);
+  /* Three lines fit the bottom part (⅜ of the card) even at the card cap;
+     the line clamp adds the ellipsis past that. */
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  max-height: none;
 }
 
 article h1,
@@ -786,7 +891,7 @@ article {
 /* pagerite.js tucks the pen at the end of the article's first h1. */
 article h1 .edit-link {
   position: static;
-  font-size: 1.1rem;
+  font-size: 1.1em;
   vertical-align: 0.3em;
   margin-inline-start: 0.4rem;
 }
@@ -1431,7 +1536,7 @@ article figure img {
   max-width: 65ch;
   padding: 0.8rem 1rem;
   color: var(--lightbox-text);
-  font-size: 0.95rem;
+  font-size: 0.95em;
   text-align: center;
   opacity: 0.85;
 }

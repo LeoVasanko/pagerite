@@ -780,6 +780,57 @@ def banner_source(menu: dict[str, Node], path: str) -> str | None:
     return None
 
 
+def card_image(menu: dict[str, Node], path: str) -> tuple[str, str]:
+    """The effective card image at ``path`` and which node supplied it.
+
+    Nearest ancestor with ``image`` set wins (the node itself first), the
+    front page — a top-level sibling of the chain — last. ("", "") when no
+    node sets one: rendering falls back to mining the article HTML. The
+    source path ("" = front page) feeds the editor banner panel's inherit
+    label.
+    """
+    chain = resolve(menu, path) or []
+    segs = path.split("/")
+    for i in range(len(chain) - 1, -1, -1):
+        if chain[i].image:
+            return chain[i].image, "/".join(segs[: i + 1])
+    front = menu.get("")
+    if front and front.image:
+        return front.image, ""
+    return "", ""
+
+
+_image_dims_cache: dict[str, tuple[int, int] | None] = {}
+
+
+def _image_dims(name: str) -> tuple[int, int] | None:
+    """(width, height) of a stored card image, None when unknown.
+
+    Probed from the ``<hash>.webp`` derivative via pyvips, cached per hash
+    (store contents are immutable). Failures (missing file, undecodable)
+    cache None — callers fall back to presence-based heuristics.
+    """
+    if name in _image_dims_cache:
+        return _image_dims_cache[name]
+    dims = _probe_dims(name)
+    _image_dims_cache[name] = dims
+    return dims
+
+
+def _probe_dims(name: str) -> tuple[int, int] | None:
+    try:
+        from pagerite.files import file_store
+
+        if not (entry := file_store.get(f"{name}.webp")):
+            return None
+        import pyvips
+
+        img = pyvips.Image.new_from_buffer(entry[0], "")
+        return img.width, img.height
+    except Exception:
+        return None
+
+
 def page_content(
     menu: dict[str, Node],
     data: Data,
@@ -877,7 +928,7 @@ def _cards(
     breakout): the cards grow to fill the page and shrink rather than
     wrap. A child without a page of its own is represented by its first
     leaf page (_represent, the nav-link logic). Each card is one <a>
-    showing the page's share
+    showing the page's card
     image (the same heuristics as og:image) as the cover and its title;
     image-less cards get a gradient cover and also show the description.
     Only phrasing-level elements (spans) go inside the <a>: as a formatting
@@ -895,7 +946,7 @@ def _cards(
         return
     with doc.div(class_="cards wide"):
         for cpath, cnode in items:
-            _card(doc, data, cnode, cpath, translation, link_lang, lang)
+            _card(doc, menu, data, cnode, cpath, translation, link_lang, lang)
 
 
 #: A lone {cards} or {cards: ...} line in the markdown: card rows placed
@@ -964,7 +1015,7 @@ def _cards_tag(
     doc = E.div(class_="cards wide")
     with doc:
         for cpath, cnode in items:
-            _card(doc, data, cnode, cpath, translation, link_lang, lang)
+            _card(doc, menu, data, cnode, cpath, translation, link_lang, lang)
     return str(doc)
 
 
@@ -979,8 +1030,31 @@ def _walk(node: Node, path: str):
             yield from _walk(child, f"{path}/{slug}")
 
 
+def _card_large(node: Node, image: str) -> bool:
+    """Whether the card renders large (True) or small (False).
+
+    Automatic: large when the image's probed store dimensions suit a large
+    card (>= 600px wide, landscape-ish aspect 1.4–2.5), small for
+    small/portrait images — and, when dimensions are unknown or the image
+    is external, for any present image. The node's ``large`` setting
+    (per-article, not inherited) overrides the automatic pick; None
+    means automatic. Shared by twitter:card (_social_meta, which maps it
+    to "summary_large_image"/"summary") and the site's own cards (_card).
+    """
+    large = bool(image)
+    if (m := re.search(r"/_f/([0-9a-f]{12})$", image)) and (
+        dims := _image_dims(m.group(1))
+    ):
+        w, h = dims
+        large = w >= 600 and h > 0 and 1.4 <= w / h <= 2.5
+    if node.large is not None:
+        large = node.large
+    return large
+
+
 def _card(
     doc,
+    menu: dict[str, Node],
     data: Data,
     node: Node,
     path: str,
@@ -988,16 +1062,25 @@ def _card(
     link_lang: str = "",
     lang: str = "",
 ) -> None:
-    """One card: cover + title, plus the description when the
-    page has no image (its card shows a gradient cover instead).
+    """One card: large mode is a full-card cover with the title overlaid;
+    small mode a square cover in the golden-ratio top part with the title
+    beside it and the description below (the description only exists in
+    the small format). Imageless cards keep the image space blank (a
+    gradient cover).
 
-    The card text localizes per target article where that page is
-    available in the language: the title comes from the translation's
-    title map and the cover/description heuristics run on the target's
-    hybrid Markdown — with per-card fallback to the original otherwise.
+    The cover is the page's resolved card image (Node.image, inheriting
+    down the tree) when set, else mined from the rendered article like
+    og:image; the mode follows the same selection as twitter:card
+    (_card_large: the node's override, else the image's dimensions). The
+    card text localizes per target article where that page is available in
+    the language: the title comes from the translation's title map and the
+    cover/description heuristics run on the target's hybrid Markdown —
+    with per-card fallback to the original otherwise.
     """
-    image = description = ""
-    if node.chunks:
+    image = html = ""
+    if name := card_image(menu, path)[0]:
+        image = f"/_f/{name}"
+    if node.chunks and not image:
         md = node_markdown(data, node) or ""
         if lang and lang in node.langs:
             md = i18n.hybrid_markdown(data, node, path, lang)
@@ -1011,18 +1094,47 @@ def _card(
             directives={"cards": lambda _args, _env: ""},
         ).html
         image, _ = _media(html)
-        if not image:
-            description = _description(html, 150)
-    with doc.a(href=_href(path, link_lang), class_="card"):
+    large = _card_large(node, image)
+    description = ""
+    if not large and node.chunks and not html:
+        md = node_markdown(data, node) or ""
+        if lang and lang in node.langs:
+            md = i18n.hybrid_markdown(data, node, path, lang)
+        html = render(
+            md,
+            path,
+            node.created,
+            node.modified,
+            directives={"cards": lambda _args, _env: ""},
+        ).html
+    if not large and html:
+        description = _description(html, 150)
+    title = _title(path.rpartition("/")[2], node, translation, path)
+    # The card text's language: the page language when the target article
+    # is translated into it, else the target's own primary language (the
+    # per-card fallback). Set on the link so hyphenation works.
+    card_lang = lang if lang and lang in node.langs else i18n.primary_lang(menu, path)
+    if not large:
+        with doc.a(href=_href(path, link_lang), class_="card compact", lang=card_lang):
+            # Two sub-grids split at the golden ratio (.top : .bottom =
+            # φ : 1): the square image fills the top part with the title
+            # beside it at the bottom, the description sits at the top of
+            # the bottom part. The title/description carry the translucent
+            # band as their own background.
+            with doc.span(class_="top"):
+                if image:
+                    doc.img(src=image, alt="", class_="cover")
+                doc.span(title, class_="title")
+            with doc.span(class_="bottom"):
+                if description:
+                    doc.span(description, class_="desc")
+    else:
+        cover = {"class_": "cover"}
         if image:
-            doc.span(class_="cover", style=f'background-image: url("{image}")')
-        else:
-            doc.span(class_="cover")
-        doc.span(
-            _title(path.rpartition("/")[2], node, translation, path), class_="title"
-        )
-        if description:
-            doc.span(description, class_="desc")
+            cover["style"] = f'background-image: url("{image}")'
+        with doc.a(href=_href(path, link_lang), class_="card", lang=card_lang):
+            doc.span(**cover)
+            doc.span(title, class_="title")
 
 
 _FIRST_P = re.compile(r"<p[^>]*>(.*?)</p>", re.S)
@@ -1084,8 +1196,8 @@ def _media(html: str) -> tuple[str, str]:
     return hero or raster or svg, video
 
 
-def _share_media(html: str, base_url: str) -> tuple[str, str]:
-    """(image, video) share URLs from the rendered article.
+def _card_media(html: str, base_url: str) -> tuple[str, str]:
+    """(image, video) card URLs from the rendered article.
 
     The _media picks as absolute URLs built from the request base —
     social scrapers cannot use relative ones. Extension-less store links
@@ -1111,23 +1223,34 @@ def _social_meta(
     html: str,
     brand: str,
     base_url: str,
+    card: str = "",
 ) -> dict[str, str]:
     """Open Graph/Twitter/SEO meta tags for a content page.
 
-    Heuristics over the rendered article: the description is the first
-    paragraph's text (truncated at ~200 chars on a word boundary), the
-    share image the article's first <img> — authors lead with their most
-    representative figure. Absolute URLs are built from the request's base
-    (social scrapers cannot use relative ones).
+    The card image is the node's own ``image`` setting when one resolves
+    (``card``, see card_image — the nearest ancestor's or the front
+    page's otherwise); with none set, heuristics over the rendered article
+    pick the first representative <img> (a {.hero} first, then raster,
+    then SVG). The description is the first paragraph's text; the first
+    <video> yields og:video. Absolute URLs are built from the request's
+    base (social scrapers cannot use relative ones).
 
     ``twitter:image`` pins extension-less store links to the ``.webp``
     variant: X only honors WebP via twitter:image (not og:image) and its
-    scraper cannot be trusted to negotiate via Accept.
+    scraper cannot be trusted to negotiate via Accept. ``twitter:card``
+    comes from _card_large (the node's per-article ``large`` override,
+    else the image's probed dimensions), mapped to
+    "summary_large_image"/"summary" only here.
     """
     url = f"{base_url}/{path}" if base_url else ""
     text = _description(html)
-    image, video = _share_media(html, base_url)
+    if card and base_url:
+        image = f"{base_url}/_f/{card}"
+        _, video = _card_media(html, base_url)
+    else:
+        image, video = _card_media(html, base_url)
     twitter_image = re.sub(r"(/_f/[0-9a-f]{12})$", r"\1.webp", image) if image else ""
+    large = _card_large(node, image)
     return {
         "description": text,
         "og:type": "article",
@@ -1139,7 +1262,7 @@ def _social_meta(
         "og:video": video,
         "article:published_time": node.created.isoformat(),
         "article:modified_time": node.modified.isoformat(),
-        "twitter:card": "summary_large_image" if image else "summary",
+        "twitter:card": "summary_large_image" if large else "summary",
         "twitter:image": twitter_image,
     }
 
@@ -1208,7 +1331,7 @@ def render_page(
         lang = original
     title = _title(path.rpartition("/")[2], node, translation, path)
     main = page_content(menu, data, path, translation, link_lang, lang)
-    social = _social_meta(node, path, title, str(main), brand, base_url)
+    social = _social_meta(node, path, title, str(main), brand, base_url, card_image(menu, path)[0])
     canonical, alternates = _language_urls(data, path, node, lang, original, base_url)
     return str(
         _layout(

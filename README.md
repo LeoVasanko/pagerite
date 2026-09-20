@@ -28,7 +28,7 @@ The worst case scenario when a hacker gains access to your admin accounts (say i
 
 **Theme just every part to your liking.** Themes, banner designs and page transitions are included — pick one from the site editor or copy a folder and make it yours. Several high quality fonts are included among with other assets: your site never phones a third party or us for anything. And if after all you need to customize, additional site and banner code may be provided by the admin panel.
 
-**Search engines and social cards come free.** Every page gets a proper description, canonical link and Open Graph/Twitter card metadata derived from the article — including a share image picked from your own figures — without a single "SEO plugin". Category index pages, if you wish to have those, also get their sub pages shown automatically in card format.
+**Search engines and social cards come free.** Every page gets a proper description, canonical link and Open Graph/Twitter card metadata derived from the article — including a card image picked from your own figures — without a single "SEO plugin". Category index pages, if you wish to have those, also get their sub pages shown automatically in card format.
 
 ![Graphs showing visitor stats and navigation across site branches.](https://git.zi.fi/LeoVasanko/pagerite/raw/branch/main/docs/screenshots/analytics.webp)
 _You can see your readers. Built-in analytics need no cookies and no third-party tracker: visits, referers, reading time and a live map of how people move between your pages, plus separate ledgers for crawlers and the abusers probing for wordpress PHP files — who are, of course, wasting their time here._

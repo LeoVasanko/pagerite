@@ -2,9 +2,9 @@
 // Recursive site-structure tree with drag-and-drop ordering (vue-draggable).
 // Nodes come from the server (GET /_api/pages via StructureEditor.vue) as
 // {slug, path, title, translated, order, published, has_content, language,
-// primary, children}. The row's flag (LangSelect) sets the node's primary
-// language (language; '' = inherit — dimmed, showing the resolved flag);
-// the setting covers the whole subtree.
+// primary, children}. The row's flag
+// (LangSelect) sets the node's primary language (language; '' = inherit —
+// dimmed, showing the resolved flag); the setting covers the whole subtree.
 // With a `lang` prop (StructureEditor's language strip) the titles shown
 // are that language's; `translated` marks rows with an actual translation
 // (untranslated rows show the original title, dimmed).

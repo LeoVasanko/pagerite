@@ -22,6 +22,12 @@ Files are content-addressed (blake3[:12] + extension) and stored **on disk** und
 
 `Node.banner_design` picks a banner design: a theme folder name whose `banner.css` styles it and whose `banner.html` (arbitrary markup: canvas + style + script) or `banner.svg` supplies the inline artwork (wrapped in `div[data-design]`); "" = explicitly no design, None = inherit (nearest ancestor, front page last, then the active theme's own design if it ships banner.css/banner.svg/banner.html). The design's banner.css lives in `<head>` (id `pagerite-banner`) between the theme and the custom CSS — a `<link>` in dev, an inline `<style>` in production.
 
+## Card images
+
+`Node.image` names a content-addressed store file (12-hex hash, served at `/_f/{name}`) used as the page's card image: `og:image`/`twitter:image` meta and the card cover in listings. Empty inherits the nearest ancestor's image, the front page last; unset everywhere, the meta tags fall back to mining the rendered article (hero → first raster → first SVG). Set in the editor's banner panel (upload → `PUT /_api/files/{name}`, then a `save` with `image` over the editor WebSocket), stored at `IMAGE_MAXSIZE` like other uploads. `twitter:card` picks `summary_large_image` vs `summary` from the image's probed dimensions (views.py `_image_dims`).
+
+`Node.large: bool | None` overrides the automatic card-mode pick per article: None = automatic, False forces a small card, True a large one. Unlike `image`, it is NOT inherited down the tree. Set from the banner panel's card previews (a `save` with `large` over the editor WebSocket).
+
 ## Site settings
 
 `Data.brand` is the site name (header link + `<title>` suffix), editable in the site editor via `/_api/settings`; empty = no header link and no `<title>` suffix.

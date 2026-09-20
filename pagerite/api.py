@@ -10,6 +10,7 @@ server-generated key in the path is the access control).
 """
 
 import logging
+import re
 from datetime import UTC, datetime
 
 from fastapi import (
@@ -403,12 +404,16 @@ async def editor_ws(ws: WebSocket) -> None:
     Stateless protocol (each message carries the path):
       <- {"type": "open", "path", "lang"?}
       -> {"type": "doc", "path", "exists", "title", "markdown", "published",
-          "banner", "banner_design", "lang", "primary_lang", "langs",
+          "banner", "banner_design", "banner_from", "banner_design_from",
+          "banner_design_inherited", "description", "image", "image_resolved",
+          "image_mined", "image_source", "has_children", "large", "lang",
+          "primary_lang", "langs",
           "translate_langs"}
       <- {"type": "render", "path", "markdown"}
       -> {"type": "html", "path", "html"}
       <- {"type": "save", "path", "title"?, "markdown"?, "published"?,
-          "banner"?, "banner_design"?, "move_from"?, "lang"?, "base"?}
+          "banner"?, "banner_design"?, "image"?, "large"?, "move_from"?,
+          "lang"?, "base"?}
           (absent fields keep their old values; move_from: rename/move a
           page, subtree included)
       -> {"type": "saved", "path"} | {"type": "error", "detail"}
@@ -452,6 +457,16 @@ async def editor_ws(ws: WebSocket) -> None:
                             # original (docs/localization.md editor flow).
                             markdown = i18n.hybrid_markdown(data, node, path, lang)
                             title = i18n.title_map(data, lang).get(path) or title
+                    # The node's card image: its own setting ("" = inherit),
+                    # the effective one after inheritance ("" = none) and
+                    # which node supplied an inherited one ("" = front page;
+                    # "" also when own/none — mirrors banner_from).
+                    img, img_source = views.card_image(data.menu, path)
+                    # The card preview's description and mined image,
+                    # from the same rendered-article heuristics as the
+                    # og:/twitter: meta (_description, _media).
+                    html = render(markdown, path).html if markdown else ""
+                    img_mined = views._media(html)[0] if html else ""
                     await ws.send_json(
                         {
                             "type": "doc",
@@ -481,6 +496,23 @@ async def editor_ws(ws: WebSocket) -> None:
                                 if src is not None
                                 else views.theme_banner_design(data.theme)
                             ),
+                            "description": views._description(html) if html else "",
+                            "image": node.image if node else "",
+                            # For the banner panel's image label ("…used in
+                            # /<path>/*"): the subtree inherits it.
+                            "has_children": bool(node.children) if node else False,
+                            "image_resolved": img,
+                            # The image the og:/twitter: heuristics would mine
+                            # from the article itself ("" = none): the previews
+                            # show it when no node image resolves.
+                            "image_mined": img_mined,
+                            "image_source": (
+                                "" if node is None or node.image else img_source
+                            ),
+                            # Card-mode override (per-article, not
+                            # inherited): null = automatic, otherwise
+                            # false = small, true = large.
+                            "large": node.large if node else None,
                             # Language context for the editor's picker: the
                             # language this Markdown represents ("" = primary),
                             # the page's own primary language, the translations
@@ -609,6 +641,30 @@ async def editor_ws(ws: WebSocket) -> None:
                             }
                         )
                         continue
+                    image = msg.get("image")
+                    if image is not None:
+                        # Card-image setting (inherited by the subtree): a
+                        # 12-hex content-addressed store name, "" = inherit.
+                        image = str(image).strip()
+                        if image and not re.fullmatch(r"[0-9a-f]{12}", image):
+                            await ws.send_json(
+                                {
+                                    "type": "error",
+                                    "detail": "image must be a store file name",
+                                }
+                            )
+                            continue
+                    large = msg.get("large")
+                    if "large" in msg and not (large is None or isinstance(large, bool)):
+                        # Card-mode override: null = automatic, true =
+                        # large, false = small.
+                        await ws.send_json(
+                            {
+                                "type": "error",
+                                "detail": "large must be null or a boolean",
+                            }
+                        )
+                        continue
                     with kanta.transaction(
                         f"page:{lang}" if translated else "page",
                         user=ws.headers.get("remote-user"),
@@ -671,6 +727,14 @@ async def editor_ws(ws: WebSocket) -> None:
                                 node.banner = msg["banner"]
                             if "banner_design" in msg:
                                 node.banner_design = msg["banner_design"]
+                            if image is not None:
+                                # Part of every render's social meta and card
+                                # covers: a change invalidates everywhere.
+                                node.image = image
+                            if "large" in msg:
+                                # Per-article card-mode override (not
+                                # inherited); None = automatic.
+                                node.large = large
                             node.modified = datetime.now(UTC)
                             _invalidate_pages()
                     await ws.send_json({"type": "saved", "path": path})
