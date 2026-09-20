@@ -118,8 +118,13 @@ def make_patch(base: str, edited: str) -> Patch:
     Blocks are the chunk_markdown split, so hunks align with translation
     units and code fences never straddle a hunk boundary. Pure inserts
     anchor on the preceding block (an empty search would never match);
-    inserts at the very top anchor on the first block. autojunk is off:
-    the diff must be deterministic, and pages are small.
+    inserts at the very top anchor on the first block. A search text that
+    occurs more than once in the page would hit the FIRST occurrence at
+    apply time (apply_patch replaces once) — possibly the wrong instance —
+    so ambiguous hunks grow block context (preceding block first) until
+    unique or the page edge, at the cost of going stale when a neighbor
+    block changes. autojunk is off: the diff must be deterministic, and
+    pages are small.
     """
     a, b = chunk_markdown(base), chunk_markdown(edited)
     hunks: list[tuple[str, str]] = []
@@ -128,18 +133,25 @@ def make_patch(base: str, edited: str) -> Patch:
     ).get_opcodes():
         if tag == "equal":
             continue
-        search = "\n\n".join(a[i1:i2])
-        replace = "\n\n".join(b[j1:j2])
+        core = "\n\n".join(b[j1:j2])
         if tag == "insert":
-            if i1:
-                search = a[i1 - 1]
-                replace = f"{a[i1 - 1]}\n\n{replace}"
-            elif a:
-                search = a[0]
-                replace = f"{replace}\n\n{a[0]}"
-            # else: base is empty — the hunk is inert (empty search is
-            # skipped by apply_patch); saving a translation of an empty
-            # page records nothing applicable.
+            left, right = (i1 - 1, i1) if i1 else (0, 1 if a else 0)
+            # Empty base: left == right == 0, the search stays empty and the
+            # hunk is inert (apply_patch skips empty searches); saving a
+            # translation of an empty page records nothing applicable.
+        else:
+            left, right = i1, i2
+        while True:
+            search = "\n\n".join(a[left:right])
+            if not search or base.count(search) <= 1:
+                break
+            if left == 0 and right == len(a):
+                break  # whole page and still ambiguous: best effort
+            if left:
+                left -= 1
+            else:
+                right += 1
+        replace = "\n\n".join([*a[left:i1], *([core] if core else []), *a[i2:right]])
         hunks.append((search, replace))
     return Patch(hunks=hunks)
 
@@ -162,7 +174,12 @@ def hybrid_markdown(data: Data, node: Node, path: str, lang: str) -> str:
     )
     for patch in data.patches.get(f"{path}:{lang}", []):
         hybrid = apply_patch(hybrid, patch)
-    return hybrid
+    # A patch deleting an extra (translation-only) paragraph removes its
+    # text but not one of the surrounding separators, leaving a stray blank
+    # line behind (apply_patch is a plain string replace). Re-chunk to
+    # normalize blank lines away — fence/HTML-atomic, and it repairs gaps
+    # left by patches stored before this normalization.
+    return join_chunks(chunk_markdown(hybrid))
 
 
 def add_patch(

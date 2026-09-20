@@ -181,6 +181,9 @@ Hunks are produced from `difflib.SequenceMatcher` on the hybrid vs. the
 edited text at block granularity: each `replace`/`delete`/`insert` opcode
 becomes one `(search, replace)` pair, with the preceding block's tail as
 left context for `insert` (pure inserts have empty search context otherwise).
+A search text that occurs more than once in the page would hit the first
+occurrence at apply time, so ambiguous hunks grow block context (preceding
+block first) until unique or the page edge.
 Application is dead simple:
 
 ```python
@@ -232,6 +235,9 @@ def get_translation(data, path, lang) -> Translation | None:
     )
     for patch in data.patches.get(f"{path}:{lang}", []):
         hybrid = apply_patch(hybrid, patch)
+    # Deleting an extra (translation-only) paragraph leaves its surrounding
+    # blank lines behind; re-chunking normalizes them away.
+    hybrid = join_chunks(chunk_markdown(hybrid))
     return Translation(markdown=hybrid, titles=title_map(data, lang))
 ```
 
