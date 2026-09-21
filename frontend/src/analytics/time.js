@@ -4,7 +4,8 @@
  * Raw data comes as sparse 5-minute buckets; the range picks the x window
  * and a coarser bucket size to keep point counts sane. The week range is
  * aligned to Monday 00:00 UTC; a "typical week" seasonal estimate
- * (seasonal.js) is overlaid on the week and day views by the chart builder.
+ * (seasonal.js) is overlaid as a solid fill on the week and day views by
+ * the chart builder.
  */
 
 export const MIN5 = 5 * 60e3
@@ -55,8 +56,14 @@ export function sumRange(raw, t0, t1) {
  * bucket — no fake zeroes drawn for the future. Counts are rates per hour
  * (bucket count * 12): a lone visit in a 5-minute bucket reads as "12/h".
  * The coarser ranges use per-day rates instead (unitMinutes = 24*60).
- * Previous weeks are no longer overlaid; the "typical week" seasonal
- * estimate (seasonal.js) takes their place as the history reference.
+ * Since the window is fixed Monday-to-Monday, the days not yet reached
+ * would otherwise be blank early in the week: last week's curve continues
+ * the graph from the current bucket to the end of the week (secondary
+ * accent, translucent fill like the current week), gradually replaced by
+ * the current week as it accrues. The tail is only drawn when the data
+ * reaches into last week at all. The
+ * "typical week" seasonal estimate (seasonal.js) is the statistical
+ * history reference under both.
  */
 export function weeklySeries(buckets) {
   const raw = rawTimes(buckets)
@@ -67,8 +74,19 @@ export function weeklySeries(buckets) {
   for (let t = thisMonday; t < end; t += MIN5) {
     points.push({ t, count: raw[t] || 0 })
   }
+  const past = []
+  if (Object.keys(raw).some((t) => Number(t) < thisMonday)) {
+    for (let t = end; t < thisMonday + WEEK; t += MIN5) {
+      past.push({ t, count: raw[t - WEEK] || 0 })
+    }
+  }
   return {
-    series: [{ points, label: `Week ${isoWeek(thisMonday)}`, opacity: 1, area: true }],
+    series: [
+      { points, label: `Week ${isoWeek(thisMonday)}`, opacity: 1, area: true },
+      ...(past.length
+        ? [{ points: past, label: `Week ${isoWeek(thisMonday - WEEK)}`, past: true, area: true }]
+        : []),
+    ],
     t0: thisMonday,
     t1: thisMonday + WEEK,
     rate: HOUR / MIN5,

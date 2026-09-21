@@ -92,13 +92,15 @@ export function weekBinIndex(t) {
  * (capped at MAX_HISTORY_DAYS back), smoothed with the same Gaussian the
  * week view uses, then folded by seasonalCurve. Returns BINS_PER_WEEK
  * counts per 5-minute bin starting Monday, or null when there is less than
- * a day of history.
+ * a day of history or the history span (first bucket to tEnd, before
+ * capping) is below minHistory.
  */
-export function typicalWeek(buckets, tEnd = Date.now()) {
+export function typicalWeek(buckets, tEnd = Date.now(), { minHistory = 0 } = {}) {
   const raw = rawTimes(buckets)
   const times = Object.keys(raw).map(Number)
   if (!times.length) return null
   const end = Math.floor(tEnd / MIN5) * MIN5
+  if (end - Math.min(...times) < minHistory) return null
   const start = Math.max(Math.min(...times), end - MAX_HISTORY_DAYS * DAY)
   const n = Math.floor((end - start) / MIN5)
   if (n < BINS_PER_DAY) return null

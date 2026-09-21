@@ -366,8 +366,17 @@ range is 10 so tiny values such as a single visit are not stretched to a
 fractional scale).
 The week range is aligned to Monday 00:00 UTC (the current week keeps the
 accent color and is truncated at the current bucket, never drawing fake
-zeroes for the future). Both the week and day views overlay a **"typical"
-history curve** in the muted color (`analytics/seasonal.js`, a port of
+zeroes for the future). Since the window is fixed Monday-to-Monday, **last
+week's curve** continues the graph from the current bucket to the end of
+the week in the secondary accent (`--accent2`, translucent fill like the
+current week), so the chart shows useful data
+on Monday too and last week is gradually replaced by the current week;
+the tail is only drawn when the recorded data reaches into last week.
+Both the week and day views overlay a **"typical"
+history estimate** as a muted fill with no stroke, translucent to the same
+degree as the current data — shown only once the history spans twice the
+view's full time (from the third day on the day view, the third week on
+the week view; `analytics/seasonal.js`, a port of
 `seasonal.py`): the whole recorded history is densified to 5-minute bins,
 smoothed with the same Gaussian as the week view, then folded onto a weekly
 grid with exponential decay over age — a 7-day half-life for the average
@@ -381,7 +390,9 @@ estimate as "Typical week" (future included); the day view cuts the rolling
 24-hour window's bins from the same estimate and labels them by the weekday
 ("Typical Saturday"). A compact legend inside the top right of the visits
 chart marks the current data in accent (ISO week label, or a bar specimen
-for "Last 24 hours") and the typical curve on a muted specimen. The week
+for "Last 24 hours"), the previous week's tail on a secondary-accent line
+specimen (week view only), and the typical estimate on a muted fill
+specimen. The week
 view's x labels are weekday names centered at midday UTC, without
 vertical grid
 lines (day boundaries would be misleading in the viewer's timezone). The

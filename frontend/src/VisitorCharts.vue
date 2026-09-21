@@ -3,7 +3,7 @@
  * Visitor and page-view smoothed curves for a single shared time range.
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { makeSeries } from './analytics/time.js'
+import { DAY, WEEK, makeSeries } from './analytics/time.js'
 import { typicalWeek, weekBinIndex } from './analytics/seasonal.js'
 import {
   CHART_H,
@@ -56,14 +56,17 @@ onUnmounted(() => {
 
 /**
  * Series for the current range plus, on the day and week views, the
- * seasonal "typical week" history curve (all history up to now, already
+ * seasonal "typical week" history estimate (all history up to now, already
  * smoothed). Week view: the full Monday-first week. Day view: the rolling
  * window's bins looked up from the same estimate, labeled by the weekday.
+ * The estimate only appears once the recorded history spans twice the
+ * view's full time — from the third day / third week on.
  */
 function withTypical(buckets) {
   const input = makeSeries(buckets, props.range)
   if (props.range !== 'day' && props.range !== 'week') return input
-  const estimate = typicalWeek(buckets, now.value)
+  const minHistory = props.range === 'week' ? 2 * WEEK : 2 * DAY
+  const estimate = typicalWeek(buckets, now.value, { minHistory })
   if (!estimate) return input
   if (props.range === 'week') {
     return { ...input, typical: { values: [...estimate], label: 'Typical week' } }
@@ -77,6 +80,11 @@ function withTypical(buckets) {
 
 const visitChart = computed(() => buildChart(withTypical(props.data?.site_visits), now.value))
 const viewChart = computed(() => buildChart(withTypical(allViews.value), now.value))
+
+/** The previous week's tail series on the week view, if present. */
+function pastSeries(chart) {
+  return chart.series.find((s) => s.past)
+}
 </script>
 
 <template>
@@ -100,8 +108,8 @@ const viewChart = computed(() => buildChart(withTypical(allViews.value), now.val
                 class="minor vertical" />
         </template>
         <g :clip-path="`url(#plot-${c.ylabel})`">
-          <!-- The muted "typical" history curve under the current data. -->
-          <path v-if="c.chart.typical" :d="c.chart.typical.line" class="line past" />
+          <!-- The translucent "typical" history fill under the current data. -->
+          <path v-if="c.chart.typical" :d="c.chart.typical.area" class="typical" />
           <template v-if="c.chart.bars">
             <rect v-for="(b, i) in c.chart.bars" :key="'b' + i"
                   :x="b.x" :y="b.y" :width="b.width" :height="b.height" class="bar" />
@@ -109,8 +117,8 @@ const viewChart = computed(() => buildChart(withTypical(allViews.value), now.val
           </template>
           <template v-else>
             <template v-for="(s, i) in c.chart.series" :key="i">
-              <path v-if="s.area" :d="s.area" class="area" />
-              <path :d="s.line" class="line" />
+              <path v-if="s.area" :d="s.area" class="area" :class="{ past: s.past }" />
+              <path :d="s.line" class="line" :class="{ past: s.past }" />
             </template>
           </template>
         </g>
@@ -124,16 +132,26 @@ const viewChart = computed(() => buildChart(withTypical(allViews.value), now.val
         <text v-for="t in c.chart.xticks" :key="'x' + t.x" :x="t.x" :y="CHART_H + MARGIN_B - 8"
               text-anchor="middle" class="xlab">{{ t.label }}</text>
         <!-- Legend, top right inside the plot: current data in accent
-             (week label, or "Last 24 hours" on the day view) and the
-             typical history curve in muted. -->
-        <g v-if="c.legend && c.chart.typical">
+             (week label, or "Last 24 hours" on the day view), the previous
+             week's tail in the secondary accent (week view only), then the
+             typical history fill as a muted specimen. -->
+        <g v-if="c.legend && (c.chart.typical || pastSeries(c.chart))">
           <line :x1="CHART_W - 118" :x2="CHART_W - 98" y1="10" y2="10" class="line" />
           <text :x="CHART_W - 92" y="10" dominant-baseline="middle"
                 class="leglab">{{ c.chart.bars ? 'Last 24 hours' : c.chart.series[0].label }}</text>
-          <line :x1="CHART_W - 118" :x2="CHART_W - 98" y1="25" y2="25"
-                class="line past" style="opacity: 0.6" />
-          <text :x="CHART_W - 92" y="25" dominant-baseline="middle"
-                class="leglab">{{ c.chart.typical.label }}</text>
+          <template v-if="pastSeries(c.chart)">
+            <line :x1="CHART_W - 118" :x2="CHART_W - 98" y1="25" y2="25"
+                  class="line past" />
+            <text :x="CHART_W - 92" y="25" dominant-baseline="middle"
+                  class="leglab">{{ pastSeries(c.chart).label }}</text>
+          </template>
+          <template v-if="c.chart.typical">
+            <rect :x="CHART_W - 118" :y="pastSeries(c.chart) ? 34 : 19"
+                  width="20" height="12" class="typical" />
+            <text :x="CHART_W - 92" :y="pastSeries(c.chart) ? 40 : 25"
+                  dominant-baseline="middle"
+                  class="leglab">{{ c.chart.typical.label }}</text>
+          </template>
         </g>
       </svg>
     </template>
@@ -213,9 +231,21 @@ const viewChart = computed(() => buildChart(withTypical(allViews.value), now.val
   stroke-linecap: round;
 }
 
-/* Past overlay weeks contrast with the current week's accent color. */
+/* The seasonal "typical" estimate is a muted fill under the current data,
+   translucent to the same degree, no stroke. */
+.chart .typical {
+  fill: var(--muted);
+  opacity: 0.6;
+}
+
+/* The previous week's tail on the week view uses the secondary accent so
+   only the typical fill is grey. */
 .chart .line.past {
-  stroke: var(--muted);
+  stroke: var(--accent2);
+}
+
+.chart .area.past {
+  fill: var(--accent2);
 }
 
 .empty { color: var(--muted); }
