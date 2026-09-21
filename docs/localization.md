@@ -337,15 +337,20 @@ transaction `user`.
 Frames are JSON-encoded tagged msgspec structs (`pagerite/translate.py`;
 `bytes` fields ride as base64):
 
-- `{"type": "hello", "langs": [...]}` — client greeting announcing its
-  **capabilities**: the language codes its model can produce (normalized
-  to base subtags; `en`/empty dropped).
-- `{"type": "job", "lang", "key", "texts", "path", "kind", "contexts"}` —
-  server push: ONE fragment to translate (an article title or a chunk), as
-  a list of **prose segments** (see Segmentation below). `contexts` is
-  parallel to `texts` ("" = none): the surround to translate the segment
-  in — for clients that translate better with context (see below).
-  Contexts are not part of the result.
+- `{"type": "hello", "langs": [...], "model", "modes"}` — client greeting
+  announcing its **capabilities**: the language codes its model can produce
+  (normalized to base subtags; `en`/empty dropped). `model` is a free-form
+  model string (logging only); `modes` lists the job granularities the
+  client accepts (default `["segments"]`, see Job modes below).
+- `{"type": "job", "lang", "key", "texts", "path", "kind", "mode",
+  "contexts"}` — server push: ONE fragment to translate (an article title
+  or a chunk; the bulk `article`/`nav` modes carry a whole page resp. the
+  whole navigation tree, see Job modes). In the default `segments` mode
+  `texts` is a list of **prose
+  segments** (see Segmentation below) and `contexts` is parallel to `texts`
+  ("" = none): the surround to translate the segment in — for clients that
+  translate better with context (see below). Contexts are not part of the
+  result. See Job modes for the other modes.
 - `{"type": "result", "lang", "key", "texts"}` — client reply: the
   segments translated, same order and count, matching its job by (lang, key).
 
@@ -387,6 +392,78 @@ Results are stored into `trans` in one transaction and set
 pages gain a language from one fragment). Unknown keys are stored anyway
 and re-storing overwrites — results are idempotent.
 
+#### Job modes: segments, markdown, article, nav
+
+Instruct LLMs understand Markdown natively, so for them the segmentation
+round trip below is unnecessary scaffolding (docs/llm-translation.md for
+the design and the model trial evidence). `Hello.modes` announces which
+job granularities a connection accepts; routing is per connection and per
+mode, so a mixed fleet (a Seed-X instance, a local qwen, an API-backed
+client) shares the work by capability. The validation skip-list is
+mode-scoped — `(lang, key, mode)` — so a fragment one model rejects stays
+offerable to clients of another approach.
+
+- **`segments`** (default when a client omits `modes`) — the protocol as
+  described so far: `Job.texts` carries prose segments, `Result.texts`
+  returns them, the server splices by offset.
+- **`markdown`** — one fragment as full Markdown: `Job.texts` carries a
+  single element, the chunk (a title crosses as plain text, with the
+  article's opening as its context as today). `Job.contexts` carries the
+  previous and next block of the **served hybrid** in the target language
+  (machine translation with user patches applied, "" where none), so human
+  corrections propagate into fresh translations as terminology/tone
+  reference; contexts are never part of the result. The result must
+  re-chunk to exactly one block with the source's anchor constructs (link
+  and image destinations, `{...}` placeholders) intact (`clean_block`),
+  then stores to `Data.trans` as usual.
+- **`article`** — a whole page at once, offered only to article-capable
+  connections and only while a page is *mostly* pending (a new article or
+  a full refresh; steady-state edit follow-up stays scoped jobs). The
+  job's key is the page's first chunk; `Job.texts` carries the full
+  original Markdown — with the page title injected as a `# {title}` line
+  at the top when the render would inject it (the body has no h1 of its
+  own), so the title translates in document context and the opening
+  paragraphs see the heading. The menu title's and parent node's existing
+  translations (from a nav job or earlier work) ride along as
+  `Job.contexts`, so the heading can match the menu while the model may
+  still adapt the in-article title to the content. The result is
+  decomposed per chunk
+  (`align_article`): non-translatable blocks (code fences, container
+  fences, raw HTML — everything `needs_translation` rejects) must appear
+  verbatim and in order and anchor the alignment; regions between anchors
+  pair positionally, a region whose block count changed stores nothing
+  (its chunks stay pending and fall back to scoped jobs), and a paired
+  block whose destinations/placeholders did not survive likewise. An
+  injected title heading's pair becomes the title fragment (heading text
+  only — never a body chunk; a demoted or merged heading simply skips it
+  and the title stays pending for a scoped title job).
+- **`nav`** — the whole navigation hierarchy at once, offered only to
+  nav-capable connections and ahead of any per-title jobs: `Job.texts`
+  carries one element, a nested Markdown list of every node title still
+  pending for the language (`- Title`, indented by depth, in menu order —
+  pages and category labels alike); the job's key is the hash of that
+  list. One round trip names the entire menu, and sibling titles
+  translate in sight of each other. The result is decomposed back into
+  per-title fragments (`align_nav`): it must be the same list item for
+  item — same count, same nesting depth at every position — or it is
+  rejected wholesale and the titles fall back to scoped title jobs; an
+  item that comes back empty, marked-up or with its destinations/
+  placeholders lost is skipped individually and likewise stays pending
+  for a scoped title job.
+
+`scripts/llm_translator.py` is the reference markdown+article+nav client
+(instruct LLMs via an OpenAI Chat Completions endpoint or ollama's native
+API); `scripts/translator.py` (Seed-X) is untouched and announces
+`["segments"]` implicitly.
+
+**Importing human-made full translations:** `align_article` doubles as an
+import path — `scripts/import_translation.py PATH LANG FILE.md` (run with
+the server stopped) decomposes a pasted whole-article translation (e.g.
+from ChatGPT) into proper `Data.trans` fragments with the same validation,
+so later source edits invalidate and re-translate per chunk rather than
+letting the translation editor's one monolithic patch go stale hunk by
+hunk.
+
 #### Segmentation
 
 Fragments cross the wire as **prose segments** (`pagerite/segments.py`): the
@@ -423,10 +500,12 @@ of the block it splices into, closing fence included — segments are
 inline prose, so `pure_prose` alone cannot see this) — each returned
 segment must parse as
 pure prose with no block-starting line or blank line, or the whole result
-is dropped and logged, and the (lang, key)
-pair is skipped for the rest of the server run (generation is
-near-deterministic, so an immediate retry would re-fail; the fragment stays
-pending and gets another chance on restart or `DELETE /_api/translations`).
+is dropped and logged, and the (lang, key, mode)
+combination is skipped for the rest of the server run (generation is
+near-deterministic per model, so an immediate retry in the same mode would
+re-fail; the fragment stays
+pending and gets another chance on restart, in another mode, or on
+`DELETE /_api/translations`).
 `Data.trans` therefore only ever holds clean translated Markdown.
 
 Link- and formatting-carrying blocks are the one place a segment is not

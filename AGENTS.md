@@ -37,6 +37,8 @@ Pagerite is a CMS. See `docs` for the full design and implementation details. Ke
   - `assets/` — base CSS, Pygments styles, fonts.
 - `scripts/devserver.py` — dev server with auto reload (the user mostly uses this; avoid running the server yourself, ask the user to test).
 - `scripts/translator.py` — Seed-X translator service client for the `/_translate/{key}` socket (reference client, runs in its own uv env via PEP 723); stays connected full time, unloads the model after 60 s idle and reloads on the next job.
+- `scripts/llm_translator.py` — instruct-LLM translator service client (docs/llm-translation.md): speaks the `markdown`/`article`/`nav` job modes against an OpenAI Chat Completions endpoint or ollama's native `/api/chat` (its `/v1` ignores `think: false`); all LLM specifics (prompts, sampling, generation caps) live here, not in pagerite.
+- `scripts/import_translation.py` — import a human-made whole-article translation file into the fragment store (same `align_article` validation as article-mode results; run with the server stopped).
 
 Server run by CLI entry point `uv run pagerite` (no auto reloads, build needed). Dev mode is `scripts/devserver.py` (auto reloads, no build needed).
 
