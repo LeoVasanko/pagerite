@@ -17,7 +17,8 @@ import logging
 import os
 import re
 import socket
-from datetime import date
+from contextlib import suppress
+from datetime import UTC, date, datetime
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
@@ -51,7 +52,7 @@ DBIP_URL = "https://download.db-ip.com/free/dbip-city-lite-{month}.mmdb.gz"
 
 def _download_dbip() -> None:
     """Download the latest dbip-city-lite MMDB if ours is missing or older."""
-    today = date.today()
+    today = datetime.now(UTC).date()
     months = [f"{today:%Y-%m}"]
     # The current month's file may not be published yet; fall back to last month.
     prev = (today.replace(day=1) - date.resolution).replace(day=1)
@@ -76,8 +77,7 @@ def _download_dbip() -> None:
                     continue
                 r.raise_for_status()
                 with open(tmp, "wb") as f:
-                    for chunk in r.iter_bytes():
-                        f.write(chunk)
+                    f.writelines(r.iter_bytes())
         except httpx.HTTPError as e:
             logger.warning("DB-IP download failed: %s", e)
             tmp.unlink(missing_ok=True)
@@ -144,18 +144,16 @@ class GeoIP:
             else:
                 self._reader = maxminddb.open_database(str(source))
         except Exception:
-            pass
+            logger.exception("Failed to open DB-IP database %s", source)
 
     def country(self, ip: str) -> str:
         """Two-letter ISO country code for ``ip``, or "" when unavailable."""
         if not ip or self._reader is None:
             return ""
-        try:
+        with suppress(Exception):
             rec = self._reader.get(ip)
             if rec:
                 return (rec.get("country") or {}).get("iso_code", "")
-        except Exception:
-            pass
         return ""
 
     def city(self, ip: str) -> str:
@@ -167,15 +165,13 @@ class GeoIP:
         """
         if not ip or self._reader is None:
             return ""
-        try:
+        with suppress(Exception):
             rec = self._reader.get(ip)
             if rec:
                 city = (rec.get("city") or {}).get("names", {}).get("en", "")
                 if city:
                     city = re.sub(r"\s*\([^)]*\)", "", city).strip()
                 return city
-        except Exception:
-            pass
         return ""
 
 
@@ -336,6 +332,7 @@ async def _broadcast_analytics() -> None:
         try:
             await ws.send_text(payload)
         except Exception:
+            logger.exception("Analytics broadcast failed; dropping client")
             closed.add(ws)
     for ws in closed:
         _analytics_ws_clients.discard(ws)
@@ -496,9 +493,10 @@ async def analytics_websocket(ws: WebSocket) -> None:
     await ws.send_text(_display_json())
     _analytics_ws_clients.add(ws)
     try:
+        # Receive until the client goes away; we only push.
         while True:
             await ws.receive_text()
-    except Exception:
-        pass
+    except WebSocketDisconnect:
+        logger.debug("Analytics WS client disconnected")
     finally:
         _analytics_ws_clients.discard(ws)

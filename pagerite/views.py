@@ -15,11 +15,12 @@ to them point straight at their first child page (first_leaf), and their
 own URL renders a card-listing page (render_category, a 404).
 """
 
-from pathlib import Path
-from html import unescape
 import json
 import os
 import re
+from contextlib import suppress
+from html import unescape
+from pathlib import Path
 
 from fastapi_vue import env
 from html5tagger import HTML, Document, E, Template
@@ -474,7 +475,9 @@ def _layout(
         # ever occurs inside string literals, where the backslash escape is
         # a no-op).
         for src in modules:
-            js = re.sub(r"</script", r"<\\/script", _inline_script(src), flags=re.I)
+            js = re.sub(
+                r"</script", r"<\\/script", _inline_script(src), flags=re.IGNORECASE
+            )
             # Stable id from the file stem minus the content hash; the
             # analytics page's script (pagerite-js-analytics) is found and
             # re-created by pagerite.js on fetch-navigations to /_a.
@@ -607,10 +610,13 @@ def sidebar_html(
     items = [(s, c) for s, c in sorted_nodes(node.children) if c.published]
     if not items:
         return HTML("")
-    if len(items) == 1 and current == f"{section}/{items[0][0]}":
-        # Viewing the only item: useless unless it has children to reach.
-        if not any(c.published for c in items[0][1].children.values()):
-            return HTML("")
+    # Viewing the only item: useless unless it has children to reach.
+    if (
+        len(items) == 1
+        and current == f"{section}/{items[0][0]}"
+        and not any(c.published for c in items[0][1].children.values())
+    ):
+        return HTML("")
     nav = E.ul
     with nav:
         for slug, child in items:
@@ -818,7 +824,7 @@ def _image_dims(name: str) -> tuple[int, int] | None:
 
 
 def _probe_dims(name: str) -> tuple[int, int] | None:
-    try:
+    with suppress(Exception):
         from pagerite.files import file_store
 
         if not (entry := file_store.get(f"{name}.webp")):
@@ -827,8 +833,7 @@ def _probe_dims(name: str) -> tuple[int, int] | None:
 
         img = pyvips.Image.new_from_buffer(entry[0], "")
         return img.width, img.height
-    except Exception:
-        return None
+    return None
 
 
 def page_content(
@@ -951,7 +956,7 @@ def _cards(
 
 #: A lone {cards} or {cards: ...} line in the markdown: card rows placed
 #: by the author. Any such tag suppresses the automatic end-of-page cards.
-_CARDS_TAG_RE = re.compile(r"^\{cards(?::[^{}\n]*)?\}[ \t]*$", re.M)
+_CARDS_TAG_RE = re.compile(r"^\{cards(?::[^{}\n]*)?\}[ \t]*$", re.MULTILINE)
 
 
 def _cards_tag(
@@ -982,18 +987,16 @@ def _cards_tag(
 
     def children(base: str, parent: Node):
         for s, c in sorted_nodes(parent.children):
-            if c.published:
-                if r := _represent(c, f"{base}/{s}" if base else s):
-                    items.append(r)
+            if c.published and (r := _represent(c, f"{base}/{s}" if base else s)):
+                items.append(r)
 
     if not specs:
         if path:
             children(path, node)
         else:
             for s, c in sorted_nodes(menu):
-                if c.published and s:
-                    if r := _represent(c, s):
-                        items.append(r)
+                if c.published and s and (r := _represent(c, s)):
+                    items.append(r)
     else:
         for spec in specs:
             spec = spec.strip("/")
@@ -1137,7 +1140,7 @@ def _card(
             doc.span(title, class_="title")
 
 
-_FIRST_P = re.compile(r"<p[^>]*>(.*?)</p>", re.S)
+_FIRST_P = re.compile(r"<p[^>]*>(.*?)</p>", re.DOTALL)
 _TAG = re.compile(r"<[^>]+>")
 _IMG_TAG = re.compile(r"<img\b[^>]*>")
 _VIDEO_TAG = re.compile(r"<video\b[^>]*>")
@@ -1331,7 +1334,9 @@ def render_page(
         lang = original
     title = _title(path.rpartition("/")[2], node, translation, path)
     main = page_content(menu, data, path, translation, link_lang, lang)
-    social = _social_meta(node, path, title, str(main), brand, base_url, card_image(menu, path)[0])
+    social = _social_meta(
+        node, path, title, str(main), brand, base_url, card_image(menu, path)[0]
+    )
     canonical, alternates = _language_urls(data, path, node, lang, original, base_url)
     return str(
         _layout(

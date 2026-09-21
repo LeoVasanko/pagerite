@@ -1,4 +1,3 @@
-# ruff: noqa: INP001
 """Utilities meant for devserver script, used only in source repository with dev deps."""
 
 from __future__ import annotations
@@ -67,7 +66,7 @@ class ProcessGroup(asyncio.TaskGroup):
     async def wait(self, *waitables: Process | Awaitable) -> tuple[Any, ...]:
         """Wait concurrently and return results in argument order."""
 
-        async def task(w: Process | Awaitable) -> Any:  # noqa: ANN401
+        async def task(w: Process | Awaitable) -> Any:
             if not isinstance(w, Process):
                 return await w
             if retcode := await w.wait():
@@ -84,7 +83,7 @@ class ProcessGroup(asyncio.TaskGroup):
         return tuple(task.result() for task in tasks)
 
 
-async def http_get_server(url: str, timeout: float) -> str | None:  # noqa: ASYNC109
+async def http_get_server(url: str, timeout: float) -> str | None:
     """GET url with plain asyncio streams, return the response Server header.
 
     Returns an empty string when the server responds without a Server header,

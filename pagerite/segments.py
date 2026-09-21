@@ -89,6 +89,7 @@ def _encode(text: str) -> str:
     """
     return text.replace("<", "＜")
 
+
 #: ASCII punctuation that is plain prose to the inline parser (so
 #: pure_prose cannot catch it) but Markdown SYNTAX in a splice context:
 #: quotes close a quoted image/link title, brackets the [...] of alt and
@@ -483,7 +484,7 @@ def split(text: str) -> tuple[list[Span], list[str], list[str]]:
 _BLOCK = re.compile(
     r"^[ \t]*(?:#{1,6}(?:[ \t]|$)|>[ \t]?|(?:[-+*]|\d{1,9}[.)])[ \t]|`{3,}|~{3,}|:{3,}(?:[ \t]|$)"
     r"|-(?:[ \t]*-){2,}[ \t]*$|=[ =]*$|_(?:[ \t]*_){2,}[ \t]*$)",
-    re.M,
+    re.MULTILINE,
 )
 _BLANK = re.compile(r"\n[ \t]*\n")
 

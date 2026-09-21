@@ -74,7 +74,8 @@ from markdown_it.renderer import RendererHTML
 from markdown_it.token import Token
 from mdit_py_plugins.admon import admon_plugin
 from mdit_py_plugins.attrs import attrs_plugin
-from mdit_py_plugins.attrs.parse import ParseError, parse as parse_attrs
+from mdit_py_plugins.attrs.parse import ParseError
+from mdit_py_plugins.attrs.parse import parse as parse_attrs
 from mdit_py_plugins.container import container_plugin
 from mdit_py_plugins.deflist import deflist_plugin
 from mdit_py_plugins.footnote import footnote_plugin
@@ -206,17 +207,18 @@ def _unwrap_lone_figures(state) -> None:
         if children:
             token.children = children
         [child] = children if len(children) == 1 else [None]
-        if child and child.type == "image":
-            if (
-                tokens[i - 1].type == "paragraph_open"
-                and tokens[i + 1].type == "paragraph_close"
-            ):
-                # A lone image becomes a <figure> (see _image_rule); block
-                # attrs on the paragraph (e.g. a trailing {.wide} line) move
-                # onto the image so they survive the unwrap.
-                _apply_attrs(child, tokens[i - 1].attrs or {})
-                tokens[i - 1].hidden = True
-                tokens[i + 1].hidden = True
+        if (
+            child
+            and child.type == "image"
+            and tokens[i - 1].type == "paragraph_open"
+            and tokens[i + 1].type == "paragraph_close"
+        ):
+            # A lone image becomes a <figure> (see _image_rule); block
+            # attrs on the paragraph (e.g. a trailing {.wide} line) move
+            # onto the image so they survive the unwrap.
+            _apply_attrs(child, tokens[i - 1].attrs or {})
+            tokens[i - 1].hidden = True
+            tokens[i + 1].hidden = True
 
 
 def _tag_task_checkboxes(state) -> None:
@@ -547,7 +549,10 @@ def _directives(state) -> None:
                     token.level = tokens[i].level
                     token.map = tokens[i].map
                     token.content = m.group(0)
-                    token.meta = {"name": m.group(1), "args": (m.group(2) or "").strip()}
+                    token.meta = {
+                        "name": m.group(1),
+                        "args": (m.group(2) or "").strip(),
+                    }
                     if m.group(1) == "cards":
                         token.attrSet("class", "wide")
                     out.append(token)
@@ -636,10 +641,10 @@ COLS_PARAS = 2
 #: straddles the column gap).
 BREAKABLE_TEXT = 800
 
-_PRE_BLOCK_RE = re.compile(r"<pre\b.*?</pre>", re.S)
+_PRE_BLOCK_RE = re.compile(r"<pre\b.*?</pre>", re.DOTALL)
 _TAG_RE = re.compile(r"<[^>]+>")
 _PARA_OPEN_RE = re.compile(r"<p[\s>]")
-_PARA_RE = re.compile(r"<p((?:\s[^>]*)?)>(.*?)</p>", re.S)
+_PARA_RE = re.compile(r"<p((?:\s[^>]*)?)>(.*?)</p>", re.DOTALL)
 
 # Classes that take their block out of the column flow: .wide is a
 # full-width separator that splits the column segments. Margin-breakout

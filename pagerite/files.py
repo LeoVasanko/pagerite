@@ -121,16 +121,16 @@ def _to_avif(body: bytes, ext: str, maxsize: int = IMAGE_MAXSIZE) -> bytes | Non
     with tempfile.NamedTemporaryFile(suffix=ext) as tmp:
         tmp.write(body)
         tmp.flush()
-        try:
+        with suppress(Exception):
+            # Not a decodable image: stored as-is by the caller.
             avif, _resp = dispatch(
                 Path(tmp.name),
                 quality=IMAGE_QUALITY,
                 maxsize=maxsize,
                 maxzoom=1,
             )
-        except Exception:
-            return None
-        return avif
+            return avif
+        return None
 
 
 def _svg_to_png(body: bytes, maxsize: int) -> bytes | None:

@@ -551,8 +551,8 @@ async def editor_ws(ws: WebSocket) -> None:
                         ),
                         directives=(
                             {
-                                "cards": lambda args, _env: views._cards_tag(
-                                    data.menu, data, node, path, args
+                                "cards": lambda args, _env, node=node, path=path: (
+                                    views._cards_tag(data.menu, data, node, path, args)
                                 )
                             }
                             if node is not None and has_cards_tag
@@ -655,7 +655,9 @@ async def editor_ws(ws: WebSocket) -> None:
                             )
                             continue
                     large = msg.get("large")
-                    if "large" in msg and not (large is None or isinstance(large, bool)):
+                    if "large" in msg and not (
+                        large is None or isinstance(large, bool)
+                    ):
                         # Card-mode override: null = automatic, true =
                         # large, false = small.
                         await ws.send_json(

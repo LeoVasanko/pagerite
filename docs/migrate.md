@@ -50,6 +50,7 @@ class Node(msgspec.Struct, omit_defaults=True):
     #: "Language index maintenance" below).
     langs: dict[str, True] = {}
 
+
 class Data(msgspec.Struct):
     ...
     #: API keys gating the translator service WebSocket (/_translate/{key}):

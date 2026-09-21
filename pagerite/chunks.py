@@ -31,8 +31,8 @@ _CONTAINER = re.compile(r"^ {0,3}:{3,}(?:[ \t]|$)")
 #: already does.
 _HTML_ATOMIC = (
     (
-        re.compile(r"^ {0,3}<(?:script|pre|style|textarea)(?:\s|>|$)", re.I),
-        re.compile(r"</(?:script|pre|style|textarea)\s*>", re.I),
+        re.compile(r"^ {0,3}<(?:script|pre|style|textarea)(?:\s|>|$)", re.IGNORECASE),
+        re.compile(r"</(?:script|pre|style|textarea)\s*>", re.IGNORECASE),
     ),
     (re.compile(r"^ {0,3}<!--"), re.compile(r"-->")),
     (re.compile(r"^ {0,3}<\?"), re.compile(r"\?>")),

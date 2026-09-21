@@ -196,7 +196,9 @@ def align_article(source: str, translated: str) -> list[tuple[bytes, str]] | Non
         if len(sregion) != len(tregion):
             continue
         pairs.extend(
-            (chunk_key(s), t) for s, t in zip(sregion, tregion) if _marks(s) == _marks(t)
+            (chunk_key(s), t)
+            for s, t in zip(sregion, tregion)
+            if _marks(s) == _marks(t)
         )
     return pairs
 
@@ -224,7 +226,9 @@ def _nav_lines(md: str) -> list[tuple[int, str]] | None:
     return items
 
 
-def align_nav(source: str, translated: str) -> tuple[list[tuple[bytes, str]], list[bytes]] | None:
+def align_nav(
+    source: str, translated: str
+) -> tuple[list[tuple[bytes, str]], list[bytes]] | None:
     """Decompose a whole-navigation translation into (title chunk key,
     translated title) pairs, plus the keys of titles that failed
     item-level validation (they stay pending for scoped title jobs).
@@ -688,6 +692,7 @@ class Dispatcher:
             try:
                 await ws.send_text(msgspec.json.encode(job).decode())
             except Exception:  # send failed: the receive loop cleans up
+                logger.exception("Job send failed; dropping translator client")
                 self.clients.pop(ws, None)
 
     def _results(

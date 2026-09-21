@@ -40,9 +40,9 @@ import time
 
 import msgspec
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
 import tracerite
 import websockets
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 tracerite.load()
 
@@ -373,7 +373,7 @@ def main():
 
     try:
         asyncio.run(serve(args.url, SeedX()))
-    except (KeyboardInterrupt, asyncio.CancelledError):
+    except KeyboardInterrupt, asyncio.CancelledError:
         pass
 
 

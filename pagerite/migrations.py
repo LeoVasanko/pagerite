@@ -75,9 +75,9 @@ def _backfill_derivatives() -> None:
     from an existing AVIF when available, everything else from the
     original (SVGs rasterized first)."""
     from pagerite.files import (
+        IMAGE_JPG_QUALITY,
         IMAGE_MAXSIZE,
         IMAGE_WEBP_QUALITY,
-        IMAGE_JPG_QUALITY,
         _avif_to_format,
         _svg_to_png,
         _to_avif,

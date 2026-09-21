@@ -93,8 +93,8 @@ fields:
 
 ```python
 class Hello(msgspec.Struct, tag="hello"):
-    langs: list[str]           # as today: languages the model can produce
-    model: str = ""            # free-form model string (logging, debugging)
+    langs: list[str]  # as today: languages the model can produce
+    model: str = ""  # free-form model string (logging, debugging)
     modes: list[str] = ["segments"]  # job granularities accepted
 ```
 

@@ -74,7 +74,7 @@ class Node(msgspec.Struct, omit_defaults=True):
     #: down the tree (unlike image).
     large: bool | None = None
     published: bool = True
-    children: dict[str, "Node"] = {}
+    children: dict[str, Node] = {}
     created: datetime = msgspec.field(
         default_factory=lambda: datetime.now(UTC),
     )

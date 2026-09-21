@@ -1012,11 +1012,11 @@ class Store:
                 and not self._hidden(g.client)
                 and ip_of.get(g.client, "") in abuse_ips
             ],
-            clients={h: _display_client(c) for h, c in data.clients.items() if not c.hide},
+            clients={
+                h: _display_client(c) for h, c in data.clients.items() if not c.hide
+            },
             favicons={
-                origin: f"/_f/{f.file}"
-                for origin, f in data.favicons.items()
-                if f.file
+                origin: f"/_f/{f.file}" for origin, f in data.favicons.items() if f.file
             },
             multilingual=multilingual,
             primary_lang=primary_lang,
