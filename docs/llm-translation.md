@@ -38,7 +38,7 @@ technical with code fences and `{dates}`) into fi/es/zh:
 - **qwen3.8:27b** (dense, 17 GB Q4 — fits VRAM): structure-perfect on all
   runs — URLs, placeholders, heading/block counts preserved, fenced code
   byte-identical. es/zh excellent; fi fluent with occasional lexical slips
-  (covered by the human patch layer). ~30 s per short article, ~2.5 min
+  (covered by the human override layer). ~30 s per short article, ~2.5 min
   for 18 KB. **The reference model for article and markdown modes.**
 - **qwen3:30b-instruct**: 3× faster, good prose, but rewrote comments and
   docstrings inside code fences despite explicit instructions — fails
@@ -78,9 +78,10 @@ into* it:
   exactly the edited chunks, all other translations keep applying.
 - Per-chunk machine translations (`Data.trans[hash][lang]`) and the hybrid
   render with per-chunk fallback to the original.
-- User patches (`Data.patches`) — search/replace hunks over the assembled
-  hybrid, per-hunk independent and best-effort. Patches are orthogonal to
-  how `Data.trans` entries were produced.
+- User overrides (`Data.overrides`) — per-original-chunk edits
+  (search/replace pairs, drops, anchored additions) applied structurally to
+  the assembled hybrid, each independent and best-effort. Overrides are
+  orthogonal to how `Data.trans` entries were produced.
 - `pending_items`: after a source edit, exactly the changed (lang, hash)
   pairs are pending — **focused retranslation of edits falls out of the
   existing bookkeeping**, no whole-article reruns.
@@ -108,11 +109,11 @@ Four job modes, in increasing granularity:
   a body chunk or a title. `Job.texts` carries a single element, the
   chunk's Markdown; `Job.contexts` carries up to two context strings
   (previous and next block of the **served hybrid** in the target
-  language — current machine translation with user patches applied),
+  language — current machine translation with user overrides applied),
   "" where none. The client is instructed to output ONLY the translation
   of the target block; the context is terminology/tone reference.
-  Using the *patched* hybrid as context propagates human corrections
-  into fresh machine translations without the LLM ever touching patch
+  Using the *overridden* hybrid as context propagates human corrections
+  into fresh machine translations without the LLM ever touching override
   storage. `Result.texts` carries one element, the translated block.
   The server validates: exactly one block after re-chunking, anchor
   constructs (URLs, image destinations, code fence content, `{...}`
@@ -214,7 +215,7 @@ The client announces in `Hello`:
 - `model`: the model string it is actually serving (e.g. `qwen3.8:27b`)
 - `langs`: from its per-model language table — for the shipped qwen3.8
   configuration the site languages as configured server-side
-  (de, es, fi, pt, zh; Finnish flagged as the weakest, patch-covered)
+  (de, es, fi, pt, zh; Finnish flagged as the weakest, override-covered)
 - `modes`: `["markdown", "article", "nav"]` for a structure-proven model,
   `["markdown"]` for one that is only trusted in scoped mode
 
@@ -226,9 +227,9 @@ by omitting `modes`).
 The decomposition function doubles as an import path for translations
 produced outside the pipeline — e.g. an article translated with ChatGPT
 and pasted back. Today such a paste lands in the translation editor and
-is stored as one giant user patch; feeding it through the same
+is stored as one giant set of overrides; feeding it through the same
 decomposition instead writes proper `Data.trans` fragments, so later
 source edits invalidate and re-translate per chunk rather than letting
-the monolithic patch silently go stale hunk by hunk. This import path is
+the monolithic override silently go stale chunk by chunk. This import path is
 also the natural testbed for the decomposition and validation logic
 before any live LLM client uses it.

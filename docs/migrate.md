@@ -67,9 +67,12 @@ class Data(msgspec.Struct):
     #: (nested, not tuple keys: msgspec's JSON serializer rejects them).
     #: Also used for node titles (hash of the title text).
     trans: dict[bytes, dict[str, str]] = {}
-    #: User override patches per article and language:
-    #: f"{path}:{lang}" -> ordered patches (see localization.md).
-    patches: dict[str, list[Patch]] = {}
+    #: User override edits per article and language:
+    #: path -> lang -> LangEdits (see localization.md) — keyed per original
+    #: chunk hash throughout, so a save's change diff touches only the
+    #: edited chunks. Replaced the old list-valued "patches" key (ignored
+    #: on decode, discarding that data — no migration).
+    overrides: dict[str, dict[str, LangEdits]] = {}
 ```
 
 Notes:
@@ -88,13 +91,14 @@ Notes:
   (keyed by chunk
   hash, so a heavy edit silently drops the flag — acceptable and
   self-healing).
-- **Patch payloads stay inline** in `Patch.hunks` — patches are small by
-  construction (minimal server-computed diffs). If a pathological case shows
-  up, hunks can be hash-stored later without schema pain.
+- **Override payloads stay inline** in the `LangEdits` struct — overrides
+  are small by construction (minimal server-computed diffs). If a
+  pathological case shows up, they can be hash-stored later without schema
+  pain.
 
 ## Language index maintenance (`node.langs`)
 
-`node.langs` is a denormalized index over the `trans`/`patches` stores so
+`node.langs` is a denormalized index over the `trans`/`overrides` stores so
 that article rendering, `select_language`'s availability check, and hreflang
 alternate links never enumerate chunks. It is written by whoever writes
 translation data, in the same transaction:
@@ -107,11 +111,11 @@ translation data, in the same transaction:
   writes the `trans[h][lang]` entry, sets `node.langs[lang] = True` on
   every article that gained one and invalidates the page cache — all in
   one transaction.
-- **Translated-view save:** appending the first patch for `f"{path}:{lang}"`
-  sets `node.langs[lang] = True` (patches alone make the version exist).
-- **Removals:** deleting a patch or GC'ing translations re-derives the key:
+- **Translated-view save:** recording the first override for a `(path, lang)`
+  sets `node.langs[lang] = True` (overrides alone make the version exist).
+- **Removals:** deleting overrides or GC'ing translations re-derives the key:
   keep `lang` if any `trans` entry for the article's current chunks/title or
-  any patch remains, otherwise drop it. Stale `langs` keys are benign (an
+  any override remains, otherwise drop it. Stale `langs` keys are benign (an
   advertised language that renders as the original), so removal can lag.
 
 ## Render / save pipeline (summary)
@@ -119,8 +123,10 @@ translation data, in the same transaction:
 - **Render:** `text = "\n\n".join(chunks[h] for h in node.chunks)` for the
   original; for language `L` (only ever attempted when `L in node.langs`),
   per chunk `trans.get(h, {}).get(L)` unless missing or `h in node.no_trans`,
-  falling back to `chunks[h]`; then apply `patches.get(f"{path}:{L}", [])`
-  in order (per-hunk, best effort); then `markdown.render` as today. All of
+  falling back to `chunks[h]`; then apply `overrides[path][L]` structurally
+  in the article's own chunk order (drops, search/replace pairs, anchored
+  additions — see docs/localization.md); then
+  `markdown.render` as today. All of
   this assembles the `Translation` the phase-1 plumbing already consumes.
 - **Availability:** `node.langs` is the availability index; `?lang=`
   handling uses exactly this set. (hreflang alternates are site-wide from
@@ -128,9 +134,9 @@ translation data, in the same transaction:
 - **Save (primary language):** server re-chunks the submitted Markdown,
   inserts new hashes into `Data.chunks`, replaces `node.chunks`. Unchanged
   chunks keep their hashes — only genuinely new text lands in the diff.
-- **Save (translated view):** diff against the served hybrid, append a
-  `Patch` under `patches[f"{path}:{lang}"]`; `node.chunks` untouched.
-- **Invalidate:** any write to `chunks` / `trans` / `patches` calls
+- **Save (translated view):** diff against the served hybrid, record
+  per-chunk overrides under `overrides[path][lang]`; `node.chunks` untouched.
+- **Invalidate:** any write to `chunks` / `trans` / `overrides` calls
   `_invalidate_pages()`.
 
 ## migrate_v3 steps
@@ -138,10 +144,8 @@ translation data, in the same transaction:
 1. Walk `menu`; for every node with a string `content`:
    `chunks = chunk_markdown(content)`; write each into the new `chunks`
   store; replace the field with the hash list (`None` stays `None`).
-2. Initialize empty `chunks` / `trans` / `patches` stores.
-3. Normalize stored paths: strip leading slashes anywhere paths are keys or
-   values.
-4. `language`, `no_trans` and `langs` need nothing — struct defaults cover
+2. Initialize empty `chunks` / `trans` stores.
+3. `language`, `no_trans` and `langs` need nothing — struct defaults cover
    them (`langs` starts empty; the translator job fills it as translations
    land).
 
@@ -161,19 +165,19 @@ Chunking must be deterministic and shared with render/save, so
 - `Translation.titles` stayed keyed by node path (phase-1 shape, views
   untouched): `get_translation` builds it by walking the menu with the same
   per-title `trans.get(chunk_key(node.title), {}).get(lang)` lookups.
-- Insert hunks anchor on the whole preceding block (not just its tail) —
-  a stronger, simpler search context.
-- `make_patch` diffs with `SequenceMatcher(autojunk=False)` so patches are
-  deterministic (popular lines like blank separators never become junk).
-- Step 3's path normalization is a no-op in practice: the only path-keyed
-  store (`patches`) starts empty at v3; analytics paths live outside the
-  kantadb. The code still strips leading slashes defensively.
+- User overrides (`record_override`) diff with `SequenceMatcher(autojunk=False)`
+  so overrides are deterministic (popular lines like blank separators never
+  become junk).
+- The old list-valued `patches` store was later replaced by the keyed
+  `overrides` store above; the rename itself discarded the old data (msgspec
+  ignores the unknown key on decode), no migration.
 
 ## Garbage collection (later, manual or idle-time)
 
 Orphaned entries accumulate: chunks no longer referenced by any
-`node.chunks`/`node.title`, translations whose chunk hash is orphaned, patch
-hunks that never match. All are harmless (never read). A GC pass is a single
+`node.chunks`/`node.title`, translations whose chunk hash is orphaned,
+overrides whose chunk hash is gone from the article (or whose `search`
+never matches). All are harmless (never read). A GC pass is a single
 tree walk collecting live hashes, then deleting the rest from `chunks` and
-`trans`; patches whose every hunk is stale get pruned. Not part of
+`trans`; override entries for dead hashes get pruned. Not part of
 migrate_v3.

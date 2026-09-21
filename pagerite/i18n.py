@@ -5,17 +5,18 @@ language is ``Node.language``, inherited down the hierarchy (front page =
 site default, ORIGINAL_LANGUAGE as the final fallback). The database holds
 the original language as content-addressed chunks (``Data.chunks``); per
 target language there are machine-translated fragments (``Data.trans``)
-and user override patches (``Data.patches``), assembled into the served
+and user overrides (``Data.overrides``), assembled into the served
 Markdown at render time, with per-node fallback to the original titles.
 """
 
+import secrets
 from collections.abc import Callable
 from difflib import SequenceMatcher
 
 import msgspec
 
 from pagerite.chunks import chunk_key, chunk_markdown, join_chunks
-from pagerite.data import Data, Node, Patch, resolve
+from pagerite.data import ChunkEdit, Data, LangEdits, Node, resolve
 
 #: Final fallback for a page's primary language when neither it nor any
 #: ancestor (up to the front page) sets one (Node.language, "" = inherit).
@@ -101,102 +102,285 @@ def select_language(
     return original
 
 
-def apply_patch(hybrid: str, patch: Patch) -> str:
-    """Apply one patch to the hybrid Markdown, best effort, each hunk
-    independently: a hunk whose search text no longer exists is stale and
-    silently skipped (docs/localization.md)."""
-    for search, replace in patch.hunks:
-        if search and search in hybrid:
-            hybrid = hybrid.replace(search, replace, 1)
-    return hybrid
+def hybrid_items(data: Data, node: Node, path: str, lang: str) -> list[tuple[bytes | None, str]]:
+    """The served hybrid as (anchor, block text) pairs: the anchor is the
+    ORIGINAL chunk hash behind the block (None for translation-only
+    addition blocks), in article order.
 
-
-def make_patch(base: str, edited: str) -> Patch:
-    """The minimal diff of ``edited`` against the served ``base`` hybrid as
-    (search, replace) hunks at block granularity (docs/localization.md).
-
-    Blocks are the chunk_markdown split, so hunks align with translation
-    units and code fences never straddle a hunk boundary. Pure inserts
-    anchor on the preceding block (an empty search would never match);
-    inserts at the very top anchor on the first block. A search text that
-    occurs more than once in the page would hit the FIRST occurrence at
-    apply time (apply_patch replaces once) — possibly the wrong instance —
-    so ambiguous hunks grow block context (preceding block first) until
-    unique or the page edge, at the cost of going stale when a neighbor
-    block changes. autojunk is off: the diff must be deterministic, and
-    pages are small.
+    User overrides (``Data.overrides``) are structural: walking the
+    article's own chunk order, each original chunk contributes its
+    before-addition, the chunk itself (dropped, or its text replaced
+    wholesale by the edit's ``replace``), and its after-addition. An
+    override for a hash the article no longer contains never applies; an
+    addition id referenced from two neighbors is emitted once, at the
+    first live referrer.
     """
-    a, b = chunk_markdown(base), chunk_markdown(edited)
-    hunks: list[tuple[str, str]] = []
-    for tag, i1, i2, j1, j2 in SequenceMatcher(
-        None, a, b, autojunk=False
-    ).get_opcodes():
-        if tag == "equal":
-            continue
-        core = "\n\n".join(b[j1:j2])
-        if tag == "insert":
-            left, right = (i1 - 1, i1) if i1 else (0, 1 if a else 0)
-            # Empty base: left == right == 0, the search stays empty and the
-            # hunk is inert (apply_patch skips empty searches); saving a
-            # translation of an empty page records nothing applicable.
-        else:
-            left, right = i1, i2
-        while True:
-            search = "\n\n".join(a[left:right])
-            if not search or base.count(search) <= 1:
-                break
-            if left == 0 and right == len(a):
-                break  # whole page and still ambiguous: best effort
-            if left:
-                left -= 1
-            else:
-                right += 1
-        replace = "\n\n".join([*a[left:i1], *([core] if core else []), *a[i2:right]])
-        hunks.append((search, replace))
-    return Patch(hunks=hunks)
+    le = (data.overrides.get(path) or {}).get(lang)
+    items: list[tuple[bytes | None, str]] = []
+    emitted: set[str] = set()
+
+    def emit_add(add_id: str) -> None:
+        if le and add_id not in emitted and (md := le.adds.get(add_id)):
+            emitted.add(add_id)
+            items.extend((None, block) for block in chunk_markdown(md))
+
+    for h in node.chunks or []:
+        edit = le.chunks.get(h) if le else None
+        if edit is not None:
+            emit_add(edit.before)
+        if edit is None or not edit.drop:
+            text = (
+                data.chunks.get(h, "")
+                if h in node.no_trans
+                else data.trans.get(h, {}).get(lang) or data.chunks.get(h, "")
+            )
+            if edit is not None and edit.replace:
+                text = edit.replace
+            items.extend((h, block) for block in chunk_markdown(text))
+        if edit is not None:
+            emit_add(edit.after)
+    return items
 
 
 def hybrid_markdown(data: Data, node: Node, path: str, lang: str) -> str:
     """The served Markdown for ``lang``: per chunk the translation from
     ``Data.trans``, unless missing or marked no-translate (fallback to the
-    original chunk), then the language's user patches applied in order.
+    original chunk), with the language's user overrides applied
+    structurally (hybrid_items).
 
     Not gated on ``node.langs`` (get_translation is the gated view): the
-    editor save path diffs against this even for a language's first patch.
+    editor save path diffs against this even for a language's first edit.
     """
-    hybrid = join_chunks(
-        [
+    return join_chunks([text for _, text in hybrid_items(data, node, path, lang)])
+
+
+#: Minimum block similarity for two blocks in a shrunk replace region to
+#: pair as a text edit (a per-chunk replace patch) rather than a
+#: drop + insertion (_refine_replace).
+_PAIR_MIN = 0.5
+
+
+def _refine_replace(
+    a: list[str], i1: int, i2: int, b: list[str], j1: int, j2: int
+) -> list[tuple[str, int, int, int, int]]:
+    """Split a ``replace`` opcode that removed blocks (more source than
+    edited blocks) into single-block sub-opcodes: greedily pair the most
+    similar source/edited blocks as text edits — a sentence fixed in the
+    paragraph above a deleted paragraph must not drag the deletion into
+    the same replace pair — leaving unpaired source blocks as deletions
+    and any unpaired edited blocks as insertions.
+
+    Only shrunk regions are refined: 1:1 replacements (up to a full
+    paragraph rewrite) and paragraph splits stay single replace pairs by
+    design. Regions are a handful of blocks, so the O(n*m) pairing with a
+    character-level ratio per candidate is cheap, and pages are small, so
+    the greedy best-first order is deterministic enough.
+    """
+    paired: list[tuple[int, int]] = []
+    left_a = list(range(i1, i2))
+    left_b = list(range(j1, j2))
+    while left_a and left_b:
+        ratio, ai, bj = max(
+            (SequenceMatcher(None, a[x], b[y], autojunk=False).ratio(), x, y)
+            for x in left_a
+            for y in left_b
+        )
+        if ratio < _PAIR_MIN:
+            break
+        paired.append((ai, bj))
+        left_a.remove(ai)
+        left_b.remove(bj)
+    ops = []
+    for ai, bj in paired:
+        ops.append((ai, bj, ("replace", ai, ai + 1, bj, bj + 1)))
+    for ai in left_a:
+        ops.append((ai, j1, ("delete", ai, ai + 1, j1, j1)))
+    for bj in left_b:
+        # Anchor an unpaired insertion just after the nearest preceding
+        # paired source block (the region start when none).
+        pos = max((ai + 1 for ai, prev in paired if prev < bj), default=i1)
+        ops.append((pos, bj, ("insert", pos, pos, bj, bj + 1)))
+    return [op for _, _, op in sorted(ops, key=lambda e: (e[0], e[1]))]
+
+
+def record_override(
+    data: Data, node: Node, path: str, lang: str, edited: str, base: str | None = None
+) -> bool:
+    """Record a translated-view edit as user overrides (``Data.overrides``):
+    the block-level diff of ``edited`` against ``base`` (default: the
+    currently served hybrid), classified per original chunk (docs/
+    localization.md):
+
+    - a changed block becomes its chunk's full-text ``replace`` patch — a
+      re-edit composes into the patch;
+    - a removed block becomes its chunk's ``drop``;
+    - new blocks become an addition in ``adds``, anchored from the
+      neighboring chunks' ``before``/``after`` (inserts next to existing
+      addition text splice into that addition instead).
+
+    Each save touches only the keys of the chunks actually edited. Every
+    classification is best effort: a diff position whose base text no
+    longer matches what the hybrid serves there (the original or the
+    machine translation moved under an open editor) is skipped rather than
+    recorded against the wrong chunk. Overrides alone make the translated
+    version exist, so ``node.langs`` is set. Returns True when anything
+    was recorded. Pure data ops — the caller wraps in a transaction and
+    invalidates.
+
+    The callers reject pages without original chunks (there is nothing to
+    anchor a translation to); should one slip through, the diff finds no
+    anchors and nothing is recorded.
+    """
+    le = (data.overrides.get(path) or {}).get(lang)
+    items = hybrid_items(data, node, path, lang)
+    a = chunk_markdown(base) if base is not None else [text for _, text in items]
+    b = chunk_markdown(edited)
+    aligned = len(a) == len(items)
+    changed = False
+
+    def edits() -> LangEdits:
+        nonlocal le
+        if le is None:
+            le = data.overrides.setdefault(path, {}).setdefault(lang, LangEdits())
+        return le
+
+    def anchor_at(i: int) -> bytes | None:
+        return items[i][0] if aligned else None
+
+    def verified(i: int) -> bool:
+        """The diff position still holds the text the hybrid serves there
+        (False when the original or the translation moved under an open
+        editor — structural ops against a shifted position are skipped)."""
+        return aligned and a[i] == items[i][1]
+
+    def served(h: bytes) -> str:
+        return (
             data.chunks.get(h, "")
             if h in node.no_trans
             else data.trans.get(h, {}).get(lang) or data.chunks.get(h, "")
-            for h in node.chunks or []
-        ]
-    )
-    for patch in data.patches.get(f"{path}:{lang}", []):
-        hybrid = apply_patch(hybrid, patch)
-    # A patch deleting an extra (translation-only) paragraph removes its
-    # text but not one of the surrounding separators, leaving a stray blank
-    # line behind (apply_patch is a plain string replace). Re-chunk to
-    # normalize blank lines away — fence/HTML-atomic, and it repairs gaps
-    # left by patches stored before this normalization.
-    return join_chunks(chunk_markdown(hybrid))
+        )
 
+    def find_add(block: str) -> tuple[str, list[str]] | None:
+        """(id, blocks) of the addition containing ``block`` (exact block
+        match — addition text is stable, user-written)."""
+        if le:
+            for add_id, md in le.adds.items():
+                blocks = chunk_markdown(md)
+                if block in blocks:
+                    return add_id, blocks
+        return None
 
-def add_patch(
-    data: Data, node: Node, path: str, lang: str, edited: str, base: str | None = None
-) -> bool:
-    """Record a translated-view edit as a user Patch: the minimal diff of
-    ``edited`` against ``base`` (default: the currently served hybrid),
-    appended to the language's patch list. Patches alone make the
-    translated version exist, so ``node.langs`` is set. Returns True when
-    a patch was stored. Pure data ops — the caller wraps in a transaction
-    and invalidates."""
-    patch = make_patch(
-        base if base is not None else hybrid_markdown(data, node, path, lang), edited
-    )
-    if not patch.hunks:
+    def do_delete(i: int) -> None:
+        nonlocal changed
+        h = anchor_at(i)
+        if h is not None:
+            if not verified(i):
+                return
+            ce = edits().chunks.setdefault(h, ChunkEdit())
+            ce.drop = True
+            ce.replace = ""
+        elif found := find_add(a[i]):
+            add_id, blocks = found
+            blocks.remove(a[i])
+            if blocks:
+                edits().adds[add_id] = "\n\n".join(blocks)
+            else:
+                del edits().adds[add_id]
+        else:
+            return
+        changed = True
+
+    def do_insert(i1: int, new_blocks: list[str]) -> None:
+        nonlocal changed
+        left, right = i1 > 0, i1 < len(a)
+        # Next to existing addition text: splice into that addition.
+        if left and anchor_at(i1 - 1) is None and (found := find_add(a[i1 - 1])):
+            add_id, blocks = found
+            idx = blocks.index(a[i1 - 1]) + 1
+            blocks[idx:idx] = new_blocks
+            edits().adds[add_id] = "\n\n".join(blocks)
+        elif right and anchor_at(i1) is None and (found := find_add(a[i1])):
+            add_id, blocks = found
+            idx = blocks.index(a[i1])
+            blocks[idx:idx] = new_blocks
+            edits().adds[add_id] = "\n\n".join(blocks)
+        else:
+            # An inter-chunk gap: anchor on the neighboring original
+            # chunks (both, when both verify — the first live referrer
+            # wins at apply time).
+            after_h = anchor_at(i1) if right and verified(i1) else None
+            before_h = anchor_at(i1 - 1) if left and verified(i1 - 1) else None
+            if after_h is None and before_h is None:
+                return  # no live anchor (drifted base): skip
+            add_id = ""
+            for h, field in ((after_h, "before"), (before_h, "after")):
+                if h is not None and (ce := le.chunks.get(h) if le else None):
+                    add_id = add_id or getattr(ce, field)
+            if add_id and add_id in edits().adds:
+                edits().adds[add_id] += "\n\n" + "\n\n".join(new_blocks)
+            else:
+                add_id = secrets.token_hex(6)
+                edits().adds[add_id] = "\n\n".join(new_blocks)
+            if after_h is not None:
+                edits().chunks.setdefault(after_h, ChunkEdit()).before = add_id
+            if before_h is not None:
+                edits().chunks.setdefault(before_h, ChunkEdit()).after = add_id
+        changed = True
+
+    def do_replace(i: int, new_blocks: list[str]) -> None:
+        nonlocal changed
+        h = anchor_at(i)
+        if h is None:
+            if not (found := find_add(a[i])):
+                return
+            add_id, blocks = found
+            blocks[blocks.index(a[i]) : blocks.index(a[i]) + 1] = new_blocks
+            edits().adds[add_id] = "\n\n".join(blocks)
+        else:
+            if not verified(i):
+                return
+            ce = le.chunks.get(h) if le else None
+            # The base shows the live patch when one exists, else the
+            # served text: splice the edit into its blocks, so the patch
+            # always covers the chunk's whole text (a patch may hold
+            # several blocks — a paragraph split). a[i] not in the blocks
+            # = the base doesn't reflect this chunk (drifted): skip.
+            base_text = ce.replace if ce is not None and ce.replace else served(h)
+            blocks = chunk_markdown(base_text)
+            if a[i] not in blocks:
+                return
+            blocks[blocks.index(a[i]) : blocks.index(a[i]) + 1] = new_blocks
+            if ce is None:
+                ce = edits().chunks.setdefault(h, ChunkEdit())
+            ce.replace = "\n\n".join(blocks)
+            ce.drop = False
+        changed = True
+
+    def emit(tag: str, i1: int, i2: int, j1: int, j2: int) -> None:
+        if tag == "delete":
+            for i in range(i1, i2):
+                do_delete(i)
+        elif tag == "insert":
+            do_insert(i1, list(b[j1:j2]))
+        elif i2 - i1 == 1:  # replace of one block, possibly into several
+            do_replace(i1, list(b[j1:j2]))
+        else:  # a grown region: pair positionally, insert the surplus
+            for k in range(i2 - i1):
+                do_replace(i1 + k, [b[j1 + k]])
+            do_insert(i2, list(b[j1 + i2 - i1 : j2]))
+
+    for tag, i1, i2, j1, j2 in SequenceMatcher(
+        None, a, b, autojunk=False
+    ).get_opcodes():
+        if tag == "equal":
+            continue
+        if tag == "replace" and i2 - i1 > j2 - j1:
+            for sub in _refine_replace(a, i1, i2, b, j1, j2):
+                emit(*sub)
+        else:
+            emit(tag, i1, i2, j1, j2)
+    if not changed:
         return False
-    data.patches.setdefault(f"{path}:{lang}", []).append(patch)
     node.langs[lang] = True
     return True
 
@@ -223,19 +407,15 @@ def set_title_translation(data: Data, node: Node, lang: str, title: str) -> bool
 
 def clear_translations(data: Data) -> None:
     """Drop all machine translations (``Data.trans``) and rebuild the
-    availability index (``node.langs``) from the surviving user patches —
-    patches alone make a language exist on a page. Pure data ops — the
+    availability index (``node.langs``) from the surviving user overrides —
+    overrides alone make a language exist on a page. Pure data ops — the
     caller wraps in a transaction and invalidates."""
     data.trans.clear()
-    patch_langs: dict[str, set[str]] = {}
-    for key in data.patches:
-        path, _, lang = key.rpartition(":")
-        patch_langs.setdefault(path, set()).add(lang)
 
     def walk(nodes: dict[str, Node], prefix: str) -> None:
         for slug, node in nodes.items():
             path = f"{prefix}/{slug}" if prefix else slug
-            node.langs = {lang: True for lang in patch_langs.get(path, ())}
+            node.langs = {lang: True for lang in data.overrides.get(path, ())}
             walk(node.children, path)
 
     walk(data.menu, "")

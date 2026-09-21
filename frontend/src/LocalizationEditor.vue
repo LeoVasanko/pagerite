@@ -7,7 +7,7 @@
 // Flag clicks toggle and save immediately; the settings round-trip
 // re-reads the payload, so this tab only ever changes translate_langs. The
 // settings write's invalidation hook kicks the translation dispatcher. The
-// refresh button drops all machine translations (user patches are kept),
+// refresh button drops all machine translations (user overrides are kept),
 // making the dispatcher re-translate everything. Translator keys are
 // managed inline (➕ add, name edit, ✕ delete); new keys are generated
 // here in the server's format and everything rides the settings
@@ -100,7 +100,7 @@ async function toggle(code) {
 
 // Delete all machine translations server-side; the dispatcher re-fills
 // them (a connected translator starts getting jobs right away). User
-// patches survive — they are edits, not machine output.
+// overrides survive — they are edits, not machine output.
 const refreshing = ref(false)
 async function refresh() {
   if (refreshing.value) return

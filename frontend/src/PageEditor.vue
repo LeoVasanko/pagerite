@@ -20,7 +20,7 @@
 // edited as its effective (hybrid) Markdown; the hybrid the session
 // started from is kept as a shadow copy (shadowBase) and sent along at
 // save time, so the server diffs the user's changes only and stores them
-// as a patch — edits to a translation never touch the original, while
+// as per-chunk overrides — edits to a translation never touch the original, while
 // edits to the primary language re-chunk the original (and thereby
 // invalidate the affected translation fragments). The live preview always
 // renders the version being edited, whichever language the page itself
@@ -208,7 +208,7 @@ function save() {
   if (lang.value) {
     msg.lang = lang.value
     // The shadow copy this session started from: the server diffs base →
-    // markdown and stores only the user's changes as a patch.
+    // markdown and stores only the user's changes as overrides.
     msg.base = shadowBase
     // An untouched title field is not sent: it holds the served
     // translation, which a save must not freeze into an override fragment.

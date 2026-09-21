@@ -112,10 +112,9 @@ async def save_page(
 
     With a ``?lang=`` query (a translation, not the primary language) the
     save is a translated-view edit (docs/localization.md): the markdown is
-    diffed against the currently served hybrid and the minimal diff is
-    appended as a Patch under ``patches[f"{path}:{lang}"]`` — node.chunks
-    and the original-language fields (title, published, banner) stay
-    untouched.
+    diffed against the currently served hybrid and recorded as user
+    overrides under ``overrides[path][lang]`` — node.chunks and the
+    original-language fields (title, published, banner) stay untouched.
     """
     path = path.strip("/")
     _check_reserved(path)
@@ -125,11 +124,13 @@ async def save_page(
         node = chain[-1] if chain else None
         if node is None or node.chunks is None:
             raise HTTPException(404, "no such page")
+        if not node.chunks:
+            raise HTTPException(400, "the page has no content to translate")
         with kanta.transaction(
             f"page:{lang}", user=request.headers.get("remote-user"), extra=path
         ):
-            # Patches alone make the translated version exist.
-            if i18n.add_patch(data, node, path, lang, page.markdown):
+            # Overrides alone make the translated version exist.
+            if i18n.record_override(data, node, path, lang, page.markdown):
                 _invalidate_pages()
         return
     with kanta.transaction("page", user=request.headers.get("remote-user"), extra=path):
@@ -331,9 +332,9 @@ async def delete_translations(request: Request) -> None:
     """Drop all machine translations (Data.trans) so the dispatcher
     re-translates everything from scratch (a translate:reset action:
     the invalidation hook re-offers every fragment to connected
-    translators). User patches are kept; the availability index
-    (node.langs) is rebuilt from them — patches alone still make a language
-    exist on a page."""
+    translators). User overrides are kept; the availability index
+    (node.langs) is rebuilt from them — overrides alone still make a
+    language exist on a page."""
     with kanta.transaction("translate:reset", user=request.headers.get("remote-user")):
         i18n.clear_translations(data)
         _invalidate_pages()
@@ -422,7 +423,7 @@ async def editor_ws(ws: WebSocket) -> None:
     effective hybrid Markdown and title for that language plus the language
     metadata the picker's UI needs; save diffs the submitted Markdown
     against "base" (the editor's shadow copy of the hybrid it started from
-    — absent: the current hybrid) and stores it as a user Patch, and a
+    — absent: the current hybrid) and records it as user overrides, and a
     changed title becomes a fragment in Data.trans — node.chunks and the
     other fields stay untouched (docs/localization.md).
     """
@@ -453,7 +454,7 @@ async def editor_ws(ws: WebSocket) -> None:
                         if lang and node.chunks is not None:
                             # Translation view: the effective (hybrid)
                             # Markdown and title for that language —
-                            # machine fragments + user patches over the
+                            # machine fragments + user overrides over the
                             # original (docs/localization.md editor flow).
                             markdown = i18n.hybrid_markdown(data, node, path, lang)
                             title = i18n.title_map(data, lang).get(path) or title
@@ -631,6 +632,16 @@ async def editor_ws(ws: WebSocket) -> None:
                         # original; it cannot create or move pages.
                         await ws.send_json({"type": "error", "detail": "no such page"})
                         continue
+                    if translated and not old.chunks:
+                        # Nothing to anchor a translation to: the original
+                        # page has no content.
+                        await ws.send_json(
+                            {
+                                "type": "error",
+                                "detail": "the page has no content to translate",
+                            }
+                        )
+                        continue
                     if translated and "markdown" in msg and not msg["markdown"].strip():
                         # Saving never deletes; an emptied translation would
                         # render as a blank page in that language.
@@ -692,13 +703,13 @@ async def editor_ws(ws: WebSocket) -> None:
                             # node.chunks and the original-language fields
                             # stay untouched: the markdown diff (against the
                             # editor's shadow "base" — the hybrid it started
-                            # from; absent: the current hybrid) is appended
-                            # as a Patch, a changed title becomes a
+                            # from; absent: the current hybrid) is recorded
+                            # as user overrides, a changed title becomes a
                             # per-language title override (i18n).
                             changed = False
                             if "markdown" in msg:
                                 base = msg.get("base")
-                                changed = i18n.add_patch(
+                                changed = i18n.record_override(
                                     data,
                                     node,
                                     path,

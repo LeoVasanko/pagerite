@@ -39,12 +39,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from kanta import Kanta
 
 from pagerite import i18n
-from pagerite.chunks import (
-    chunk_key,
-    chunk_markdown,
-    join_chunks,
-    needs_translation,
-)
+from pagerite.chunks import chunk_key, chunk_markdown, needs_translation
 from pagerite.data import Data, Node, node_markdown, resolve, sorted_nodes
 from pagerite.markdown import has_h1
 from pagerite.segments import Span, join, pure_prose, split
@@ -488,7 +483,7 @@ class Dispatcher:
 
     def _block_contexts(self, lang: str, item: TransItem) -> list[str]:
         """The previous and next block of the served hybrid around a pending
-        chunk (current machine translation with user patches applied, so
+        chunk (current machine translation with user overrides applied, so
         human corrections propagate into fresh translations)."""
         chain = resolve(self.data.menu, item.path)
         node = chain[-1] if chain else None
@@ -498,10 +493,7 @@ class Dispatcher:
             self.data.trans.get(h, {}).get(lang) or self.data.chunks.get(h, "")
             for h in node.chunks
         ]
-        hybrid = join_chunks(served)
-        for patch in self.data.patches.get(f"{item.path}:{lang}", []):
-            hybrid = i18n.apply_patch(hybrid, patch)
-        blocks = chunk_markdown(hybrid)
+        blocks = chunk_markdown(i18n.hybrid_markdown(self.data, node, item.path, lang))
         i = node.chunks.index(item.key)
         # Map the chunk's served-list position onto the patched block list
         # (patches may merge, split or drop blocks).

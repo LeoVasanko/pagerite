@@ -7,7 +7,7 @@ parameter or the `Accept-Language` header.
   plumbing. Translations are consumed through a stub interface; the database
   still holds only the original language.
 - **Phase 2 (implemented):** gettext-style fragment storage in the
-  database — machine-translated chunks plus user override patches, assembled
+  database — machine-translated chunks plus user overrides, assembled
   at render time. Storage details in `docs/migrate.md`.
 
 ## Phase 1: negotiation and URLs
@@ -116,26 +116,28 @@ Region tags normalize to their base subtag (`fi-FI` → `fi`).
 Phase 1 assumed whole-page translated Markdown delivered from outside. The
 refined model is gettext-style: an article has **one primary version** (its
 `content`, in its own language) plus, per target language, **machine
-fragments** (translated chunks of Markdown) and **user patches** (minimal
-editor overrides). Both are stored in the database and assembled into the
-served Markdown at render time.
+fragments** (translated chunks of Markdown) and **user overrides** (minimal
+editor edits, keyed per original chunk). Both are stored in the database and
+assembled into the served Markdown at render time.
 
 ### The scenario this must handle
 
 1. Article written in English.
 2. Machine-translated into Spanish → fragments stored.
 3. Editor fixes one Spanish paragraph and changes a link elsewhere to point
-   at a Spanish resource → user patch hunks stored.
+   at a Spanish resource → user overrides stored.
 4. English article edited → the edited chunk's key changes; its Spanish
    fragment no longer matches.
 5. Page requested before the machine translation refreshes → served as a
    **hybrid**: old fragments for unchanged chunks, plain English for the
-   edited chunk. User patches are attempted against this hybrid, best effort,
-   each hunk independently: the text fix is stale (its search text no longer
-   exists) and silently skipped; the link change still applies even though
-   the link sits in the now-English paragraph.
-6. Machine translation refreshes → full Spanish again, with both patch hunks
-   applying.
+   edited chunk. User overrides key off chunk hashes, so an override whose
+   chunk was the edited one is orphaned with the old hash and silently
+   stops applying; overrides for untouched chunks apply as before, even
+   over the hybrid.
+6. Machine translation refreshes → full Spanish again, with the surviving
+   overrides applying. An override whose original paragraph was edited
+   stays orphaned — the edit was about that content — and needs re-doing
+   when still wanted.
 
 ### Chunks
 
@@ -163,41 +165,89 @@ Consequences:
 - No explicit "source version" bookkeeping is needed — staleness falls out
   of the keys.
 
-### User patches
+### User overrides
 
 Editors always edit **full Markdown** in the existing editor UX — never
 fragments. When editing a translated view (`?lang=es`), the editor is loaded
-with the *current hybrid Markdown*; on save, the server computes a minimal
-diff against that hybrid and stores it as a patch:
+with the *current hybrid Markdown*; on save, the server diffs it against
+that hybrid and records the changes as **user overrides**. Storage is keyed
+throughout — no lists, no composite keys, no stored ordering:
 
 ```python
-class Patch(msgspec.Struct, omit_defaults=True):
-    """One editing session's overrides, applied independently per hunk."""
+class ChunkEdit(msgspec.Struct, omit_defaults=True):
+    """One original chunk's override in one language."""
 
-    hunks: list[tuple[str, str]] = []  # (search, replace) on hybrid Markdown
+    replace: str = ""  # the user's full text for the chunk
+    drop: bool = False  # the chunk is deleted in this language
+    before: str = ""   # addition ids (LangEdits.adds) inserted
+    after: str = ""    # before/after this chunk
+
+
+class LangEdits(msgspec.Struct, omit_defaults=True):
+    """All overrides of one article in one language."""
+
+    chunks: dict[bytes, ChunkEdit] = {}  # ORIGINAL chunk hash -> override
+    adds: dict[str, str] = {}            # addition id -> Markdown
+
+
+Data.overrides: dict[str, dict[str, LangEdits]]  # path -> lang -> edits
 ```
 
-Hunks are produced from `difflib.SequenceMatcher` on the hybrid vs. the
-edited text at block granularity: each `replace`/`delete`/`insert` opcode
-becomes one `(search, replace)` pair, with the preceding block's tail as
-left context for `insert` (pure inserts have empty search context otherwise).
-A search text that occurs more than once in the page would hit the first
-occurrence at apply time, so ambiguous hunks grow block context (preceding
-block first) until unique or the page edge.
-Application is dead simple:
+Everything keys off the **original chunk hashes**, which already carry the
+article's order (`Node.chunks`) — application walks that order, so nothing
+about sequence is stored. kanta's change diffs register per key, so a save
+touches only the entries for the chunks actually edited (a list would be
+rewritten whole every time).
 
-```python
-def apply_patch(hybrid: str, patch: Patch) -> str:
-    for search, replace in patch.hunks:
-        if search and search in hybrid:
-            hybrid = hybrid.replace(search, replace, 1)
-        # missing search text = stale hunk -> silently skipped
-    return hybrid
-```
+The diff runs over the `chunk_markdown` block split
+(`difflib.SequenceMatcher`, autojunk off: deterministic, pages are small)
+and classifies each opcode per original chunk (`record_override` in
+`pagerite/i18n.py`):
 
-Per-hunk independence is the robustness property from the scenario: a stale
-text fix does not block a still-valid link change. Patches are stored as an
-ordered list and applied in order.
+- **Within-paragraph edits** — any `replace`, up to a full rewrite of the
+  paragraph's text — become the chunk's **`replace`** patch: the user's
+  text replaces the chunk's served text wholesale, applied by chunk hash
+  alone. A retranslation of the chunk is overridden wholesale too — the
+  user's edit stays in effect across AI re-runs; editing the *original*
+  changes the hash and orphans the patch, so the freshly translated
+  paragraph reappears (the edit was about that content). A re-edit of the
+  same chunk **composes** into the patch — repeat edits never need
+  ordering either. Keyed application also kills the old ambiguity problem:
+  the patch applies to *its* chunk, never to an identical paragraph
+  elsewhere by accident.
+- **Whole-paragraph deletions** become **`drop`** on the chunk.
+  Hash-anchored, the deletion survives retranslation untouched (a
+  text-anchored delete would stop matching and the paragraph would
+  resurrect); when the *original* paragraph is edited its hash changes and
+  the freshly translated paragraph reappears — the delete was about that
+  content, not that position.
+- **Whole-paragraph insertions** become **additions** in `adds` under
+  their own ids, referenced from the neighboring chunks' `before`/`after`
+  — both, when both exist, and the first live referrer wins at apply time,
+  so an original edit on one side leaves the other anchor. Since content
+  hashes don't change under retranslation, the inserted paragraph stays in
+  place across a refresh. Inserts next to existing addition text splice
+  into that addition (its text is stable, user-written), as do edits and
+  deletions of added paragraphs — no original hash is ever needed for
+  translation-only content.
+
+A save often mixes several edits. `SequenceMatcher` lumps adjacent changes
+into one `replace` opcode, so regions that *removed* blocks are refined
+(`_refine_replace`): blocks pair greedily by similarity (ratio ≥ 0.5) into
+text edits, leaving unpaired source blocks as deletions — a sentence fix
+in the paragraph above a deleted paragraph no longer drags the deletion
+into the same patch. The split-paragraph grey case (one paragraph
+becomes two) deliberately stays a single `replace` patch holding both
+paragraphs: it applies whole across retranslations, rather than
+half-applying, and telling a split apart from an edit-plus-insert is
+fuzzy anyway.
+
+Every classification is best effort: a diff position whose base text no
+longer matches what the hybrid serves there (the original or the machine
+translation moved under an open editor) is skipped rather than recorded
+against the wrong chunk. Overrides for hashes the article no longer
+contains are harmless orphans (they never apply) and can be
+garbage-collected lazily, like orphaned chunks.
 
 ### Storage
 
@@ -216,8 +266,9 @@ Full storage design and the `migrate_v3` restructuring live in
   of the global `ORIGINAL_LANGUAGE` constant.
   - **Known weakness:** changing a page's (or subtree's) `language` after
     translations exist mis-keys everything — translations are keyed by
-    *source* chunks, so old entries silently stop matching and user patches
-    (searching for old-hybrid text) mostly go stale. That is acceptable:
+    *source* chunks, so old entries silently stop matching and user
+    overrides (anchored to the old chunks' hashes) are orphaned.
+    That is acceptable:
     the orphaned data is harmless and translations regenerate. We do not
     migrate translations across a language change.
 - Article paths are stored and keyed **without leading slashes**
@@ -229,27 +280,23 @@ Full storage design and the `migrate_v3` restructuring live in
 def get_translation(data, path, lang) -> Translation | None:
     if lang not in node.langs:
         return None
-    hybrid = "\n\n".join(
-        chunks[h] if h in node.no_trans else trans.get(h, {}).get(lang, chunks[h])
-        for h in node.chunks
-    )
-    for patch in data.patches.get(f"{path}:{lang}", []):
-        hybrid = apply_patch(hybrid, patch)
-    # Deleting an extra (translation-only) paragraph leaves its surrounding
-    # blank lines behind; re-chunking normalizes them away.
-    hybrid = join_chunks(chunk_markdown(hybrid))
+    hybrid = hybrid_markdown(data, node, path, lang)  # i18n.py: walk
+    # node.chunks; per chunk chunks[h] if h in node.no_trans else
+    # trans.get(h, {}).get(lang, chunks[h]), with the chunk's override
+    # applied structurally: its before-addition, the chunk itself (dropped,
+    # or replaced wholesale by the edit's `replace`), its after-addition.
     return Translation(markdown=hybrid, titles=title_map(data, lang))
 ```
 
 - Availability is an article-level index: `node.langs: dict[lang, True]`,
-  maintained by the translation writers (translator job, patch saves) in the
-  same transaction as their data writes — rendering and language selection
+  maintained by the translation writers (translator job, override saves) in
+  the same transaction as their data writes — rendering and language selection
   never probe the `trans` store chunk by chunk. A stale key is benign (the
   "translation" just renders as the original).
 - `titles` for nav/sidebar/cards: each node's translated title is
   `trans.get(hash(node.title), {}).get(lang)` with per-node fallback — one
   dict lookup per nav item at render time.
-- Cache invalidation: writes to `chunks` / `trans` / `patches` (translator,
+- Cache invalidation: writes to `chunks` / `trans` / `overrides` (translator,
   editor saves) call `_invalidate_pages()`, same as content writes.
 
 ### Editor flow
@@ -281,17 +328,22 @@ preferences.
   metadata (`lang`, `primary_lang`, `langs`, `translate_langs`).
 - The editor keeps a **shadow copy** of the Markdown it opened. WS `save`
   with `lang` sends it as `base`; the server diffs `base` → submitted text
-  (`make_patch`) and appends a `Patch`. Diffing against the shadow (rather
-  than the current hybrid) keeps hunks correct when the original or the
-  machine translation moved under an open editor; application against the
-  then-current hybrid stays best-effort per hunk, as designed.
+  (`record_override`) and stores per-chunk overrides. Diffing against the
+  shadow (rather than the current hybrid) keeps the diff correct when the
+  original or the machine translation moved under an open editor; positions
+  that no longer match the then-current hybrid are skipped, as designed.
 - A changed **title** on a translated save becomes a fragment in
   `Data.trans` keyed by the original title's chunk hash — the same storage
   as machine title translations. An untouched title field (holding the
   served translation) is not sent, so saving never freezes a stale machine
   title into an override.
 - Saving never deletes; a translation additionally cannot be emptied (that
-  would render as a blank page in that language).
+  would render as a blank page in that language), and a translated save on
+  a page without original content is rejected outright (there is nothing
+  to anchor a translation to — "the page has no content to translate").
+  The converse is fine: if the original is edited empty after the fact,
+  every override's anchor is gone and the translation simply renders
+  empty, its overrides inert orphans.
 - The live preview renders the version being edited, whichever language
   the page itself was loaded in (the render is just the edited Markdown +
   title). A translated save keeps that preview in place — re-fetching the
@@ -367,7 +419,7 @@ simply stays idle.
 `DELETE /_api/translations` (the localization tab's "refresh all
 translations" button) drops every machine translation (`Data.trans`) and
 rebuilds the availability index (`node.langs`) from the surviving user
-patches, so the dispatcher re-translates everything from scratch; the
+overrides, so the dispatcher re-translates everything from scratch; the
 run's validation skip-list is cleared with it, giving rejected fragments
 another chance.
 
@@ -410,7 +462,7 @@ offerable to clients of another approach.
   single element, the chunk (a title crosses as plain text, with the
   article's opening as its context as today). `Job.contexts` carries the
   previous and next block of the **served hybrid** in the target language
-  (machine translation with user patches applied, "" where none), so human
+  (machine translation with user overrides applied, "" where none), so human
   corrections propagate into fresh translations as terminology/tone
   reference; contexts are never part of the result. The result must
   re-chunk to exactly one block with the source's anchor constructs (link
@@ -461,8 +513,8 @@ import path — `scripts/import_translation.py PATH LANG FILE.md` (run with
 the server stopped) decomposes a pasted whole-article translation (e.g.
 from ChatGPT) into proper `Data.trans` fragments with the same validation,
 so later source edits invalidate and re-translate per chunk rather than
-letting the translation editor's one monolithic patch go stale hunk by
-hunk.
+letting the translation editor's one monolithic override go stale chunk by
+chunk.
 
 #### Segmentation
 

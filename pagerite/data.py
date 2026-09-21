@@ -15,12 +15,39 @@ import msgspec
 from pagerite.chunks import join_chunks
 
 
-class Patch(msgspec.Struct, omit_defaults=True):
-    """One editing session's overrides on a translated view, applied
-    independently per hunk (docs/localization.md)."""
+class ChunkEdit(msgspec.Struct, omit_defaults=True):
+    """One original chunk's user override in one language
+    (docs/localization.md). Fields are independent and applied by chunk
+    hash alone; an entry for a hash the article no longer contains simply
+    never applies."""
 
-    #: (search, replace) pairs on the served hybrid Markdown.
-    hunks: list[tuple[str, str]] = []
+    #: Full-chunk replacement text, applied whenever the article still
+    #: contains the chunk — a retranslation of the chunk is overridden
+    #: wholesale (editing the original changes the hash, orphaning the
+    #: patch). May contain blank lines (a paragraph split). A re-edit of
+    #: the chunk composes into this text.
+    replace: str = ""
+    #: The chunk is deleted in this language. Hash-anchored, so the
+    #: deletion survives retranslation; when the original paragraph itself
+    #: is edited its hash changes and the fresh translation reappears.
+    drop: bool = False
+    #: Addition ids (LangEdits.adds) inserted before/after this chunk.
+    before: str = ""
+    after: str = ""
+
+
+class LangEdits(msgspec.Struct, omit_defaults=True):
+    """All user overrides of one article in one language. Keyed throughout
+    (no lists), so a save's database diff touches only the edited chunks;
+    application order comes from the article's own chunk order."""
+
+    #: Original chunk hash -> override.
+    chunks: dict[bytes, ChunkEdit] = {}
+    #: Translation-only additions: id -> Markdown, one per insertion gap,
+    #: referenced from the neighboring chunks' ``before``/``after`` (both
+    #: point at the same id; the first live referrer wins at apply time, so
+    #: an original edit on one side leaves the other anchor).
+    adds: dict[str, str] = {}
 
 
 class Node(msgspec.Struct, omit_defaults=True):
@@ -74,7 +101,9 @@ class Node(msgspec.Struct, omit_defaults=True):
     #: down the tree (unlike image).
     large: bool | None = None
     published: bool = True
-    children: dict[str, Node] = {}
+    # Quoted: msgspec 0.21 evaluates the bare self-reference eagerly at
+    # class creation (Python 3.14 lazy annotations) and NameErrors.
+    children: dict[str, "Node"] = {}  # noqa: UP037
     created: datetime = msgspec.field(
         default_factory=lambda: datetime.now(UTC),
     )
@@ -132,9 +161,10 @@ class Data(msgspec.Struct):
     #: serializer does not support). Also used for node titles (hash of
     #: the title text).
     trans: dict[bytes, dict[str, str]] = {}
-    #: User override patches per article and language:
-    #: f"{path}:{lang}" -> ordered patches (paths without leading slash).
-    patches: dict[str, list[Patch]] = {}
+    #: User override edits per article and language:
+    #: path -> lang -> LangEdits (paths without leading slash). Replaces
+    #: the old "patches" key (ignored on decode, discarding that data).
+    overrides: dict[str, dict[str, LangEdits]] = {}
 
 
 def node_markdown(data: Data, node: Node) -> str | None:

@@ -18,7 +18,7 @@ Pagerite is a CMS. See `docs` for the full design and implementation details. Ke
   - `pages.py` — public content pages: `/`, `/sitemap.xml`, `/robots.txt`, the `/{path:path}` catch-all.
   - `data.py` — msgspec Structs for the kanta database.
   - `chunks.py` — block-level Markdown chunking and content-hash keys for the chunk stores (docs/migrate.md).
-  - `i18n.py` — language selection, translation assembly (chunks + patches) and translated-edit recording (user patches, per-language title overrides, refresh).
+  - `i18n.py` — language selection, translation assembly (chunks + overrides) and translated-edit recording (per-chunk user overrides in `Data.overrides`, per-language title overrides, refresh).
   - `translate.py` — translator service protocol (msgspec structs), the connected-client `Dispatcher` (job pipeline, result validation) and pending/store core for the `/_translate/{key}` WebSocket (docs/localization.md); api.py only registers the route.
   - `segments.py` — the translation round trip: fragments split into pure-prose wire segments (via markdown.make_md's verbatim parser; link- and formatting-carrying blocks stay whole, link/formatted texts inline, Markdown stripped) and translations spliced back by source offset, link/formatting markdown re-inserted at weight-mapped positions (docs/localization.md).
   - `migrations.py` — kanta migrations (`migrate_vN`); ALL schema/storage upgrades live here (raw state dict before struct decoding), never in the app lifespan: v1 moves legacy in-db file blobs to the on-disk store and rebuilds the legacy flat `pages` as the menu tree, v2 rewrites `/_f/{hash}.ext` image links to the extension-less form, backfills AVIF/WebP/JPEG derivatives on disk and drops the obsolete `version` field.

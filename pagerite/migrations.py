@@ -150,13 +150,12 @@ def migrate_v3(d: dict) -> None:
 
     Chunk keys are 9-byte blake3 digests; at this raw JSON level they are
     base64 strings (decoding into the structs restores ``bytes`` keys).
-    ``trans``/``patches`` start empty; the translator job fills them and
-    maintains the ``langs`` index as translations land. ``language``,
-    ``no_trans`` and ``langs`` need nothing — struct defaults cover them.
+    ``trans`` starts empty; the translator job fills it and maintains the
+    ``langs`` index as translations land. ``language``, ``no_trans`` and
+    ``langs`` need nothing — struct defaults cover them.
     """
     store = d.setdefault("chunks", {})
     d.setdefault("trans", {})
-    patches = d.setdefault("patches", {})
 
     def walk(nodes: dict) -> None:
         for node in nodes.values():
@@ -171,8 +170,3 @@ def migrate_v3(d: dict) -> None:
             walk(node.get("children") or {})
 
     walk(d.get("menu") or {})
-    # Article paths never carry a leading slash in keys (docs/migrate.md).
-    # The only path-keyed store starts empty here, so this is defensive
-    # for databases that went through a downgrade/upgrade cycle.
-    for key in [k for k in patches if k.startswith("/")]:
-        patches[key.lstrip("/")] = patches.pop(key)
